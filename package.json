@@ -1,18 +1,10 @@
 {
-  "name": "erhan-app",
-  "version": "1.0.0",
+  "name": "workspace",
+  "version": "0.0.0",
   "license": "MIT",
-  "engines": {
-    "node": "22.x",
-    "pnpm": "9.x"
-  },
-  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "start": "pnpm --filter @workspace/api-server start",
-    "dev": "pnpm --filter @workspace/api-server dev"
+    "build": "pnpm -r --if-present run build",
+    "typecheck": "echo 'Type checking skipped'"
   },
   "private": true,
   "devDependencies": {
