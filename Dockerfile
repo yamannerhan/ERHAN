@@ -24,4 +24,6 @@ ENV NODE_ENV=production
 
 EXPOSE 3000 8080
 
-CMD ["node", "artifacts/api-server/dist/index.mjs"]
+RUN chmod +x ./start.sh
+
+CMD ["./start.sh"]
