@@ -17,6 +17,7 @@ RUN pnpm install --no-frozen-lockfile
 COPY . .
 
 RUN echo '{"extends": "./tsconfig.base.json"}' > tsconfig.json
+RUN pnpm --filter @workspace/ozel-guvenlik build
 RUN pnpm --filter @workspace/api-server build
 
 ENV NODE_ENV=production
