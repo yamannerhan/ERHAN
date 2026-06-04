@@ -5,8 +5,10 @@ import { z } from "zod/v4";
 export const notificationsTable = pgTable("notifications", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
-  type: text("type").notNull(), // listing | message | admin | system
+  type: text("type").notNull(), // listing | message | admin | system | support
+  title: text("title"),
   message: text("message").notNull(),
+  relatedId: integer("related_id"),
   isRead: boolean("is_read").notNull().default(false),
   linkUrl: text("link_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -404,6 +404,7 @@ const DISTRICT_TO_CITY: Record<string, { city: string; district: string }> = {
   "etimesgut":     {city:"Ankara", district:"Etimesgut"},
   "golbasi":       {city:"Ankara", district:"Gölbaşı"},
   "kahramankazan": {city:"Ankara", district:"Kahramankazan"},
+  "kazan":         {city:"Ankara", district:"Kazan"},
   "kecioren":      {city:"Ankara", district:"Keçiören"},
   "kiziicahamam":  {city:"Ankara", district:"Kızılcahamam"},
   "mamak":         {city:"Ankara", district:"Mamak"},

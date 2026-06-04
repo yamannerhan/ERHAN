@@ -174,7 +174,7 @@ router.post("/chat/messages/:id/react", authMiddleware, async (req, res): Promis
 
   const userId = req.user!.id;
   const username = req.user!.username;
-  const displayName = req.user!.displayName ?? null;
+  const displayName = (req.user as any).displayName ?? null;
 
   const [existing] = await db.select().from(chatReactionsTable)
     .where(and(
@@ -220,7 +220,7 @@ router.delete("/chat/messages/:id", authMiddleware, requireAdmin, async (req, re
 router.delete("/chat/messages", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   await db.update(chatMessagesTable).set({ isDeleted: true }).where(eq(chatMessagesTable.isDeleted, false));
 
-  const clearedBy = req.user!.displayName || req.user!.username;
+  const clearedBy = (req.user as any).displayName || req.user!.username;
   const roleLabel = req.user!.role === "admin" ? "Admin" : "Moderatör";
 
   const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;

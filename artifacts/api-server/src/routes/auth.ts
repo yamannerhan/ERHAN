@@ -6,7 +6,7 @@ import { authMiddleware, signToken } from "../middlewares/auth";
 
 const router = Router();
 
-function userJson(user: typeof usersTable.$inferSelect) {
+function userJson(user: any) {
   return {
     id: user.id,
     username: user.username,
