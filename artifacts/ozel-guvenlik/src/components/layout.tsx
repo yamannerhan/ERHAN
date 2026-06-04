@@ -239,7 +239,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <img src={user.avatarUrl} alt={user.username} className="w-8 h-8 rounded-full object-cover ring-2 ring-primary/40 hover:ring-primary transition-all" />
               ) : user ? (
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-xs font-bold ring-2 ring-primary/30 hover:ring-primary/60 transition-all">
-                  {user.username.slice(0, 1).toUpperCase()}
+                  {user.username?.slice(0, 1).toUpperCase() || "?"}
                 </div>
               ) : (
                 <div className="w-8 h-8 rounded-full bg-white/10 border border-white/20 flex items-center justify-center hover:bg-white/15 transition-all">
