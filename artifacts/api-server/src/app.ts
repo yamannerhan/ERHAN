@@ -36,10 +36,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/", (_req, res) => {
-  res.status(200).type("text/plain").send("OK Railway root works");
-});
-
 app.get(["/health", "/api/health", "/api/healthz"], (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
@@ -50,18 +46,43 @@ app.get("/favicon.ico", (_req, res) => {
 
 const clientDistPath = path.join(process.cwd(), "artifacts", "ozel-guvenlik", "dist", "public");
 const clientIndexPath = path.join(clientDistPath, "index.html");
-const clientIndexExists = fs.existsSync(clientIndexPath);
+const clientIndexHtml = fs.existsSync(clientIndexPath)
+  ? fs.readFileSync(clientIndexPath, "utf-8")
+  : null;
 
-if (clientIndexExists) {
-  logger.info({ clientDistPath }, "Frontend static folder found");
+if (clientIndexHtml) {
+  logger.info({ clientDistPath }, "Serving frontend static files");
   app.use("/assets", express.static(path.join(clientDistPath, "assets")));
   app.use(express.static(clientDistPath, { index: false }));
 } else {
   logger.error({ clientIndexPath }, "Frontend index.html not found");
 }
 
+app.get("/", (_req, res) => {
+  if (clientIndexHtml) {
+    res.status(200).type("html").send(clientIndexHtml);
+    return;
+  }
+
+  res.status(200).type("text/plain").send("OK Railway root works");
+});
+
 app.use("/api/avatars", express.static(path.join(process.cwd(), "uploads", "avatars")));
 app.use("/api", router);
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    next();
+    return;
+  }
+
+  if (clientIndexHtml) {
+    res.status(200).type("html").send(clientIndexHtml);
+    return;
+  }
+
+  res.status(404).type("text/plain").send("Frontend not found");
+});
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, "Unhandled request error");
