@@ -19,6 +19,9 @@ RUN pnpm install --no-frozen-lockfile
 # Copy source code
 COPY . .
 
+# Create tsconfig.json that extends base
+RUN echo '{"extends": "./tsconfig.base.json"}' > tsconfig.json
+
 # Build the application
 RUN pnpm run build
 
