@@ -9,6 +9,8 @@ WORKDIR /app
 # Copy package files
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY artifacts/api-server/package.json ./artifacts/api-server/
+COPY artifacts/ozel-guvenlik/package.json ./artifacts/ozel-guvenlik/
+COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/
 COPY lib/db/package.json ./lib/db/
 COPY lib/api-zod/package.json ./lib/api-zod/
 COPY lib/api-client-react/package.json ./lib/api-client-react/
