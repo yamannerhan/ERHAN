@@ -31,14 +31,32 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/api/avatars", express.static(path.join(process.cwd(), "uploads", "avatars")));
-app.use("/api", router);
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
+app.get("/favicon.ico", (_req, res) => {
+  res.status(204).end();
+});
 
 const clientDistPath = path.join(process.cwd(), "artifacts", "ozel-guvenlik", "dist", "public");
 const clientIndexPath = path.join(clientDistPath, "index.html");
 const clientIndexHtml = fs.existsSync(clientIndexPath)
   ? fs.readFileSync(clientIndexPath, "utf-8")
   : null;
+
+app.get("/", (_req, res) => {
+  if (clientIndexHtml) {
+    res.status(200).type("html").send(clientIndexHtml);
+    return;
+  }
+
+  res.status(200).type("html").send("<!doctype html><html><head><title>ERHAN</title></head><body><h1>ERHAN çalışıyor</h1></body></html>");
+});
+
+app.use("/assets", express.static(path.join(clientDistPath, "assets")));
+app.use("/api/avatars", express.static(path.join(process.cwd(), "uploads", "avatars")));
+app.use("/api", router);
 
 if (clientIndexHtml) {
   logger.info({ clientDistPath }, "Serving frontend static files");
@@ -53,9 +71,6 @@ if (clientIndexHtml) {
   });
 } else {
   logger.warn({ clientIndexPath }, "Frontend build not found");
-  app.get("/", (_req, res) => {
-    res.status(200).send("ERHAN API is running");
-  });
 }
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
