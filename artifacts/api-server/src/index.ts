@@ -921,24 +921,36 @@ async function expireListings() {
   } catch { /* ignore */ }
 }
 
-// Başlangıç gecikmeleri
-void expireListings();
-setInterval(() => { void expireListings(); }, 30 * 60 * 1000);
-void trimChatHistory();
-setInterval(() => { void trimChatHistory(); }, 5 * 60 * 1000);
-setTimeout(() => scheduleBotMessage(), 3 * 60 * 1000);
-setTimeout(() => scheduleFakeConversation(), 30000);
-// İlk bilgi mesajını 5 saniye sonra gönder, ardından döngü başlar
-setTimeout(() => {
-  const firstWrapped = wrapInfoContent(getNextInfoMsg());
-  void saveToDB(-999, firstWrapped);
-  io.emit("chat:message", makeInfoMsg(firstWrapped));
-  scheduleInfoBot();
-}, 5 * 1000);
-scheduleHourlyReminder();
-setInterval(() => { void broadcastOnlineCount(); }, 45000);
-startScraperWorker();
-void initTelegramClient();
+process.on("unhandledRejection", (err) => {
+  logger.error({ err }, "Unhandled rejection");
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception");
+});
+
+const backgroundJobsEnabled = process.env["ENABLE_BACKGROUND_JOBS"] === "true";
+
+if (backgroundJobsEnabled) {
+  void expireListings();
+  setInterval(() => { void expireListings(); }, 30 * 60 * 1000);
+  void trimChatHistory();
+  setInterval(() => { void trimChatHistory(); }, 5 * 60 * 1000);
+  setTimeout(() => scheduleBotMessage(), 3 * 60 * 1000);
+  setTimeout(() => scheduleFakeConversation(), 30000);
+  setTimeout(() => {
+    const firstWrapped = wrapInfoContent(getNextInfoMsg());
+    void saveToDB(-999, firstWrapped);
+    io.emit("chat:message", makeInfoMsg(firstWrapped));
+    scheduleInfoBot();
+  }, 5 * 1000);
+  scheduleHourlyReminder();
+  setInterval(() => { void broadcastOnlineCount(); }, 45000);
+  startScraperWorker();
+  void initTelegramClient();
+} else {
+  logger.info("Background jobs disabled. Set ENABLE_BACKGROUND_JOBS=true to enable bots and scraper.");
+}
 
 httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
