@@ -22,6 +22,6 @@ RUN pnpm --filter @workspace/api-server build
 
 ENV NODE_ENV=production
 
-EXPOSE 3000
+EXPOSE 3000 8080
 
 CMD ["node", "artifacts/api-server/dist/index.mjs"]

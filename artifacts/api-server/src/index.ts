@@ -955,3 +955,15 @@ httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
   logger.info({ port, host: "0.0.0.0" }, "Server listening");
 });
+
+const railwayFallbackPort = 8080;
+if (port !== railwayFallbackPort) {
+  const fallbackServer = createServer(app);
+  fallbackServer.listen(railwayFallbackPort, "0.0.0.0", (err?: Error) => {
+    if (err) {
+      logger.warn({ err, port: railwayFallbackPort }, "Railway fallback port not available");
+      return;
+    }
+    logger.info({ port: railwayFallbackPort, host: "0.0.0.0" }, "Railway fallback server listening");
+  });
+}
