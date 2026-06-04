@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+﻿import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
@@ -40,7 +40,7 @@ const clientIndexPath = path.join(clientDistPath, "index.html");
 
 if (fs.existsSync(clientIndexPath)) {
   app.use(express.static(clientDistPath));
-  app.get("*", (req, res, next) => {
+  app.use((req, res, next) => {
     if (req.path.startsWith("/api")) {
       next();
       return;
@@ -62,3 +62,4 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 });
 
 export default app;
+
