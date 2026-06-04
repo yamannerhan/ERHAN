@@ -8,6 +8,11 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+app.use((req, _res, next) => {
+  logger.info({ method: req.method, path: req.path, url: req.url }, "Incoming request");
+  next();
+});
+
 app.use(
   pinoHttp({
     logger,
@@ -31,7 +36,11 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/health", (_req, res) => {
+app.get("/", (_req, res) => {
+  res.status(200).type("text/plain").send("OK Railway root works");
+});
+
+app.get(["/health", "/api/health", "/api/healthz"], (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
@@ -41,37 +50,18 @@ app.get("/favicon.ico", (_req, res) => {
 
 const clientDistPath = path.join(process.cwd(), "artifacts", "ozel-guvenlik", "dist", "public");
 const clientIndexPath = path.join(clientDistPath, "index.html");
-const clientIndexHtml = fs.existsSync(clientIndexPath)
-  ? fs.readFileSync(clientIndexPath, "utf-8")
-  : null;
+const clientIndexExists = fs.existsSync(clientIndexPath);
 
-app.get("/", (_req, res) => {
-  if (clientIndexHtml) {
-    res.status(200).type("html").send(clientIndexHtml);
-    return;
-  }
+if (clientIndexExists) {
+  logger.info({ clientDistPath }, "Frontend static folder found");
+  app.use("/assets", express.static(path.join(clientDistPath, "assets")));
+  app.use(express.static(clientDistPath, { index: false }));
+} else {
+  logger.error({ clientIndexPath }, "Frontend index.html not found");
+}
 
-  res.status(200).type("html").send("<!doctype html><html><head><title>ERHAN</title></head><body><h1>ERHAN çalışıyor</h1></body></html>");
-});
-
-app.use("/assets", express.static(path.join(clientDistPath, "assets")));
 app.use("/api/avatars", express.static(path.join(process.cwd(), "uploads", "avatars")));
 app.use("/api", router);
-
-if (clientIndexHtml) {
-  logger.info({ clientDistPath }, "Serving frontend static files");
-  app.use(express.static(clientDistPath, { index: false }));
-  app.use((req, res, next) => {
-    if (req.path.startsWith("/api")) {
-      next();
-      return;
-    }
-
-    res.status(200).type("html").send(clientIndexHtml);
-  });
-} else {
-  logger.warn({ clientIndexPath }, "Frontend build not found");
-}
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, "Unhandled request error");
