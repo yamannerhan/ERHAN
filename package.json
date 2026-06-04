@@ -2,6 +2,11 @@
   "name": "erhan-app",
   "version": "1.0.0",
   "license": "MIT",
+  "engines": {
+    "node": "22.x",
+    "pnpm": "9.x"
+  },
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
