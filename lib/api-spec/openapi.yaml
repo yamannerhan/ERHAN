@@ -1,0 +1,1266 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: ÖzelGüvenlik.Online API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: listings
+    description: Job listings
+  - name: chat
+    description: Live chat
+  - name: users
+    description: User profiles
+  - name: notifications
+    description: Notifications
+  - name: admin
+    description: Admin panel
+  - name: announcements
+    description: Scrolling announcements
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Unauthorized
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+
+  /listings:
+    get:
+      operationId: getListings
+      tags: [listings]
+      summary: Get all listings
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: featured
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of job listings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingsResponse"
+
+    post:
+      operationId: createListing
+      tags: [listings]
+      summary: Create a new listing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Listing"
+
+  /listings/{id}:
+    get:
+      operationId: getListing
+      tags: [listings]
+      summary: Get listing by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Listing"
+        "404":
+          description: Not found
+
+    patch:
+      operationId: updateListing
+      tags: [listings]
+      summary: Update a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Listing"
+
+    delete:
+      operationId: deleteListing
+      tags: [listings]
+      summary: Delete a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /listings/{id}/like:
+    post:
+      operationId: toggleListingLike
+      tags: [listings]
+      summary: Toggle like on a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Like toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeResponse"
+
+  /listings/{id}/favorite:
+    post:
+      operationId: toggleListingFavorite
+      tags: [listings]
+      summary: Toggle favorite on a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Favorite toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FavoriteResponse"
+
+  /listings/{id}/view:
+    post:
+      operationId: incrementListingView
+      tags: [listings]
+      summary: Increment view count
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: View incremented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /listings/stats/summary:
+    get:
+      operationId: getListingStats
+      tags: [listings]
+      summary: Get listing statistics summary
+      responses:
+        "200":
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingStats"
+
+  /chat/messages:
+    get:
+      operationId: getChatMessages
+      tags: [chat]
+      summary: Get recent chat messages
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: before
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Send a chat message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageInput"
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+
+  /chat/messages/{id}:
+    delete:
+      operationId: deleteChatMessage
+      tags: [chat]
+      summary: Delete a chat message (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /chat/messages/{id}/pin:
+    post:
+      operationId: pinChatMessage
+      tags: [chat]
+      summary: Pin/unpin a chat message (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pin toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /chat/online:
+    get:
+      operationId: getOnlineCount
+      tags: [chat]
+      summary: Get current online user count
+      responses:
+        "200":
+          description: Online count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnlineCount"
+
+  /users/profile/{username}:
+    get:
+      operationId: getUserProfile
+      tags: [users]
+      summary: Get user profile by username
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "404":
+          description: Not found
+
+  /users/me:
+    patch:
+      operationId: updateMyProfile
+      tags: [users]
+      summary: Update current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/favorites:
+    get:
+      operationId: getMyFavorites
+      tags: [users]
+      summary: Get my favorited listings
+      responses:
+        "200":
+          description: Favorite listings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Listing"
+
+  /notifications:
+    get:
+      operationId: getNotifications
+      tags: [notifications]
+      summary: Get current user notifications
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: Marked read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /notifications/unread-count:
+    get:
+      operationId: getUnreadNotificationCount
+      tags: [notifications]
+      summary: Get unread notification count
+      responses:
+        "200":
+          description: Count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadCount"
+
+  /announcements:
+    get:
+      operationId: getAnnouncements
+      tags: [announcements]
+      summary: Get active announcements (kayan yazılar)
+      responses:
+        "200":
+          description: Announcements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Announcement"
+
+    post:
+      operationId: createAnnouncement
+      tags: [announcements]
+      summary: Create announcement (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+
+  /announcements/{id}:
+    delete:
+      operationId: deleteAnnouncement
+      tags: [announcements]
+      summary: Delete announcement (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      tags: [admin]
+      summary: Get admin dashboard stats
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+
+  /admin/users:
+    get:
+      operationId: getAdminUsers
+      tags: [admin]
+      summary: List all users (admin)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Users list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersResponse"
+
+  /admin/users/{id}/ban:
+    post:
+      operationId: banUser
+      tags: [admin]
+      summary: Ban a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BanInput"
+      responses:
+        "200":
+          description: User banned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/users/{id}/unban:
+    post:
+      operationId: unbanUser
+      tags: [admin]
+      summary: Unban a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User unbanned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/users/{id}/role:
+    patch:
+      operationId: updateUserRole
+      tags: [admin]
+      summary: Update user role
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleUpdate"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/users/{id}/name-color:
+    patch:
+      operationId: updateUserNameColor
+      tags: [admin]
+      summary: Set user display name color
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NameColorUpdate"
+      responses:
+        "200":
+          description: Name color updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/settings:
+    get:
+      operationId: getAdminSettings
+      tags: [admin]
+      summary: Get admin settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSettings"
+
+    patch:
+      operationId: updateAdminSettings
+      tags: [admin]
+      summary: Update admin settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSettingsUpdate"
+      responses:
+        "200":
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSettings"
+
+  /admin/listings/{id}/approve:
+    post:
+      operationId: approveListing
+      tags: [admin]
+      summary: Approve a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/listings/{id}/feature:
+    post:
+      operationId: featureListing
+      tags: [admin]
+      summary: Toggle featured status of a listing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Featured toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/listings/{id}/fake-likes:
+    post:
+      operationId: addFakeLikes
+      tags: [admin]
+      summary: Add fake likes to a listing (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FakeLikesInput"
+      responses:
+        "200":
+          description: Fake likes added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/chat/lock:
+    post:
+      operationId: toggleChatLock
+      tags: [admin]
+      summary: Lock/unlock the chat
+      responses:
+        "200":
+          description: Chat lock toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /admin/banned-words:
+    get:
+      operationId: getBannedWords
+      tags: [admin]
+      summary: Get banned words list
+      responses:
+        "200":
+          description: Banned words
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BannedWord"
+
+    post:
+      operationId: addBannedWord
+      tags: [admin]
+      summary: Add a banned word
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BannedWordInput"
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BannedWord"
+
+  /admin/banned-words/{id}:
+    delete:
+      operationId: deleteBannedWord
+      tags: [admin]
+      summary: Delete a banned word
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: ["string", "null"]
+
+    User:
+      type: object
+      required: [id, username, email, role, createdAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        bio:
+          type: ["string", "null"]
+        nameColor:
+          type: ["string", "null"]
+        nameAnimated:
+          type: boolean
+        isBanned:
+          type: boolean
+        banReason:
+          type: ["string", "null"]
+        banExpiresAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    UserProfile:
+      type: object
+      required: [id, username, role, createdAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        role:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        bio:
+          type: ["string", "null"]
+        nameColor:
+          type: ["string", "null"]
+        nameAnimated:
+          type: boolean
+        listingCount:
+          type: integer
+        createdAt:
+          type: string
+
+    RegisterInput:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+
+    ProfileUpdate:
+      type: object
+      properties:
+        bio:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+
+    Listing:
+      type: object
+      required: [id, title, company, city, status, viewCount, likeCount, createdAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        company:
+          type: string
+        city:
+          type: string
+        salary:
+          type: ["string", "null"]
+        workType:
+          type: string
+        description:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        status:
+          type: string
+        viewCount:
+          type: integer
+        likeCount:
+          type: integer
+        isFeatured:
+          type: boolean
+        applyUrl:
+          type: ["string", "null"]
+        companyLogoUrl:
+          type: ["string", "null"]
+        authorId:
+          type: ["integer", "null"]
+        authorUsername:
+          type: ["string", "null"]
+        isLikedByMe:
+          type: boolean
+        isFavoritedByMe:
+          type: boolean
+        createdAt:
+          type: string
+
+    ListingInput:
+      type: object
+      required: [title, company, city]
+      properties:
+        title:
+          type: string
+        company:
+          type: string
+        city:
+          type: string
+        salary:
+          type: ["string", "null"]
+        workType:
+          type: string
+        description:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        applyUrl:
+          type: ["string", "null"]
+        companyLogoUrl:
+          type: ["string", "null"]
+
+    ListingUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        company:
+          type: string
+        city:
+          type: string
+        salary:
+          type: ["string", "null"]
+        workType:
+          type: string
+        description:
+          type: ["string", "null"]
+        requirements:
+          type: ["string", "null"]
+        status:
+          type: string
+        applyUrl:
+          type: ["string", "null"]
+        isFeatured:
+          type: boolean
+
+    ListingsResponse:
+      type: object
+      required: [listings, total, page, limit]
+      properties:
+        listings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Listing"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    ListingStats:
+      type: object
+      required: [total, today, featured, byCity]
+      properties:
+        total:
+          type: integer
+        today:
+          type: integer
+        featured:
+          type: integer
+        byCity:
+          type: array
+          items:
+            $ref: "#/components/schemas/CityCount"
+
+    CityCount:
+      type: object
+      required: [city, count]
+      properties:
+        city:
+          type: string
+        count:
+          type: integer
+
+    LikeResponse:
+      type: object
+      required: [liked, likeCount]
+      properties:
+        liked:
+          type: boolean
+        likeCount:
+          type: integer
+
+    FavoriteResponse:
+      type: object
+      required: [favorited]
+      properties:
+        favorited:
+          type: boolean
+
+    ChatMessage:
+      type: object
+      required: [id, content, userId, username, createdAt]
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        userId:
+          type: integer
+        username:
+          type: string
+        userAvatarUrl:
+          type: ["string", "null"]
+        userNameColor:
+          type: ["string", "null"]
+        userNameAnimated:
+          type: boolean
+        userRole:
+          type: string
+        replyToId:
+          type: ["integer", "null"]
+        replyToUsername:
+          type: ["string", "null"]
+        replyToContent:
+          type: ["string", "null"]
+        isPinned:
+          type: boolean
+        mentions:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+
+    ChatMessageInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+        replyToId:
+          type: ["integer", "null"]
+
+    OnlineCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+        fakeBonus:
+          type: integer
+
+    Notification:
+      type: object
+      required: [id, type, message, isRead, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        message:
+          type: string
+        isRead:
+          type: boolean
+        linkUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    UnreadCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+
+    Announcement:
+      type: object
+      required: [id, content, isActive, createdAt]
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    AnnouncementInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    AdminStats:
+      type: object
+      required: [totalUsers, onlineUsers, totalListings, todayListings, totalMessages, bannedUsers, pendingListings, reportedMessages]
+      properties:
+        totalUsers:
+          type: integer
+        onlineUsers:
+          type: integer
+        totalListings:
+          type: integer
+        todayListings:
+          type: integer
+        totalMessages:
+          type: integer
+        bannedUsers:
+          type: integer
+        pendingListings:
+          type: integer
+        reportedMessages:
+          type: integer
+
+    AdminUsersResponse:
+      type: object
+      required: [users, total]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+
+    BanInput:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+        expiresAt:
+          type: ["string", "null"]
+
+    RoleUpdate:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+
+    NameColorUpdate:
+      type: object
+      properties:
+        nameColor:
+          type: ["string", "null"]
+        nameAnimated:
+          type: boolean
+
+    AdminSettings:
+      type: object
+      required: [chatLocked, fakeOnlineBonus, maintenanceMode]
+      properties:
+        chatLocked:
+          type: boolean
+        fakeOnlineBonus:
+          type: integer
+        maintenanceMode:
+          type: boolean
+        welcomeMessage:
+          type: ["string", "null"]
+
+    AdminSettingsUpdate:
+      type: object
+      properties:
+        chatLocked:
+          type: boolean
+        fakeOnlineBonus:
+          type: integer
+        maintenanceMode:
+          type: boolean
+        welcomeMessage:
+          type: ["string", "null"]
+
+    FakeLikesInput:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+
+    BannedWord:
+      type: object
+      required: [id, word, createdAt]
+      properties:
+        id:
+          type: integer
+        word:
+          type: string
+        createdAt:
+          type: string
+
+    BannedWordInput:
+      type: object
+      required: [word]
+      properties:
+        word:
+          type: string

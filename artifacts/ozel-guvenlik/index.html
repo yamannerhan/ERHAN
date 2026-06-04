@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="tr" style="background:#0F172A;color:#F1F5F9">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
+    <title>ÖZEL GÜVENLİK</title>
+    <meta name="description" content="Özel Güvenlik İş İlanları & Topluluk Platformu" />
+    <meta name="robots" content="index, follow" />
+    <meta name="application-name" content="ÖZEL GÜVENLİK" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ÖZEL GÜVENLİK" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#4F46E5" />
+    <meta property="og:title" content="ÖZEL GÜVENLİK — İş İlanları & Topluluk" />
+    <meta property="og:description" content="Türkiye'nin özel güvenlik sektörüne özel iş ilanları ve topluluk platformu." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ÖZEL GÜVENLİK" />
+    <meta name="twitter:description" content="Özel Güvenlik İş İlanları & Topluluk" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"></noscript>
+  </head>
+  <body>
+    <div id="root"><div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#0F172A"><div style="width:40px;height:40px;border:3px solid rgba(79,70,229,0.25);border-top-color:#4F46E5;border-radius:50%;animation:_sp 0.8s linear infinite"></div><style>@keyframes _sp{to{transform:rotate(360deg)}}</style></div></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function() {
+        var _reloading = false;
+        function doReload() {
+          if (_reloading) return;
+          _reloading = true;
+          try {
+            if ("caches" in window) {
+              caches.keys().then(function(k) {
+                return Promise.all(k.map(function(c) { return caches.delete(c); }));
+              }).then(function() { window.location.reload(true); });
+            } else { window.location.reload(true); }
+          } catch(e) { window.location.reload(true); }
+        }
+
+        // Katman 1: BUILD_TS (transformIndexHtml her restarttan sonra yeni değer yazar)
+        var BUILD_TS = "__BUILD_TS__";
+        var btsStored = localStorage.getItem("_bts");
+        if (btsStored && btsStored !== BUILD_TS && BUILD_TS.indexOf("BUILD_TS") === -1) {
+          localStorage.setItem("_bts", BUILD_TS);
+          doReload(); return;
+        }
+        localStorage.setItem("_bts", BUILD_TS);
+
+        // Katman 2: /version.json polling — SW'den tamamen bağımsız
+        // Eski SW bu dosyayı önbelleğe almadı, network-first ile taze okur
+        function checkVersion() {
+          fetch("/version.json?_=" + Date.now(), { cache: "no-store" })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+              var vs = localStorage.getItem("_ver");
+              if (vs && vs !== d.v) { localStorage.setItem("_ver", d.v); doReload(); }
+              else { localStorage.setItem("_ver", d.v); }
+            }).catch(function() {});
+        }
+        checkVersion();
+        setInterval(checkVersion, 15000);
+
+        // Katman 3: Service Worker olayları (geri uyumluluk + yeni SW)
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.addEventListener("controllerchange", doReload);
+          navigator.serviceWorker.addEventListener("message", function(e) {
+            if (e.data && e.data.type === "SW_UPDATED") doReload();
+          });
+          window.addEventListener("load", function() {
+            navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+              .then(function(reg) {
+                reg.update();
+                setInterval(function() { reg.update(); }, 20000);
+              }).catch(function() {});
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

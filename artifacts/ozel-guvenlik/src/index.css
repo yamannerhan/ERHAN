@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #0F172A;
+  --foreground: #F1F5F9;
+  --card: #1E293B;
+  --card-foreground: #F1F5F9;
+  --popover: #1E293B;
+  --popover-foreground: #F1F5F9;
+  --primary: #4F46E5;
+  --primary-foreground: #F1F5F9;
+  --secondary: #7C3AED;
+  --secondary-foreground: #F1F5F9;
+  --muted: #334155;
+  --muted-foreground: #94A3B8;
+  --accent: #06B6D4;
+  --accent-foreground: #0F172A;
+  --destructive: #EF4444;
+  --border: rgba(255,255,255,0.08);
+  --input: rgba(255,255,255,0.08);
+  --ring: #4F46E5;
+  --chart-1: #4F46E5;
+  --chart-2: #7C3AED;
+  --chart-3: #06B6D4;
+  --chart-4: #10B981;
+  --chart-5: #F59E0B;
+  --sidebar: #1E293B;
+  --sidebar-foreground: #F1F5F9;
+  --sidebar-primary: #4F46E5;
+  --sidebar-primary-foreground: #F1F5F9;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #F1F5F9;
+  --sidebar-border: rgba(255,255,255,0.08);
+  --sidebar-ring: #4F46E5;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* ── Ticker ────────────────────────────────────────────────── */
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-ticker {
+  animation: ticker 60s linear infinite;
+}
+
+/* ── Logo glow pulse ───────────────────────────────────────── */
+@keyframes logo-glow {
+  0%, 100% { text-shadow: 0 0 8px rgba(79,70,229,0.8), 0 0 20px rgba(79,70,229,0.4); }
+  50%       { text-shadow: 0 0 16px rgba(124,58,237,0.9), 0 0 40px rgba(6,182,212,0.5); }
+}
+.animate-logo-glow {
+  animation: logo-glow 3s ease-in-out infinite;
+}
+
+/* ── Logo image glow ───────────────────────────────────────── */
+@keyframes logo-img-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(79,70,229,0.7)) drop-shadow(0 0 12px rgba(79,70,229,0.3));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(124,58,237,0.9)) drop-shadow(0 0 24px rgba(6,182,212,0.5));
+    transform: scale(1.04);
+  }
+}
+.logo-glow-anim {
+  animation: logo-img-glow 3s ease-in-out infinite;
+}
+
+/* ── Gradient text shift ───────────────────────────────────── */
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.logo-gradient {
+  background: linear-gradient(135deg, #4F46E5, #7C3AED, #06B6D4, #4F46E5);
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 4s ease infinite;
+}
+
+/* ── Rainbow name ──────────────────────────────────────────── */
+@keyframes rainbow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.animate-rainbow {
+  background: linear-gradient(270deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3);
+  background-size: 1400% 1400%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rainbow 3s ease infinite;
+}
+
+/* ── Featured auto-scroll ──────────────────────────────────── */
+@keyframes featured-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-featured-scroll {
+  animation: featured-scroll 28s linear infinite;
+}
+.animate-featured-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* ── Banner carousel ───────────────────────────────────────── */
+@keyframes banner-slide {
+  0%   { opacity: 0; transform: scale(1.03); }
+  5%   { opacity: 1; transform: scale(1); }
+  90%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.97); }
+}
+
+/* ── Part Time öne çıkan parlayan çerçeve ──────────────────── */
+@keyframes pt-featured-glow {
+  0%   { box-shadow: 0 0 8px 2px rgba(251,191,36,0.35), 0 0 0 1px rgba(251,191,36,0.5); }
+  50%  { box-shadow: 0 0 22px 6px rgba(251,191,36,0.65), 0 0 0 1.5px rgba(251,191,36,0.9); }
+  100% { box-shadow: 0 0 8px 2px rgba(251,191,36,0.35), 0 0 0 1px rgba(251,191,36,0.5); }
+}
+.animate-pt-glow {
+  animation: pt-featured-glow 2s ease-in-out infinite;
+}
+
+/* ── Glass card ────────────────────────────────────────────── */
+.glass-card {
+  @apply bg-card/80 backdrop-blur-md border border-white/10 shadow-[0_0_15px_rgba(79,70,229,0.1)];
+}
+
+/* ── Hide scrollbar ────────────────────────────────────────── */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
