@@ -940,7 +940,7 @@ setInterval(() => { void broadcastOnlineCount(); }, 45000);
 startScraperWorker();
 void initTelegramClient();
 
-httpServer.listen(port, (err?: Error) => {
+httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
-  logger.info({ port }, "Server listening");
+  logger.info({ port, host: "0.0.0.0" }, "Server listening");
 });

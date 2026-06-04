@@ -21,7 +21,6 @@ RUN pnpm --filter @workspace/ozel-guvenlik build
 RUN pnpm --filter @workspace/api-server build
 
 ENV NODE_ENV=production
-ENV PORT=3000
 
 EXPOSE 3000
 

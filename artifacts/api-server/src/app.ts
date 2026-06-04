@@ -40,7 +40,7 @@ const clientIndexPath = path.join(clientDistPath, "index.html");
 
 if (fs.existsSync(clientIndexPath)) {
   app.use(express.static(clientDistPath));
-  app.use((req, res, next) => {
+  app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) {
       next();
       return;
@@ -48,6 +48,17 @@ if (fs.existsSync(clientIndexPath)) {
 
     res.sendFile(clientIndexPath);
   });
+} else {
+  app.get("/", (_req, res) => {
+    res.status(200).send("ERHAN API is running");
+  });
 }
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err }, "Unhandled request error");
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default app;
