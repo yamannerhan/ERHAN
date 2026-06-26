@@ -8,9 +8,9 @@ export const sourcesTable = pgTable("sources", {
   apiToken: text("api_token"),
   active: boolean("active").notNull().default(true),
   status: text("status").notNull().default("active"),
-  checkInterval: integer("check_interval").notNull().default(15), // minutes
-  autoPublish: boolean("auto_publish").notNull().default(false),
-  requireApproval: boolean("require_approval").notNull().default(true),
+  checkInterval: integer("check_interval").notNull().default(1), // minutes
+  autoPublish: boolean("auto_publish").notNull().default(true),
+  requireApproval: boolean("require_approval").notNull().default(false),
   targetCities: text("target_cities").array(),
   publishOnlyTargetCities: boolean("publish_only_target_cities").notNull().default(false),
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
@@ -18,5 +18,7 @@ export const sourcesTable = pgTable("sources", {
   totalImported: integer("total_imported").notNull().default(0),
   telegramChatId: text("telegram_chat_id"),
   lastTelegramMessageId: text("last_telegram_message_id"),
+  initialScanDone: boolean("initial_scan_done").notNull().default(false),
+  lastScanPublished: integer("last_scan_published").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -2,8 +2,8 @@ import crypto from "crypto";
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable } from "@workspace/db";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { getUpdates, isBotTokenSet, isClientConnected, fetchMessagesViaClient } from "../services/telegram-client";
-import type { BotUpdate } from "../services/telegram-client";
+import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages } from "../services/telegram-client";
+import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender } from "../lib/job-parsing";
 
 // ── Keyword lists ──────────────────────────────────────────────────
@@ -145,8 +145,15 @@ async function findActiveListingByPhone(phone: string, city: string): Promise<nu
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
+  if (source.platform === "telegram") return true;
   return source.autoPublish || !source.requireApproval;
 }
+
+// İlk tarama: son 30 gün. Sonraki taramalar: lastTelegramMessageId sonrası.
+const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
+const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
+const TELEGRAM_SCAN_INTERVAL_MS = 60_000; // 1 dakika
 
 function isJobPosting(text: string): boolean {
   if (text.length < 30) return false;
@@ -167,13 +174,6 @@ function extractTelegramUsername(url: string): string | null {
   const name = m[1];
   return name.startsWith("+") ? null : name.toLowerCase();
 }
-
-// Sadece bu kadar günden yeni ilanlar içeri alınır — eski gönderiler atlanır.
-// SCRAPER_MAX_POST_AGE_DAYS env'i ile ayarlanabilir (varsayılan 7 gün).
-// Geçersiz/negatif değer kazara her şeyi elemesin diye 7'ye düşülür.
-const envAgeDays = Number(process.env["SCRAPER_MAX_POST_AGE_DAYS"]);
-const MAX_POST_AGE_DAYS = Number.isFinite(envAgeDays) && envAgeDays > 0 ? envAgeDays : 7;
-const MAX_POST_AGE_MS = MAX_POST_AGE_DAYS * 24 * 60 * 60 * 1000;
 
 // ── Telegram web scraping (no bot token needed) ────────────────────
 interface ScrapedMessage { id: string; text: string; url: string; postedAt?: Date }
@@ -290,26 +290,33 @@ async function scrapeTelegramChannel(username: string): Promise<ScrapedMessage[]
 }
 
 // ── Core processing ────────────────────────────────────────────────
+type ProcessResult = { published: boolean };
+
 async function processMessage(
   source: typeof sourcesTable.$inferSelect,
   externalId: string,
   text: string,
   sourceUrl: string,
   postedAt?: Date,
-): Promise<void> {
-  if (!text?.trim() || isChatMessage(text)) return;
-  if (!isJobPosting(text)) return;
+  isInitialScan = false,
+): Promise<ProcessResult> {
+  if (!text?.trim() || isChatMessage(text)) return { published: false };
+  if (!isJobPosting(text)) return { published: false };
 
-  // Sadece güncel ilanlar: tarihi belli olup eşik değerden eski olanları atla
-  if (postedAt && Date.now() - postedAt.getTime() > MAX_POST_AGE_MS) return;
+  if (isInitialScan && postedAt && Date.now() - postedAt.getTime() > INITIAL_SCAN_MS) {
+    return { published: false };
+  }
+
+  const [seenExt] = await db.select({ id: importedPostsTable.id })
+    .from(importedPostsTable)
+    .where(and(
+      eq(importedPostsTable.sourceId, source.id),
+      eq(importedPostsTable.externalId, externalId),
+    ))
+    .limit(1);
+  if (seenExt) return { published: false };
 
   const hash = createDuplicateHash(text);
-
-  const existing = await db.select({ id: importedPostsTable.id })
-    .from(importedPostsTable)
-    .where(eq(importedPostsTable.duplicateHash, hash))
-    .limit(1);
-  if (existing.length > 0) return;
 
   const [imported] = await db.insert(importedPostsTable).values({
     sourceId: source.id,
@@ -322,65 +329,15 @@ async function processMessage(
     status: "pending",
   }).returning();
 
-  if (!imported) return;
-
-  await db.update(sourcesTable)
-    .set({ totalImported: (source.totalImported ?? 0) + 1 })
-    .where(eq(sourcesTable.id, source.id));
+  if (!imported) return { published: false };
 
   const title = extractTitle(text);
   const city = extractCity(text) ?? "Türkiye";
   const salary = extractSalary(text);
   const phone = extractPhone(text);
-  const contactName = extractContactName(text);
   const gender = extractGender(text);
 
-  const existingListingId = phone ? await findActiveListingByPhone(phone, city) : null;
-  if (existingListingId && shouldAutoPublish(source)) {
-    await db.update(listingsTable).set({
-      title: title ?? "Güvenlik Personeli Aranıyor",
-      salary: salary ?? undefined,
-      description: text,
-      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
-      status: "active",
-      isActive: true,
-      updatedAt: new Date(),
-      ...(postedAt ? { createdAt: postedAt } : {}),
-    }).where(eq(listingsTable.id, existingListingId));
-    await db.update(importedPostsTable)
-      .set({ status: "approved" })
-      .where(eq(importedPostsTable.id, imported.id));
-    return;
-  }
-  if (existingListingId) {
-    await db.update(importedPostsTable)
-      .set({ status: "duplicate" })
-      .where(eq(importedPostsTable.id, imported.id));
-    return;
-  }
-
-  if (shouldAutoPublish(source)) {
-    await db.insert(listingsTable).values({
-      title: title ?? "Güvenlik Personeli Aranıyor",
-      company: "Belirtilmemiş",
-      city,
-      salary: salary ?? undefined,
-      workType: "Tam Zamanlı",
-      description: text,
-      // Cinsiyet her zaman gösterilsin; metinde yoksa "Belirtilmemiş"
-      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
-      status: "active",
-      isActive: true,
-      sourceTag: source.platform,
-      // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil); numara yoksa kaynağa düş
-      applyUrl: phone ? `tel:${phone}` : sourceUrl,
-      // Gerçek gönderim tarihini kullan ki "X gün önce" ve sıralama doğru olsun
-      ...(postedAt ? { createdAt: postedAt } : {}),
-    });
-    await db.update(importedPostsTable)
-      .set({ status: "approved" })
-      .where(eq(importedPostsTable.id, imported.id));
-  } else {
+  if (!shouldAutoPublish(source)) {
     await db.insert(pendingJobsTable).values({
       sourceId: source.id,
       importedPostId: imported.id,
@@ -398,7 +355,45 @@ async function processMessage(
       duplicateHash: hash,
       ...(postedAt ? { createdAt: postedAt } : {}),
     });
+    return { published: false };
   }
+
+  const existingListingId = phone ? await findActiveListingByPhone(phone, city) : null;
+  if (existingListingId) {
+    await db.update(listingsTable).set({
+      title: title ?? "Güvenlik Personeli Aranıyor",
+      salary: salary ?? undefined,
+      description: text,
+      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
+      status: "active",
+      isActive: true,
+      updatedAt: new Date(),
+      ...(postedAt ? { createdAt: postedAt } : {}),
+    }).where(eq(listingsTable.id, existingListingId));
+    await db.update(importedPostsTable)
+      .set({ status: "approved" })
+      .where(eq(importedPostsTable.id, imported.id));
+    return { published: true };
+  }
+
+  await db.insert(listingsTable).values({
+    title: title ?? "Güvenlik Personeli Aranıyor",
+    company: "Belirtilmemiş",
+    city,
+    salary: salary ?? undefined,
+    workType: "Tam Zamanlı",
+    description: text,
+    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
+    status: "active",
+    isActive: true,
+    sourceTag: source.platform,
+    applyUrl: phone ? `tel:${phone}` : sourceUrl,
+    ...(postedAt ? { createdAt: postedAt } : {}),
+  });
+  await db.update(importedPostsTable)
+    .set({ status: "approved" })
+    .where(eq(importedPostsTable.id, imported.id));
+  return { published: true };
 }
 
 // ── Bot API polling state ──────────────────────────────────────────
@@ -445,7 +440,7 @@ async function processBotUpdates(): Promise<void> {
         : `https://t.me/c/${chatId.replace("-100", "")}/${post.message_id}`;
       const postedAt = typeof post.date === "number" ? new Date(post.date * 1000) : undefined;
       try {
-        await processMessage(source, `bot_${chatId}_${post.message_id}`, post.text, msgUrl, postedAt);
+        await processMessage(source, `bot_${chatId}_${post.message_id}`, post.text, msgUrl, postedAt, false);
       } catch (e) {
         logger.error(e, `scraper: bot update processing error`);
       }
@@ -455,7 +450,24 @@ async function processBotUpdates(): Promise<void> {
   }
 }
 
-// ── Check a single Telegram source via web scraping ────────────────
+// ── Web fallback (önizleme açık kanallar) ─────────────────────────
+async function scrapeTelegramChannelFiltered(
+  username: string,
+  minMessageId: number,
+  maxAgeDays: number,
+): Promise<ChannelMessage[]> {
+  const all = await scrapeTelegramChannel(username);
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  return all.filter(m => {
+    const id = parseInt(m.id, 10);
+    if (!Number.isFinite(id)) return false;
+    if (minMessageId > 0) return id > minMessageId;
+    if (m.postedAt && m.postedAt.getTime() < cutoff) return false;
+    return true;
+  });
+}
+
+// ── Tek Telegram kaynağını tara ────────────────────────────────────
 async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Promise<void> {
   const username = extractTelegramUsername(source.url);
   if (!username) {
@@ -465,67 +477,89 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     return;
   }
 
-  logger.info(`scraper: checking @${username} (gramjs=${isClientConnected()}, bot=${isBotTokenSet()})`);
+  const lastId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
+  const isInitialScan = !source.initialScanDone;
 
-  let messages: ScrapedMessage[];
-  if (isClientConnected()) {
-    try {
-      const raw = await fetchMessagesViaClient(username);
-      messages = raw;
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(`scraper: GramJS fetch failed for @${username}, fallback to web: ${errMsg}`);
-      messages = await scrapeTelegramChannel(username);
+  logger.info(`scraper: @${username} ${isInitialScan ? `ilk tarama (${INITIAL_SCAN_DAYS}g)` : `devam (id>${lastId})`} gramjs=${isClientConnected()}`);
+
+  let messages: ChannelMessage[] = [];
+  try {
+    if (isClientConnected()) {
+      messages = await fetchChannelMessages(username, {
+        minMessageId: isInitialScan ? 0 : lastId,
+        maxAgeDays: isInitialScan ? INITIAL_SCAN_DAYS : undefined,
+      });
     }
-  } else {
-    messages = await scrapeTelegramChannel(username);
+    if (!messages.length) {
+      messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
+    }
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    if (isClientConnected() && !errMsg.includes("kapalı") && !errMsg.includes("bulunamadı")) {
+      try {
+        messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
+      } catch (webErr) {
+        throw webErr;
+      }
+    } else {
+      throw e;
+    }
   }
 
-  if (messages.length === 0) {
-    await db.update(sourcesTable)
-      .set({
-        lastCheckedAt: new Date(),
-        lastError: "Kanal boş veya mesajlar okunamadı. Kanal herkese açık olmalı.",
-      })
-      .where(eq(sourcesTable.id, source.id));
-    return;
-  }
+  let published = 0;
+  let maxId = lastId;
 
-  // En yeni gönderiler önce işlensin (tarihi olmayanlar sona)
-  messages.sort((a, b) => (b.postedAt?.getTime() ?? 0) - (a.postedAt?.getTime() ?? 0));
-
-  let processed = 0;
   for (const msg of messages) {
+    const msgId = parseInt(msg.id, 10);
+    if (!Number.isFinite(msgId)) continue;
+    if (!isInitialScan && msgId <= lastId) continue;
     try {
-      await processMessage(source, `${username}_${msg.id}`, msg.text, msg.url, msg.postedAt);
-      processed++;
+      const result = await processMessage(
+        source,
+        `${username}_${msg.id}`,
+        msg.text,
+        msg.url,
+        msg.postedAt,
+        isInitialScan,
+      );
+      if (result.published) published++;
+      if (msgId > maxId) maxId = msgId;
     } catch (e) {
-      logger.error(e, `scraper: error processing msg ${msg.id} from @${username}`);
+      logger.error(e, `scraper: msg ${msg.id} @${username}`);
     }
   }
 
   await db.update(sourcesTable)
-    .set({ lastCheckedAt: new Date(), lastError: null })
+    .set({
+      lastCheckedAt: new Date(),
+      lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
+      initialScanDone: true,
+      lastScanPublished: published,
+      totalImported: (source.totalImported ?? 0) + published,
+      lastError: messages.length === 0 && isInitialScan
+        ? (isClientConnected() ? null : "Telegram hesabı bağlı değil — özel kanallar için admin panelden bağlayın.")
+        : null,
+    })
     .where(eq(sourcesTable.id, source.id));
 
-  logger.info(`scraper: @${username} — ${messages.length} mesaj tarandı, ${processed} işlendi`);
+  logger.info(`scraper: @${username} — ${messages.length} mesaj, ${published} yayınlandı, sonId=${maxId}`);
 }
 
 // ── Main scraper loop ──────────────────────────────────────────────
 // Aynı anda iki tarama döngüsü çalışmasın (interval + manuel tetikleme yarışını önler).
 let cycleRunning = false;
 
-async function runScraperCycle(): Promise<void> {
+async function runScraperCycle(force = false): Promise<void> {
   if (cycleRunning) return;
   cycleRunning = true;
   try {
-    await runScraperCycleInner();
+    await runScraperCycleInner(force);
   } finally {
     cycleRunning = false;
   }
 }
 
-async function runScraperCycleInner(): Promise<void> {
+async function runScraperCycleInner(force = false): Promise<void> {
   // 1) Pull all updates the bot received across all its chats
   await processBotUpdates();
 
@@ -536,9 +570,12 @@ async function runScraperCycleInner(): Promise<void> {
   const now = new Date();
 
   for (const source of sources) {
-    const intervalMs = (source.checkInterval ?? 15) * 60 * 1000;
+    const intervalMin = source.platform === "telegram"
+      ? Math.max(1, source.checkInterval ?? 1)
+      : (source.checkInterval ?? 15);
+    const intervalMs = intervalMin * 60 * 1000;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
-    if (now.getTime() - lastChecked < intervalMs) continue;
+    if (!force && now.getTime() - lastChecked < intervalMs) continue;
 
     if (source.platform === "telegram") {
       try {
@@ -560,28 +597,29 @@ async function runScraperCycleInner(): Promise<void> {
 
 // ── Public API ─────────────────────────────────────────────────────
 export function startScraperWorker(): void {
-  const mode = isBotTokenSet() ? "Bot API polling + web scraping fallback" : "web scraping only";
-  logger.info(`scraper: worker started (${mode})`);
+  const mode = isClientConnected()
+    ? "GramJS + web fallback"
+    : isBotTokenSet()
+      ? "Bot API + web fallback"
+      : "web scraping only";
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, 1dk döngü)`);
 
-  // Bot polling runs every 30 seconds for fast message delivery
   if (isBotTokenSet()) {
     setInterval(async () => {
       try { await processBotUpdates(); }
       catch (e) { logger.error(e, "scraper: bot poll error"); }
-    }, 30_000);
+    }, TELEGRAM_SCAN_INTERVAL_MS);
   }
 
-  // Full cycle (web scraping + bot poll) runs every minute
   setInterval(async () => {
     try { await runScraperCycle(); }
     catch (e) { logger.error(e, "scraper: cycle error"); }
-  }, 60_000);
+  }, TELEGRAM_SCAN_INTERVAL_MS);
 
-  // Run immediately after 10 seconds
   setTimeout(async () => {
     try { await runScraperCycle(); }
     catch (e) { logger.error(e, "scraper: initial run error"); }
-  }, 10_000);
+  }, 5_000);
 }
 
 export function isTelegramTokenSet(): boolean {
@@ -593,7 +631,7 @@ export function isTelegramTokenSet(): boolean {
 // tarama döngüsü hemen çalıştırılır (interval beklenmez).
 export async function triggerRescan(): Promise<void> {
   botUpdateOffset = 0;
-  await runScraperCycle();
+  await runScraperCycle(true);
 }
 
 // Otomatik içe aktarılmış (sourceTag dolu) ilanları, kayıtlı metinlerinden

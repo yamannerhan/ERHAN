@@ -35,7 +35,10 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
       lastError: s.lastError ?? null,
       totalImported: s.totalImported,
+      lastScanPublished: s.lastScanPublished ?? 0,
+      initialScanDone: s.initialScanDone ?? false,
       telegramChatId: s.telegramChatId ?? null,
+      lastTelegramMessageId: s.lastTelegramMessageId ?? null,
       createdAt: s.createdAt.toISOString(),
     })),
     telegramTokenSet: isTelegramTokenSet(),
@@ -53,16 +56,17 @@ router.post("/admin/sources", authMiddleware, requireAdmin, async (req, res): Pr
   if (!platform || !["telegram", "facebook", "sahibinden", "secretcv", "kariyer", "iskur", "manual_admin"].includes(platform)) { res.status(400).json({ error: "Geçersiz platform" }); return; }
   if (!url?.trim()) { res.status(400).json({ error: "URL zorunlu" }); return; }
 
+  const isTelegram = platform === "telegram";
   const [source] = await db.insert(sourcesTable).values({
     name: name.trim(),
     platform,
-    url: platform === "telegram" ? sanitizeTelegramUrl(url) : url.trim(),
+    url: isTelegram ? sanitizeTelegramUrl(url) : url.trim(),
     apiToken: apiToken?.trim() || undefined,
     active: active ?? true,
     status: active === false ? "inactive" : "active",
-    checkInterval: checkInterval ?? 15,
-    autoPublish: autoPublish ?? false,
-    requireApproval: requireApproval ?? true,
+    checkInterval: checkInterval ?? (isTelegram ? 1 : 15),
+    autoPublish: isTelegram ? true : (autoPublish ?? false),
+    requireApproval: isTelegram ? false : (requireApproval ?? true),
   }).returning();
 
   res.json(source);
@@ -138,9 +142,11 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
   await db.update(sourcesTable).set({
     lastCheckedAt: null,
     lastTelegramMessageId: null,
+    initialScanDone: false,
     totalImported: 0,
+    lastScanPublished: 0,
     lastError: null,
-  });
+  }).where(eq(sourcesTable.platform, "telegram"));
 
   void triggerRescan().catch(() => { /* hata logger içinde yakalanır */ });
 

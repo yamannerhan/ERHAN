@@ -968,7 +968,7 @@ scheduleHourlyReminder();
 
 async function bootstrapWorkers(): Promise<void> {
   await db.update(sourcesTable)
-    .set({ autoPublish: true, requireApproval: false })
+    .set({ autoPublish: true, requireApproval: false, checkInterval: 1 })
     .where(and(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.active, true)));
 
   await initTelegramClient();

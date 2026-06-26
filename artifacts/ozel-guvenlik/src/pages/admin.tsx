@@ -1227,7 +1227,9 @@ interface Source {
   status?: "active" | "inactive" | "blocked" | string;
   targetCities: string[]; publishOnlyTargetCities: boolean;
   lastTelegramMessageId: string | null;
-  lastError: string | null; totalImported: number; createdAt: string;
+  lastError: string | null; totalImported: number;
+  lastScanPublished: number; initialScanDone: boolean;
+  createdAt: string;
 }
 
 type TgAuthStateType = "disconnected" | "awaiting_code" | "awaiting_password" | "connected";
@@ -1382,7 +1384,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const defaultForm = { name: "", platform: "telegram", url: "", apiToken: "", active: true, checkInterval: 15, autoPublish: false, requireApproval: true, targetCitiesText: "", publishOnlyTargetCities: false };
+  const defaultForm = { name: "", platform: "telegram", url: "", apiToken: "", active: true, checkInterval: 1, autoPublish: true, requireApproval: false, targetCitiesText: "", publishOnlyTargetCities: false };
   const [form, setForm] = useState<typeof defaultForm>(defaultForm);
 
   const load = async () => {
@@ -1462,8 +1464,9 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     <Section title="İlan Kaynakları" icon={Radio}>
       <div className="flex items-start gap-2 bg-primary/10 border border-primary/20 rounded-xl p-3 mb-4">
         <Radio className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-        <div className="text-xs text-primary/80">
-          Telegram veya Sahibinden linki ekleyin, sistem otomatik tarar. Sahibinden için arama/listeme linkini verin; tüm sayfaları gezip yeni ilanları çeker.
+        <div className="text-xs text-primary/80 space-y-1">
+          <p><strong>Tam otomatik bot:</strong> Telegram kanalı ekleyin — her <strong>1 dakikada</strong> taranır, ilanlar <strong>otomatik yayınlanır</strong> (admin onayı yok).</p>
+          <p>İlk tarama: son <strong>30 gün</strong>. Sonraki taramalar kaldığı mesajdan devam eder. Özel kanallar için aşağıdan Telegram hesabınızı bağlayın.</p>
         </div>
       </div>
 
@@ -1512,21 +1515,32 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
           </div>
           <Input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder={form.platform === "telegram" ? "https://t.me/kanal_adi" : form.platform === "sahibinden" ? "https://www.sahibinden.com/..." : "https://facebook.com/sayfaadi"} className="h-8 text-sm bg-white/5 border-white/10" />
           {form.platform === "telegram" && (
-            <p className="text-[10px] text-muted-foreground">Sadece kanal linki yeterli — Telegram hesabı bağlamadan ilanlar otomatik çekilir.</p>
+            <p className="text-[10px] text-muted-foreground">Kanal linki yeterli. Bot 1 dk&apos;da bir tarar, ilanları otomatik yayınlar.</p>
           )}
-          <div className="space-y-1">
-            <Input value={form.targetCitiesText} onChange={e => setForm(f => ({ ...f, targetCitiesText: e.target.value }))} placeholder="Hedef şehir/ilçe/semt: İstanbul, Gebze, Ankara, İzmir" className="h-8 text-sm bg-white/5 border-white/10" />
-            <p className="text-[10px] text-muted-foreground">Virgülle ayır. Sistem il/ilçe/semt yakalayıp eşleştirir.</p>
-          </div>
+          {form.platform !== "telegram" && (
+            <div className="space-y-1">
+              <Input value={form.targetCitiesText} onChange={e => setForm(f => ({ ...f, targetCitiesText: e.target.value }))} placeholder="Hedef şehir/ilçe/semt: İstanbul, Gebze, Ankara, İzmir" className="h-8 text-sm bg-white/5 border-white/10" />
+              <p className="text-[10px] text-muted-foreground">Virgülle ayır. Sistem il/ilçe/semt yakalayıp eşleştirir.</p>
+            </div>
+          )}
           <div className="flex gap-4 flex-wrap">
-            <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-              <input type="checkbox" checked={form.autoPublish} onChange={e => setForm(f => ({ ...f, autoPublish: e.target.checked }))} className="w-3.5 h-3.5 rounded accent-primary" />
-              <Zap className="w-3 h-3 text-amber-400" /> Otomatik yayınla
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-              <input type="checkbox" checked={form.requireApproval} onChange={e => setForm(f => ({ ...f, requireApproval: e.target.checked }))} className="w-3.5 h-3.5 rounded accent-primary" />
-              <Shield className="w-3 h-3 text-primary" /> Admin onayı
-            </label>
+            {form.platform !== "telegram" && (
+              <>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                  <input type="checkbox" checked={form.autoPublish} onChange={e => setForm(f => ({ ...f, autoPublish: e.target.checked }))} className="w-3.5 h-3.5 rounded accent-primary" />
+                  <Zap className="w-3 h-3 text-amber-400" /> Otomatik yayınla
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                  <input type="checkbox" checked={form.requireApproval} onChange={e => setForm(f => ({ ...f, requireApproval: e.target.checked }))} className="w-3.5 h-3.5 rounded accent-primary" />
+                  <Shield className="w-3 h-3 text-primary" /> Admin onayı
+                </label>
+              </>
+            )}
+            {form.platform === "telegram" && (
+              <span className="text-[10px] px-2 py-1 rounded-lg bg-amber-500/15 text-amber-300 flex items-center gap-1">
+                <Zap className="w-3 h-3" /> Tam otomatik — onay yok
+              </span>
+            )}
             <label className="flex items-center gap-1.5 cursor-pointer text-xs">
               <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} className="w-3.5 h-3.5 rounded accent-green-400" />
               Aktif
@@ -1596,7 +1610,9 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                   </a>
                   <div className="flex items-center gap-3 mt-1 flex-wrap">
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.checkInterval}dk</span>
-                    <span className="text-[10px] text-muted-foreground">{s.totalImported} ilan çekildi</span>
+                    <span className="text-[10px] text-muted-foreground">{s.totalImported} ilan yayınlandı</span>
+                    {s.lastScanPublished > 0 && <span className="text-[10px] text-green-400">Son tarama: +{s.lastScanPublished}</span>}
+                    {!s.initialScanDone && s.platform === "telegram" && <span className="text-[10px] text-amber-400">30g ilk tarama…</span>}
                     {s.lastTelegramMessageId && <span className="text-[10px] text-muted-foreground">Son ID: {s.lastTelegramMessageId}</span>}
                     {s.lastCheckedAt && <span className="text-[10px] text-muted-foreground">Son: {new Date(s.lastCheckedAt).toLocaleString("tr-TR")}</span>}
                   </div>

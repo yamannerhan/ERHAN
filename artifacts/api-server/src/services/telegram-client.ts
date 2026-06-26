@@ -152,19 +152,85 @@ export function getAuthState(): AuthState { return currentState; }
 export function getCurrentPhone(): string | null { return currentPhone; }
 export function isClientConnected(): boolean { return currentState === "connected" && client !== null; }
 
-export async function fetchMessagesViaClient(username: string, limit = 100): Promise<{ id: string; text: string; url: string; postedAt?: Date }[]> {
+export interface ChannelMessage {
+  id: string;
+  text: string;
+  url: string;
+  postedAt?: Date;
+}
+
+function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
+  if (!m.message || m.message.length < 20) return null;
+  return {
+    id: String(m.id),
+    text: m.message,
+    url: `https://t.me/${username}/${m.id}`,
+    postedAt: typeof m.date === "number" ? new Date(m.date * 1000) : undefined,
+  };
+}
+
+/** GramJS ile kanal mesajlarını çeker. İlk tarama: maxAgeDays geriye; sonraki: minMessageId sonrası. */
+export async function fetchChannelMessages(
+  username: string,
+  options: { minMessageId?: number; maxAgeDays?: number } = {},
+): Promise<ChannelMessage[]> {
+  if (!client || !isClientConnected()) return [];
+
+  const minId = options.minMessageId ?? 0;
+  const maxAgeDays = options.maxAgeDays ?? 30;
+  const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const entity = await client.getEntity(username);
+  const results: ChannelMessage[] = [];
+  const seen = new Set<number>();
+
+  if (minId > 0) {
+    const batch = await client.getMessages(entity, { limit: 100, minId });
+    for (const m of batch) {
+      if (m.id <= minId) continue;
+      const mapped = mapGramMessage(username, m);
+      if (mapped) results.push(mapped);
+    }
+    return results.sort((a, b) => Number(a.id) - Number(b.id));
+  }
+
+  let offsetId = 0;
+  for (let page = 0; page < 30; page++) {
+    const batch = await client.getMessages(entity, {
+      limit: 100,
+      ...(offsetId > 0 ? { offsetId } : {}),
+    });
+    if (!batch.length) break;
+
+    let reachedCutoff = false;
+    for (const m of batch) {
+      const ts = typeof m.date === "number" ? m.date * 1000 : 0;
+      if (ts > 0 && ts < cutoffMs) {
+        reachedCutoff = true;
+        continue;
+      }
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      const mapped = mapGramMessage(username, m);
+      if (mapped) results.push(mapped);
+    }
+
+    if (reachedCutoff) break;
+    const last = batch[batch.length - 1];
+    if (!last || batch.length < 100) break;
+    offsetId = last.id;
+  }
+
+  return results.sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+/** @deprecated fetchChannelMessages kullanın */
+export async function fetchMessagesViaClient(username: string, limit = 100): Promise<ChannelMessage[]> {
   if (!client || !isClientConnected()) return [];
   const entity = await client.getEntity(username);
   const messages = await client.getMessages(entity, { limit });
   return messages
-    .filter(m => m.message && m.message.length > 30)
-    .map(m => ({
-      id: String(m.id),
-      text: m.message,
-      url: `https://t.me/${username}/${m.id}`,
-      // m.date Telegram'da unix saniye — gerçek gönderim tarihi
-      postedAt: typeof m.date === "number" ? new Date(m.date * 1000) : undefined,
-    }));
+    .map(m => mapGramMessage(username, m))
+    .filter((m): m is ChannelMessage => m !== null);
 }
 
 // Bot API helpers (still available for polling)
