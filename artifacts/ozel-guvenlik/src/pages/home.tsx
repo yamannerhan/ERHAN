@@ -20,6 +20,36 @@ import { useQueryClient } from "@tanstack/react-query";
 
 const BASE_URL = "https://ozelguvenlik.online";
 
+const HOME_STATE_KEY = "home_page_state";
+const HOME_SCROLL_KEY = "home_scroll_y";
+
+type HomeSavedState = {
+  page: number;
+  activePill: string;
+  otherCity: string | null;
+  sortNewest: "new" | "old";
+};
+
+function getSavedHomeState(): HomeSavedState {
+  try {
+    const saved = sessionStorage.getItem(HOME_STATE_KEY);
+    if (!saved) return { page: 1, activePill: "all", otherCity: null, sortNewest: "new" };
+    const parsed = JSON.parse(saved) as Partial<HomeSavedState>;
+    return {
+      page: Math.max(1, parsed.page ?? 1),
+      activePill: parsed.activePill ?? "all",
+      otherCity: parsed.otherCity ?? null,
+      sortNewest: parsed.sortNewest === "old" ? "old" : "new",
+    };
+  } catch {
+    return { page: 1, activePill: "all", otherCity: null, sortNewest: "new" };
+  }
+}
+
+function saveHomeScroll() {
+  sessionStorage.setItem(HOME_SCROLL_KEY, String(window.scrollY));
+}
+
 interface Banner {
   id: number;
   title: string | null;
@@ -184,12 +214,13 @@ export default function Home() {
   const { data: announcementsData } = useGetAnnouncements();
   const announcements = announcementsData || [];
 
-  const [page, setPage] = useState(1);
+  const savedHome = getSavedHomeState();
+  const [page, setPage] = useState(savedHome.page);
   const pageSize = 10;
-  const [activePill, setActivePill] = useState<string>("all");
-  const [otherCity, setOtherCity] = useState<string | null>(null);
+  const [activePill, setActivePill] = useState<string>(savedHome.activePill);
+  const [otherCity, setOtherCity] = useState<string | null>(savedHome.otherCity);
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
-  const [sortNewest, setSortNewest] = useState<"new" | "old">("new");
+  const [sortNewest, setSortNewest] = useState<"new" | "old">(savedHome.sortNewest);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
 
   useEffect(() => {
@@ -210,6 +241,25 @@ export default function Home() {
     limit: pageSize,
     ...(cityFilter ? { city: cityFilter } : {}),
   } as Parameters<typeof useGetListings>[0]);
+
+  useEffect(() => {
+    sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify({ page, activePill, otherCity, sortNewest }));
+  }, [page, activePill, otherCity, sortNewest]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    const raw = sessionStorage.getItem(HOME_SCROLL_KEY);
+    if (!raw) return;
+    const y = parseInt(raw, 10);
+    if (!Number.isFinite(y) || y <= 0) {
+      sessionStorage.removeItem(HOME_SCROLL_KEY);
+      return;
+    }
+    requestAnimationFrame(() => {
+      window.scrollTo(0, y);
+      sessionStorage.removeItem(HOME_SCROLL_KEY);
+    });
+  }, [isLoading, page]);
 
   const [banners, setBanners] = useState<Banner[]>([]);
 
@@ -385,7 +435,7 @@ export default function Home() {
             return (
               <button
                 key={p.id}
-                onClick={() => { setActivePill(p.id); setOtherCity(null); setPage(1); }}
+                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setActivePill(p.id); setOtherCity(null); setPage(1); }}
                 className={`og-pill ${active ? "og-pill-active" : ""}`}
               >
                 {p.id === "istanbul" && <MapPin className="w-3 h-3" />}
@@ -433,6 +483,7 @@ export default function Home() {
                       <button
                         key={c.city}
                         onClick={() => {
+                          sessionStorage.removeItem(HOME_SCROLL_KEY);
                           setActivePill("other");
                           setOtherCity(c.city);
                           setPage(1);
@@ -460,6 +511,7 @@ export default function Home() {
           <section>
             <Link
               href={`/ilan/${featured.id}`}
+              onClick={saveHomeScroll}
               className="og-featured-card block relative"
             >
               <div className="og-featured-pill">
@@ -546,7 +598,7 @@ export default function Home() {
                     transition={{ delay: Math.min(idx * 0.02, 0.2) }}
                     className="og-list-row-wrap"
                   >
-                    <Link href={`/ilan/${listing.id}`} className="og-list-row">
+                    <Link href={`/ilan/${listing.id}`} onClick={saveHomeScroll} className="og-list-row">
                       {/* Image / logo */}
                       <div className="og-list-img">
                         {listing.companyLogoUrl ? (
@@ -645,7 +697,7 @@ export default function Home() {
           {!isLoading && totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-5">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(p => Math.max(1, p - 1)); }}
                 disabled={page <= 1}
                 className="og-page-btn"
               >
@@ -655,7 +707,7 @@ export default function Home() {
                 Sayfa {page} / {totalPages}
               </div>
               <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(p => Math.min(totalPages, p + 1)); }}
                 disabled={page >= totalPages}
                 className="og-page-btn"
               >
