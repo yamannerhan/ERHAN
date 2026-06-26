@@ -7,8 +7,8 @@ import { setBotIo } from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
 import { startScraperWorker } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
-import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable } from "@workspace/db";
-import { eq, count, sql, desc, lt, asc } from "drizzle-orm";
+import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
+import { eq, count, sql, desc, lt, asc, and } from "drizzle-orm";
 
 const rawPort = process.env["PORT"] || "3000";
 const port = Number(rawPort);
@@ -966,8 +966,17 @@ setTimeout(() => {
 }, 5 * 1000);
 scheduleHourlyReminder();
 
-startScraperWorker();
-void initTelegramClient();
+async function bootstrapWorkers(): Promise<void> {
+  await db.update(sourcesTable)
+    .set({ autoPublish: true, requireApproval: false })
+    .where(and(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.active, true)));
+
+  await initTelegramClient();
+  startScraperWorker();
+  logger.info("Workers started (telegram + scraper)");
+}
+
+void bootstrapWorkers();
 
 httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }

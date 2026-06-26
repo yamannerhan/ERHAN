@@ -152,7 +152,7 @@ export function getAuthState(): AuthState { return currentState; }
 export function getCurrentPhone(): string | null { return currentPhone; }
 export function isClientConnected(): boolean { return currentState === "connected" && client !== null; }
 
-export async function fetchMessagesViaClient(username: string, limit = 50): Promise<{ id: string; text: string; url: string; postedAt?: Date }[]> {
+export async function fetchMessagesViaClient(username: string, limit = 100): Promise<{ id: string; text: string; url: string; postedAt?: Date }[]> {
   if (!client || !isClientConnected()) return [];
   const entity = await client.getEntity(username);
   const messages = await client.getMessages(entity, { limit });

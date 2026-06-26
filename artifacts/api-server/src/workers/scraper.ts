@@ -131,10 +131,8 @@ function createDuplicateHash(text: string): string {
   return crypto.createHash("sha256").update(`${city}|${normalized}`).digest("hex");
 }
 
-// Aynı telefon + şehre sahip yayında (aktif) bir ilan var mı? (gruplar arası mükerrer
-// kontrolü). Şehir de karşılaştırılır ki aynı numaradan farklı şehirler için açılan
-// ayrı ilanlar yanlışlıkla bastırılmasın.
-async function listingExistsForPhone(phone: string, city: string): Promise<boolean> {
+// Aynı telefon + şehre sahip yayında (aktif) bir ilan var mı?
+async function findActiveListingByPhone(phone: string, city: string): Promise<number | null> {
   const rows = await db.select({ id: listingsTable.id })
     .from(listingsTable)
     .where(and(
@@ -143,7 +141,11 @@ async function listingExistsForPhone(phone: string, city: string): Promise<boole
       eq(listingsTable.status, "active"),
     ))
     .limit(1);
-  return rows.length > 0;
+  return rows[0]?.id ?? null;
+}
+
+function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
+  return source.autoPublish || !source.requireApproval;
 }
 
 function isJobPosting(text: string): boolean {
@@ -333,16 +335,31 @@ async function processMessage(
   const contactName = extractContactName(text);
   const gender = extractGender(text);
 
-  // Aynı iletişim numarasına sahip aktif bir ilan zaten yayında ise (başka gruptan
-  // gelen mükerrer ilan) tekrar yayınlama / onaya düşürme.
-  if (phone && (await listingExistsForPhone(phone, city))) {
+  const existingListingId = phone ? await findActiveListingByPhone(phone, city) : null;
+  if (existingListingId && shouldAutoPublish(source)) {
+    await db.update(listingsTable).set({
+      title: title ?? "Güvenlik Personeli Aranıyor",
+      salary: salary ?? undefined,
+      description: text,
+      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
+      status: "active",
+      isActive: true,
+      updatedAt: new Date(),
+      ...(postedAt ? { createdAt: postedAt } : {}),
+    }).where(eq(listingsTable.id, existingListingId));
+    await db.update(importedPostsTable)
+      .set({ status: "approved" })
+      .where(eq(importedPostsTable.id, imported.id));
+    return;
+  }
+  if (existingListingId) {
     await db.update(importedPostsTable)
       .set({ status: "duplicate" })
       .where(eq(importedPostsTable.id, imported.id));
     return;
   }
 
-  if (source.autoPublish && !source.requireApproval) {
+  if (shouldAutoPublish(source)) {
     await db.insert(listingsTable).values({
       title: title ?? "Güvenlik Personeli Aranıyor",
       company: "Belirtilmemiş",
@@ -353,6 +370,7 @@ async function processMessage(
       // Cinsiyet her zaman gösterilsin; metinde yoksa "Belirtilmemiş"
       requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
       status: "active",
+      isActive: true,
       sourceTag: source.platform,
       // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil); numara yoksa kaynağa düş
       applyUrl: phone ? `tel:${phone}` : sourceUrl,
