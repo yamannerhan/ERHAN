@@ -168,11 +168,9 @@ export function ChatBubble() {
       return false;
     }
     if (isSystem(msg)) {
-      if (msg.type !== "welcome") {
-        const key = `${msg.type}:${msg.text}`;
-        if (systemKeysRef.current.has(key)) return false;
-        systemKeysRef.current.add(key);
-      }
+      const key = `${msg.type}:${msg.text}`;
+      if (systemKeysRef.current.has(key)) return false;
+      systemKeysRef.current.add(key);
     } else {
       const id = (msg as ChatMessage).id;
       messageIdsRef.current.add(id);
@@ -245,7 +243,7 @@ export function ChatBubble() {
     });
     setSocket(s);
     const authenticate = () => {
-      if (user?.id) s.emit("authenticate", { userId: user.id });
+      if (user?.id && s.connected) s.emit("authenticate", { userId: user.id });
     };
 
     s.on("connect", authenticate);
@@ -266,7 +264,7 @@ export function ChatBubble() {
     s.on("chat:welcome", ({ message }: { message: string }) => {
       addMsg({ id: Date.now() + 1, type: "welcome", text: message, createdAt: new Date().toISOString() });
     });
-    authenticate();
+    if (s.connected) authenticate();
     return () => {
       s.off("connect", authenticate);
       s.disconnect();

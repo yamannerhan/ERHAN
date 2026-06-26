@@ -723,6 +723,7 @@ async function getChatWelcomeMessage(): Promise<string> {
 }
 
 const userLastDisconnect = new Map<number, number>();
+const welcomedSockets = new Set<string>();
 const JOIN_THRESHOLD_MS = 20 * 60 * 1000;
 
 // ── Socket.io ─────────────────────────────────────────────────────
@@ -754,13 +755,17 @@ io.on("connection", (socket) => {
               });
             }
           }
-          socket.emit("chat:welcome", { message: await getChatWelcomeMessage() });
+          if (!welcomedSockets.has(socketId)) {
+            welcomedSockets.add(socketId);
+            socket.emit("chat:welcome", { message: await getChatWelcomeMessage() });
+          }
         }
       } catch { /* ignore */ }
     }
   });
 
   socket.on("disconnect", () => {
+    welcomedSockets.delete(socketId);
     const entry = onlineSockets.get(socketId);
     if (entry?.userId) {
       const remaining = [...onlineSockets.values()].filter(e => e.userId === entry.userId && e !== entry);

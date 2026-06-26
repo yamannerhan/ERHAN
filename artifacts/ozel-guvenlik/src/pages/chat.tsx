@@ -191,11 +191,9 @@ export default function Chat() {
       return false;
     }
     if (isSystem(msg)) {
-      if (msg.type !== "welcome") {
-        const key = `${msg.type}:${msg.text}`;
-        if (systemKeysRef.current.has(key)) return false;
-        systemKeysRef.current.add(key);
-      }
+      const key = `${msg.type}:${msg.text}`;
+      if (systemKeysRef.current.has(key)) return false;
+      systemKeysRef.current.add(key);
     } else {
       const id = (msg as ExtMsg).id;
       messageIdsRef.current.add(id);
@@ -261,7 +259,7 @@ export default function Chat() {
     });
     setSocket(s);
     const authenticate = () => {
-      if (user?.id) s.emit("authenticate", { userId: user.id });
+      if (user?.id && s.connected) s.emit("authenticate", { userId: user.id });
     };
     s.on("connect", authenticate);
     s.on("chat:message", (msg: ExtMsg) => addMsg(msg));
@@ -282,7 +280,7 @@ export default function Chat() {
     s.on("chat:cleared", () => {
       setMessages([]);
     });
-    authenticate();
+    if (s.connected) authenticate();
     return () => {
       s.off("connect", authenticate);
       s.disconnect();
