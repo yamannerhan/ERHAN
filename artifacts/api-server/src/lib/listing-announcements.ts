@@ -1,4 +1,4 @@
-import { db, chatMessagesTable, notificationsTable, usersTable } from "@workspace/db";
+import { db, chatMessagesTable, notificationsTable, usersTable, adminSettingsTable } from "@workspace/db";
 import { emitRealtime } from "./realtime";
 
 type ListingAnnouncement = {
@@ -20,32 +20,39 @@ export async function announceNewListing(listing: ListingAnnouncement): Promise<
   const linkUrl = `/ilan/${listing.id}`;
   const message = announcementText(listing);
 
-  const [chatMsg] = await db.insert(chatMessagesTable).values({
-    userId: BOT_USER_ID,
-    content: message,
-    isPinned: false,
-    isDeleted: false,
-  }).returning();
+  const settings = await db.select({ chatAnnounceListings: adminSettingsTable.chatAnnounceListings })
+    .from(adminSettingsTable).limit(1);
+  const chatEnabled = settings[0]?.chatAnnounceListings !== false;
 
-  const chatPayload = {
-    id: chatMsg.id,
-    content: chatMsg.content,
-    userId: BOT_USER_ID,
-    username: "GuvenlikBot",
-    displayName: "GuvenlikBot",
-    userAvatarUrl: null,
-    userNameColor: "#22d3ee",
-    userNameAnimated: true,
-    userRole: "bot",
-    isBot: true,
-    replyToId: null,
-    replyToUsername: null,
-    replyToContent: null,
-    isPinned: false,
-    isDeleted: false,
-    reactions: [],
-    createdAt: chatMsg.createdAt.toISOString(),
-  };
+  if (chatEnabled) {
+    const [chatMsg] = await db.insert(chatMessagesTable).values({
+      userId: BOT_USER_ID,
+      content: message,
+      isPinned: false,
+      isDeleted: false,
+    }).returning();
+
+    const chatPayload = {
+      id: chatMsg.id,
+      content: chatMsg.content,
+      userId: BOT_USER_ID,
+      username: "GuvenlikBot",
+      displayName: "GuvenlikBot",
+      userAvatarUrl: null,
+      userNameColor: "#22d3ee",
+      userNameAnimated: true,
+      userRole: "bot",
+      isBot: true,
+      replyToId: null,
+      replyToUsername: null,
+      replyToContent: null,
+      isPinned: false,
+      isDeleted: false,
+      reactions: [],
+      createdAt: chatMsg.createdAt.toISOString(),
+    };
+    emitRealtime("chat:message", chatPayload);
+  }
 
   const users = await db.select({ id: usersTable.id }).from(usersTable);
   if (users.length > 0) {
@@ -58,7 +65,6 @@ export async function announceNewListing(listing: ListingAnnouncement): Promise<
     })));
   }
 
-  emitRealtime("chat:message", chatPayload);
   emitRealtime("notification:new", {
     type: "listing",
     message: `Yeni ilan eklendi: ${listing.title}`,

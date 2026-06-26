@@ -5,6 +5,7 @@ import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender } from "../lib/job-parsing";
+import { announceNewListing } from "../lib/listing-announcements";
 
 // ── Keyword lists ──────────────────────────────────────────────────
 const JOB_KEYWORDS = [
@@ -290,7 +291,7 @@ async function scrapeTelegramChannel(username: string): Promise<ScrapedMessage[]
 }
 
 // ── Core processing ────────────────────────────────────────────────
-type ProcessResult = { published: boolean };
+type ProcessResult = { isNew: boolean };
 
 async function processMessage(
   source: typeof sourcesTable.$inferSelect,
@@ -300,11 +301,11 @@ async function processMessage(
   postedAt?: Date,
   isInitialScan = false,
 ): Promise<ProcessResult> {
-  if (!text?.trim() || isChatMessage(text)) return { published: false };
-  if (!isJobPosting(text)) return { published: false };
+  if (!text?.trim() || isChatMessage(text)) return { isNew: false };
+  if (!isJobPosting(text)) return { isNew: false };
 
   if (isInitialScan && postedAt && Date.now() - postedAt.getTime() > INITIAL_SCAN_MS) {
-    return { published: false };
+    return { isNew: false };
   }
 
   const [seenExt] = await db.select({ id: importedPostsTable.id })
@@ -314,7 +315,7 @@ async function processMessage(
       eq(importedPostsTable.externalId, externalId),
     ))
     .limit(1);
-  if (seenExt) return { published: false };
+  if (seenExt) return { isNew: false };
 
   const hash = createDuplicateHash(text);
 
@@ -329,7 +330,7 @@ async function processMessage(
     status: "pending",
   }).returning();
 
-  if (!imported) return { published: false };
+  if (!imported) return { isNew: false };
 
   const title = extractTitle(text);
   const city = extractCity(text) ?? "Türkiye";
@@ -355,7 +356,7 @@ async function processMessage(
       duplicateHash: hash,
       ...(postedAt ? { createdAt: postedAt } : {}),
     });
-    return { published: false };
+    return { isNew: false };
   }
 
   const existingListingId = phone ? await findActiveListingByPhone(phone, city) : null;
@@ -373,10 +374,10 @@ async function processMessage(
     await db.update(importedPostsTable)
       .set({ status: "approved" })
       .where(eq(importedPostsTable.id, imported.id));
-    return { published: true };
+    return { isNew: false };
   }
 
-  await db.insert(listingsTable).values({
+  const [newListing] = await db.insert(listingsTable).values({
     title: title ?? "Güvenlik Personeli Aranıyor",
     company: "Belirtilmemiş",
     city,
@@ -389,11 +390,23 @@ async function processMessage(
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
     expiresAt: null,
-  });
+  }).returning();
+  if (!newListing) return { isNew: false };
+
   await db.update(importedPostsTable)
     .set({ status: "approved" })
     .where(eq(importedPostsTable.id, imported.id));
-  return { published: true };
+
+  if (!isInitialScan) {
+    void announceNewListing({
+      id: newListing.id,
+      title: newListing.title,
+      city: newListing.city,
+      company: newListing.company,
+    }).catch((err) => logger.error({ err }, "scraper: announceNewListing failed"));
+  }
+
+  return { isNew: true };
 }
 
 // ── Bot API polling state ──────────────────────────────────────────
@@ -483,27 +496,23 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   logger.info(`scraper: @${username} ${isInitialScan ? `ilk tarama (${INITIAL_SCAN_DAYS}g)` : `devam (id>${lastId})`} gramjs=${isClientConnected()}`);
 
   let messages: ChannelMessage[] = [];
+  const gramConnected = isClientConnected();
   try {
-    if (isClientConnected()) {
+    if (gramConnected) {
       messages = await fetchChannelMessages(username, {
         minMessageId: isInitialScan ? 0 : lastId,
         maxAgeDays: isInitialScan ? INITIAL_SCAN_DAYS : undefined,
       });
-    }
-    if (!messages.length) {
+    } else {
       messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
     }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    if (isClientConnected() && !errMsg.includes("kapalı") && !errMsg.includes("bulunamadı")) {
-      try {
-        messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
-      } catch (webErr) {
-        throw webErr;
-      }
-    } else {
+    if (gramConnected) {
+      logger.warn(`scraper: GramJS failed for @${username}: ${errMsg}`);
       throw e;
     }
+    throw e;
   }
 
   let published = 0;
@@ -522,7 +531,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         msg.postedAt,
         isInitialScan,
       );
-      if (result.published) published++;
+      if (result.isNew) published++;
       if (msgId > maxId) maxId = msgId;
     } catch (e) {
       logger.error(e, `scraper: msg ${msg.id} @${username}`);
@@ -536,8 +545,8 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       initialScanDone: true,
       lastScanPublished: published,
       totalImported: (source.totalImported ?? 0) + published,
-      lastError: messages.length === 0 && isInitialScan
-        ? (isClientConnected() ? null : "Telegram hesabı bağlı değil — özel kanallar için admin panelden bağlayın.")
+      lastError: messages.length === 0 && !gramConnected
+        ? "Telegram hesabı bağlı değil — özel kanallar için admin panelden bağlayın."
         : null,
     })
     .where(eq(sourcesTable.id, source.id));
@@ -582,10 +591,16 @@ async function runScraperCycleInner(force = false): Promise<void> {
         await checkTelegramSource(source);
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        logger.warn(`scraper: web scrape failed for source ${source.id}: ${errMsg}`);
-        await db.update(sourcesTable)
-          .set({ lastError: errMsg.slice(0, 500), lastCheckedAt: now })
-          .where(eq(sourcesTable.id, source.id));
+        logger.warn(`scraper: telegram source ${source.id} failed: ${errMsg}`);
+        if (!isClientConnected()) {
+          await db.update(sourcesTable)
+            .set({ lastError: errMsg.slice(0, 500), lastCheckedAt: now })
+            .where(eq(sourcesTable.id, source.id));
+        } else {
+          await db.update(sourcesTable)
+            .set({ lastCheckedAt: now, lastError: null })
+            .where(eq(sourcesTable.id, source.id));
+        }
       }
     } else if (source.platform === "facebook") {
       await db.update(sourcesTable)
