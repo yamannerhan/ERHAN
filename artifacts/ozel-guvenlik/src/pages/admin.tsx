@@ -1434,7 +1434,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [reparsing, setReparsing] = useState(false);
 
   const resetBots = async () => {
-    if (!confirm("Botlar sıfırlanacak: Telegram'dan çekilen tüm ilanlar silinip son 30 gün baştan taranacak. Ardından seçili dakikada (örn. 1 dk) kaldığı mesajdan sürekli tarama devam eder. Manuel eklediğiniz ilanlar etkilenmez. Devam edilsin mi?")) return;
+    if (!confirm("Bot tarama geçmişi sıfırlanacak (yayındaki ilanlar silinmez). Son 30 gün yeniden taranır. Devam?")) return;
     setResetting(true);
     try {
       const r = await apiCall("/admin/sources/reset", "POST") as { message?: string };
@@ -1479,7 +1479,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>Botları Sıfırla:</strong> içe aktarma geçmişini temizler ve kanalları baştan tarar (yayındaki ilanlar silinmez, mükerrer ilan eklenmez). <strong>Yeniden Kontrol Et:</strong> içe aktarılan ilanları tekrar okuyup eksik maaş/cinsiyet bilgisini doldurur.
+        <strong>Botları Sıfırla:</strong> tarama geçmişini temizler, 30 günü yeniden tarar (yayındaki ilanlar silinmez). <strong>Yeniden Kontrol Et:</strong> içe aktarılan ilanları tekrar okuyup eksik maaş/cinsiyet bilgisini doldurur.
       </p>
 
       <div className="flex justify-between items-center mb-3">

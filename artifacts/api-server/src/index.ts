@@ -8,7 +8,7 @@ import { setRealtimeServer } from "./lib/realtime";
 import { startScraperWorker } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
 import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
-import { eq, count, sql, desc, lt, asc, and } from "drizzle-orm";
+import { eq, count, sql, desc, lt, asc, and, isNotNull } from "drizzle-orm";
 
 const rawPort = process.env["PORT"] || "3000";
 const port = Number(rawPort);
@@ -923,20 +923,17 @@ async function broadcastOnlineCount() {
 }
 
 // ── Süresi dolan ilanları otomatik pasif yap ─────────────────────
+// Telegram/bot ilanları (sourceTag dolu) asla otomatik silinmez — sadece elle eklenen
+// ilanların expiresAt tarihi geçince pasife alınır.
 async function expireListings() {
   try {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     await db.update(listingsTable)
-      .set({ status: "expired" })
+      .set({ status: "expired", isActive: false })
       .where(
-        sql`${listingsTable.status} = 'active' AND (
-          (${listingsTable.expiresAt} IS NOT NULL AND ${listingsTable.expiresAt} < NOW())
-          OR
-          (
-            (${listingsTable.sourceTag} IS NULL OR ${listingsTable.sourceTag} != 'telegram')
-            AND ${listingsTable.createdAt} < ${thirtyDaysAgo.toISOString()}
-          )
-        )`
+        sql`${listingsTable.status} = 'active'
+          AND ${listingsTable.sourceTag} IS NULL
+          AND ${listingsTable.expiresAt} IS NOT NULL
+          AND ${listingsTable.expiresAt} < NOW()`,
       );
   } catch { /* ignore */ }
 }
@@ -970,6 +967,11 @@ async function bootstrapWorkers(): Promise<void> {
   await db.update(sourcesTable)
     .set({ autoPublish: true, requireApproval: false, checkInterval: 1 })
     .where(and(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.active, true)));
+
+  // Yanlışlıkla pasife alınmış bot ilanlarını geri aç
+  await db.update(listingsTable)
+    .set({ status: "active", isActive: true })
+    .where(and(isNotNull(listingsTable.sourceTag), eq(listingsTable.status, "expired")));
 
   await initTelegramClient();
   startScraperWorker();

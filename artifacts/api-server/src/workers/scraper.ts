@@ -368,7 +368,7 @@ async function processMessage(
       status: "active",
       isActive: true,
       updatedAt: new Date(),
-      ...(postedAt ? { createdAt: postedAt } : {}),
+      createdAt: new Date(),
     }).where(eq(listingsTable.id, existingListingId));
     await db.update(importedPostsTable)
       .set({ status: "approved" })
@@ -388,7 +388,7 @@ async function processMessage(
     isActive: true,
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
-    ...(postedAt ? { createdAt: postedAt } : {}),
+    expiresAt: null,
   });
   await db.update(importedPostsTable)
     .set({ status: "approved" })

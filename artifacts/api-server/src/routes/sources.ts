@@ -121,13 +121,8 @@ router.delete("/admin/sources/:id", authMiddleware, requireAdmin, async (req, re
 });
 
 // ── Reset bots & re-scan ──────────────────────────────────────────
-// Botun çektiği ilanları sıfırlar, son 30 günü baştan tarar, sonra seçili dakikada
-// kaldığı mesajdan devam ederek sürekli tarama yapar.
+// Yayında olan ilanları SİLMEZ — sadece içe aktarma geçmişini ve tarama imlecini sıfırlar.
 router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
-  const deletedListings = await db.delete(listingsTable)
-    .where(eq(listingsTable.sourceTag, "telegram"))
-    .returning({ id: listingsTable.id });
-
   await db.delete(pendingJobsTable);
   await db.delete(importedPostsTable);
 
@@ -152,8 +147,7 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
 
   res.json({
     success: true,
-    deletedListings: deletedListings.length,
-    message: `${deletedListings.length} Telegram ilanı sıfırlandı. Son 30 gün baştan taranıyor; ardından seçili dakikada kaldığı yerden devam edecek.`,
+    message: "Tarama geçmişi sıfırlandı. Yayındaki ilanlar korundu; son 30 gün yeniden taranıyor.",
   });
 });
 
