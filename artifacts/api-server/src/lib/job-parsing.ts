@@ -145,14 +145,16 @@ export function extractSalary(text: string): string | null {
   if (total && rangeInfo.total) return `${formatTL(rangeInfo.total)} Toplam`;
 
   const binLabeled = tl.match(/(?:maa[şs]|[üu]cret|net|ayl[ıi]k|hakedi[şs])\D{0,12}(\d{1,3})\s*bin/);
-  const binCur = tl.match(/(\d{1,3})\s*bin\s*(?:tl|₺|lira)/);
-  const bin = binLabeled ?? binCur;
+  const binCur = tl.match(/(\d{1,3})\s*bin\s*(?:tl|₺|lira)?/);
+  const binBare = tl.match(/\b(\d{2,3})\s*bin\b/);
+  const bin = binLabeled ?? binCur ?? binBare;
   if (bin) {
     const n = parseInt(bin[1]!, 10);
     if (n >= 10 && n <= 200) return `${n}.000 TL`;
   }
 
-  const labeled = tl.match(new RegExp(`(?:maa[şs]|[üu]cret|ayl[ıi]k|net\\s+maa[şs]|ele\\s+ge[çc]en)\\s*[:\\-]?\\s*${NUM}\\s*${CUR}?`));
+  const labeled = tl.match(new RegExp(`(?:maa[şs]|[üu]cret|ayl[ıi]k|net\\s+maa[şs]|ele\\s+ge[çc]en)\\s*[:\\-]?\\s*${NUM}\\s*${CUR}?`))
+    ?? tl.match(new RegExp(`(?:maa[şs]|[üu]cret|ayl[ıi]k|net\\s+maa[şs]|hakedi[şs])\\s*[:\\-]?\\s*${NUM}(?!\\s*[-–])`));
   if (labeled) {
     return `${labeled[1]} TL`;
   }
@@ -229,12 +231,16 @@ export function isJobSeekerPost(text: string): boolean {
 }
 
 export function isSecurityJobPosting(text: string): boolean {
-  if (isJobSeekerPost(text) || text.length < 40) return false;
+  if (isJobSeekerPost(text) || text.length < 20) return false;
   const t = normalizeTr(text);
-  const security = /(özel\s+g[üu]venlik|g[üu]venlik\s+görevlisi|g[üu]venlik\s+personeli|g[üu]venlik|ögg|ogg|silahl[ıi]|silahs[ıi]z|5188|kimlikli|sertifikal[ıi])/.test(t);
-  const hiring = /(aran[ıi]yor|al[ıi]nacak|al[ıi]m[ıi]|al[ıi]n[ıi]cakt[ıi]r|ihtiya[çc]|personel|eleman|tak[ıi]m\s+arkada[şs][ıi]|görevlisi|bay|bayan|bay\s*\/\s*bayan|bay-bayan)/.test(t);
-  const details = /(?:0|\+90)?5\d{9}|maa[şs]|[üu]cret|vardiya|servis|yemek|sgk|başvuru|ileti[şs]im|proje|avm|site|fabrika|depo|hastane|metro/.test(t);
-  return security && (hiring || details);
+  const security = /(özel\s+g[üu]venlik|g[üu]venlik\s+i[şs]\s+ilan|g[üu]venlik\s+eleman|g[üu]venlik\s+görev|g[üu]venlik\s+görevlisi|g[üu]venlik\s+personeli|g[üu]venlik|ögg|ogg|silahl[ıi]|silahs[ıi]z|5188|kimlikli|sertifikal[ıi]|koruma\s+görev)/.test(t);
+  if (!security) return false;
+
+  const hiring = /(aran[ıi]yor|al[ıi]nacak|al[ıi]m[ıi]|al[ıi]n[ıi]cakt[ıi]r|ihtiya[çc]|personel|eleman|tak[ıi]m|görevlisi|g[öo]rev|ba[şs]vuru|başvur|cv|ileti[şs]im|wp|whatsapp|dm|özelden)/.test(t);
+  const salary = /(?:maa[şs]|[üu]cret|hakedi[şs]|ayl[ıi]k|\d{2,3}\s*bin|\d{1,3}[.,]\d{3}\s*(?:tl|₺|lira)?|asgari\s+[üu]cret|net\s+maa[şs])/.test(t);
+  const details = /(?:0|\+90)?5\d{9}|vardiya|servis|yemek|sgk|proje|avm|site|fabrika|depo|hastane|metro|bay|bayan|erkek|kad[ıi]n/.test(t);
+
+  return hiring || salary || details;
 }
 
 export function extractWorkType(text: string): string {

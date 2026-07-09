@@ -79,36 +79,29 @@ function matchesTargetCities(
   const plain = text.toLocaleLowerCase("tr-TR");
   const cityNorm = (location.city ?? "").toLocaleLowerCase("tr-TR");
   const displayNorm = (location.display ?? "").toLocaleLowerCase("tr-TR");
-  return targets.some((raw) => {
+  const matches = targets.some((raw) => {
     const t = raw.trim().toLocaleLowerCase("tr-TR");
     if (!t) return false;
     return plain.includes(t) || cityNorm.includes(t) || t.includes(cityNorm)
       || displayNorm.includes(t) || t.includes(displayNorm);
   });
+  if (matches) return true;
+  // Konum çıkarılamadıysa bölgesel kanaldaki ilanları yine geçir
+  if (!location.city && !location.district) return true;
+  return false;
 }
 
 function createDuplicateHash(text: string, location: ParsedLocation, postedAt?: Date): string {
   const phone = extractPhone(text);
   const city = location.city ?? "";
+  const district = location.district ?? "";
   const dateKey = postedAt ? postedAt.toISOString().slice(0, 10) : "";
   const title = normalizeText(extractTitle(text) ?? "").slice(0, 80);
   const normalized = normalizeText(text).slice(0, 250);
   if (phone) {
-    return crypto.createHash("sha256").update(`tel:${phone}|${city}|${dateKey}`).digest("hex");
+    return crypto.createHash("sha256").update(`tel:${phone}|${city}|${district}|${dateKey}|${normalized.slice(0, 120)}`).digest("hex");
   }
-  return crypto.createHash("sha256").update(`${city}|${dateKey}|${title}|${normalized.slice(0, 100)}`).digest("hex");
-}
-
-// Aynı telefona sahip aktif ilan var mı? (gruplar arası çift kayıt engeli)
-async function findActiveListingByPhone(phone: string): Promise<number | null> {
-  const rows = await db.select({ id: listingsTable.id })
-    .from(listingsTable)
-    .where(and(
-      eq(listingsTable.applyUrl, `tel:${phone}`),
-      eq(listingsTable.status, "active"),
-    ))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return crypto.createHash("sha256").update(`${city}|${district}|${dateKey}|${title}|${normalized.slice(0, 100)}`).digest("hex");
 }
 
 async function findDuplicateImported(hash: string, sourceId?: number, externalId?: string): Promise<boolean> {
@@ -274,7 +267,8 @@ function listingExpiryFrom(postedAt?: Date): Date {
 }
 
 function isChatMessage(text: string): boolean {
-  if (text.length > 300) return false;
+  if (isSecurityJobPosting(text)) return false;
+  if (text.length > 500) return false;
   const lower = normalizeText(text);
   return CHAT_SKIP_KEYWORDS.some(kw => lower.includes(kw));
 }
@@ -488,28 +482,6 @@ async function processMessage(
       ...(postedAt ? { createdAt: postedAt } : {}),
     });
     return "skipped";
-  }
-
-  const existingListingId = phone ? await findActiveListingByPhone(phone) : null;
-  if (existingListingId) {
-    await db.update(listingsTable).set({
-      title: title ?? "Güvenlik Personeli Aranıyor",
-      city,
-      salary: salary ?? undefined,
-      description: text,
-      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
-      status: "active",
-      isActive: true,
-      updatedAt: now,
-      lastSeenAt: now,
-      sourceUrl,
-      rawText: text,
-      ...(postedAt ? { createdAt: postedAt, publishedAt: postedAt, expiresAt: listingExpiryFrom(postedAt) } : {}),
-    }).where(eq(listingsTable.id, existingListingId));
-    await db.update(importedPostsTable)
-      .set({ status: "approved" })
-      .where(eq(importedPostsTable.id, imported.id));
-    return "updated";
   }
 
   const [newListing] = await db.insert(listingsTable).values({
