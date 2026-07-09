@@ -31,5 +31,9 @@ export const sourcesTable = pgTable("sources", {
   lastScanErrors: integer("last_scan_errors").notNull().default(0),
   /** İlk 30 gün taraması ilerlemesi (1–100) */
   initialScanProgress: integer("initial_scan_progress").notNull().default(0),
+  /** backward = 30 gün sınırına git, forward = eskiden yeniye işle */
+  initialScanPhase: text("initial_scan_phase"),
+  initialScanAnchorId: text("initial_scan_anchor_id"),
+  initialScanTopId: text("initial_scan_top_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

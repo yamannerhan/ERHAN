@@ -192,37 +192,45 @@ export async function getScanPhase(): Promise<"initial" | "incremental"> {
   return (await hasIncompleteInitialScan()) ? "initial" : "incremental";
 }
 
-function computeInitialProgress(
-  current: number,
-  messages: ChannelMessage[],
-  reachedCutoff: boolean,
-  noMoreMessages: boolean,
-  channelOlderThanCutoff: boolean,
-  initialComplete: boolean,
-): number {
-  if (initialComplete) return 100;
-  let next = Math.max(current, 1);
+type InitialScanPhase = "backward" | "forward";
 
-  if (reachedCutoff) next = Math.max(next, 95);
+const CONNECTION_ERR =
+  "Telegram hesabı bu kaynağı okuyamadı: Telegram hesabı bağlı değil veya oturum yenilenemedi. " +
+  "Admin → Telegram Hesabı sekmesinden bağlayın.";
 
-  let oldestMs: number | null = null;
-  for (const m of messages) {
-    if (m.postedAt) {
-      const t = m.postedAt.getTime();
-      if (oldestMs == null || t < oldestMs) oldestMs = t;
-    }
-  }
-  if (oldestMs != null) {
-    const ageMs = Date.now() - oldestMs;
-    const byAge = Math.min(99, Math.max(1, Math.floor((ageMs / INITIAL_SCAN_MS) * 100)));
-    next = Math.max(next, byAge);
-  } else if (messages.length > 0) {
-    next = Math.min(99, next + 2);
-  }
+function resolveInitialPhase(source: typeof sourcesTable.$inferSelect): InitialScanPhase {
+  if (source.initialScanDone) return "forward";
+  if (source.initialScanPhase === "forward") return "forward";
+  return "backward";
+}
 
-  if (noMoreMessages && channelOlderThanCutoff) next = Math.max(next, 99);
+function mergeIdRange(anchor: number, top: number, batchMin: number, batchMax: number): { anchor: number; top: number } {
+  let a = anchor;
+  let t = top;
+  if (batchMin > 0 && (a === 0 || batchMin < a)) a = batchMin;
+  if (batchMax > 0 && batchMax > t) t = batchMax;
+  return { anchor: a, top: t };
+}
 
-  return Math.min(99, Math.max(1, next));
+function computeBackwardProgress(oldestPostedAt: Date | null | undefined, current: number): number {
+  if (!oldestPostedAt) return Math.max(1, current);
+  const ageMs = Date.now() - oldestPostedAt.getTime();
+  const pct = 1 + Math.floor((Math.min(ageMs, INITIAL_SCAN_MS) / INITIAL_SCAN_MS) * 18);
+  return Math.min(20, Math.max(current, pct));
+}
+
+function computeForwardProgress(anchorId: number, topId: number, lastProcessedId: number): number {
+  if (topId <= 0 || anchorId <= 0) return 21;
+  if (topId <= anchorId) return 100;
+  const ratio = Math.max(0, Math.min(1, (lastProcessedId - anchorId) / (topId - anchorId)));
+  return Math.min(99, Math.max(21, 20 + Math.floor(ratio * 79)));
+}
+
+async function patchSourceProgress(
+  sourceId: number,
+  patch: Partial<typeof sourcesTable.$inferInsert>,
+): Promise<void> {
+  await db.update(sourcesTable).set(patch).where(eq(sourcesTable.id, sourceId));
 }
 
 async function deleteListingsForSource(source: typeof sourcesTable.$inferSelect): Promise<number> {
@@ -645,81 +653,166 @@ async function releaseSourceScanLock(sourceId: number): Promise<void> {
   await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, sourceId));
 }
 
+async function fetchWithReconnect(
+  username: string,
+  options: Parameters<typeof fetchChannelMessages>[1],
+): Promise<Awaited<ReturnType<typeof fetchChannelMessages>>> {
+  try {
+    return await fetchChannelMessages(username, options);
+  } catch (firstErr) {
+    logger.warn({ err: firstErr, username }, "scraper: fetch failed, reconnect deneniyor");
+    const ok = await ensureTelegramConnected(5);
+    if (!ok) throw firstErr;
+    return fetchChannelMessages(username, options);
+  }
+}
+
 async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
   const stats: ScanStats = { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: parseInt(source.lastTelegramMessageId ?? "0", 10) || 0 };
   const username = extractTelegramUsername(source.url);
   if (!username) {
-    await db.update(sourcesTable)
-      .set({ lastError: "Geçersiz Telegram kanal linki. Örnek: https://t.me/kanal_adi" })
-      .where(eq(sourcesTable.id, source.id));
+    await patchSourceProgress(source.id, { lastError: "Geçersiz Telegram kanal linki. Örnek: https://t.me/kanal_adi", isScanning: false });
     return stats;
   }
 
-  const lastId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
-  const scanOffset = parseInt(source.initialScanOffsetId ?? "0", 10) || 0;
   const isInitialScan = !source.initialScanDone;
+  const phase = resolveInitialPhase(source);
+  let lastId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
+  const scanOffset = parseInt(source.initialScanOffsetId ?? "0", 10) || 0;
+  let anchorId = parseInt(source.initialScanAnchorId ?? "0", 10) || 0;
+  let topId = parseInt(source.initialScanTopId ?? "0", 10) || 0;
 
-  await ensureTelegramConnected();
-  const gramConnected = isClientConnected();
-
+  const gramConnected = await ensureTelegramConnected(4);
   logger.info(
     `scraper: @${username} ${isInitialScan
-      ? `ilk tarama (${INITIAL_SCAN_DAYS}g, offset=${scanOffset})`
+      ? `ilk tarama [${phase}] %${source.initialScanProgress ?? 1}`
       : `yeni mesajlar (id>${lastId})`} gramjs=${gramConnected}`,
   );
 
-  const GRAMJS_REQUIRED_MSG =
-    "Telegram hesabı bağlı değil — Admin → Telegram Hesabı sekmesinden giriş yapın. " +
-    "Önizlemesi kapalı kanallar için hesap bağlantısı zorunludur.";
-
   if (!gramConnected) {
-    await db.update(sourcesTable)
-      .set({
-        lastCheckedAt: new Date(),
-        lastError: GRAMJS_REQUIRED_MSG,
-        isScanning: false,
-        lastScanMessagesRead: 0,
-        lastScanFound: 0,
-        lastScanAdded: 0,
-        lastScanDuplicates: 0,
-        lastScanErrors: 0,
-      })
-      .where(eq(sourcesTable.id, source.id));
+    await patchSourceProgress(source.id, {
+      lastCheckedAt: new Date(),
+      lastError: CONNECTION_ERR,
+      isScanning: false,
+      lastScanMessagesRead: 0,
+      lastScanFound: 0,
+      lastScanAdded: 0,
+      lastScanDuplicates: 0,
+      lastScanErrors: 0,
+    });
     return stats;
   }
 
+  await patchSourceProgress(source.id, { lastError: null, isScanning: true });
+
+  // ── Aşama 1: 30 gün sınırına geri git (mesaj işleme yok) ──
+  if (isInitialScan && phase === "backward") {
+    let result;
+    try {
+      result = await fetchWithReconnect(username, {
+        maxAgeDays: INITIAL_SCAN_DAYS,
+        offsetId: scanOffset,
+        maxPages: PAGES_PER_CYCLE,
+      });
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
+      throw e;
+    }
+
+    const merged = mergeIdRange(anchorId, topId, result.minIdInBatch, result.maxIdInBatch);
+    anchorId = merged.anchor;
+    topId = merged.top;
+
+    let oldestPostedAt: Date | undefined;
+    for (const m of result.messages) {
+      if (m.postedAt && (!oldestPostedAt || m.postedAt < oldestPostedAt)) oldestPostedAt = m.postedAt;
+    }
+
+    const progress = computeBackwardProgress(oldestPostedAt, source.initialScanProgress ?? 1);
+    const cutoffDate = new Date(Date.now() - INITIAL_SCAN_MS);
+    const channelOlderThanCutoff = oldestPostedAt != null && oldestPostedAt <= cutoffDate;
+    const discoveryComplete = result.reachedCutoff
+      || (result.noMoreMessages && (channelOlderThanCutoff || result.messages.length === 0));
+
+    stats.messagesRead = result.messages.length;
+
+    if (discoveryComplete) {
+      const forwardStart = anchorId > 0 ? anchorId - 1 : 0;
+      if (anchorId === 0 && topId === 0) {
+        await patchSourceProgress(source.id, {
+          lastCheckedAt: new Date(),
+          initialScanDone: true,
+          initialScanPhase: null,
+          initialScanProgress: 100,
+          initialScanOffsetId: null,
+          isScanning: false,
+          lastError: "Kanalda son 30 gün içinde metin mesajı bulunamadı.",
+        });
+        return stats;
+      }
+
+      await patchSourceProgress(source.id, {
+        lastCheckedAt: new Date(),
+        initialScanPhase: "forward",
+        initialScanAnchorId: String(anchorId),
+        initialScanTopId: String(topId),
+        initialScanOffsetId: null,
+        lastTelegramMessageId: String(forwardStart),
+        initialScanProgress: Math.max(progress, 20),
+        lastScanMessagesRead: stats.messagesRead,
+        isScanning: false,
+        lastError: null,
+      });
+      logger.info({ username, anchorId, topId }, "scraper: 30 gün sınırına ulaşıldı, eski→yeni tarama başlıyor");
+      return stats;
+    }
+
+    await patchSourceProgress(source.id, {
+      lastCheckedAt: new Date(),
+      initialScanOffsetId: result.nextOffsetId > 0 ? String(result.nextOffsetId) : source.initialScanOffsetId,
+      initialScanAnchorId: anchorId > 0 ? String(anchorId) : source.initialScanAnchorId,
+      initialScanTopId: topId > 0 ? String(topId) : source.initialScanTopId,
+      initialScanProgress: progress,
+      lastScanMessagesRead: stats.messagesRead,
+      isScanning: false,
+      lastError: null,
+    });
+    return stats;
+  }
+
+  // ── Aşama 2: 30 gün sınırından yeniye doğru işle ──
   let messages: ChannelMessage[] = [];
-  let reachedCutoff = false;
   let noMoreMessages = false;
-  let nextOffsetId = scanOffset;
 
   try {
-    const result = await fetchChannelMessages(username, isInitialScan
-      ? { maxAgeDays: INITIAL_SCAN_DAYS, offsetId: scanOffset, maxPages: PAGES_PER_CYCLE }
-      : { minMessageId: lastId, maxPages: 15 },
-    );
+    const fetchOpts = isInitialScan && phase === "forward"
+      ? { minMessageId: lastId, maxPages: PAGES_PER_CYCLE }
+      : { minMessageId: lastId, maxPages: 15 };
+    const result = await fetchWithReconnect(username, fetchOpts);
     messages = result.messages;
-    reachedCutoff = result.reachedCutoff;
     noMoreMessages = result.noMoreMessages;
-    nextOffsetId = result.nextOffsetId;
+    if (isInitialScan && phase === "forward") {
+      anchorId = parseInt(source.initialScanAnchorId ?? "0", 10) || anchorId;
+      topId = parseInt(source.initialScanTopId ?? "0", 10) || topId;
+    }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) {
-      bumpScanBackoffOnRateLimit();
-    }
+    if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
     throw e;
   }
 
   stats.messagesRead = messages.length;
   let maxId = lastId;
+  let processedCount = 0;
 
   for (const msg of messages) {
     const msgId = parseInt(msg.id, 10);
     if (!Number.isFinite(msgId)) continue;
-    if (!isInitialScan && msgId <= lastId) continue;
+    if (msgId <= lastId) continue;
     if (msgId > maxId) maxId = msgId;
     try {
-      const result = await processMessage(
+      const procResult = await processMessage(
         source,
         `${username}_${msg.id}`,
         msg.text,
@@ -727,87 +820,65 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         msg.postedAt,
         isInitialScan,
       );
-      if (result === "added") { stats.added++; stats.found++; }
-      else if (result === "updated") { stats.found++; }
-      else       if (result === "duplicate") { stats.duplicates++; stats.found++; }
+      if (procResult === "added") { stats.added++; stats.found++; }
+      else if (procResult === "updated") { stats.found++; }
+      else if (procResult === "duplicate") { stats.duplicates++; stats.found++; }
     } catch (e) {
       stats.errors++;
       logger.error(e, `scraper: msg ${msg.id} @${username}`);
+    }
+    processedCount++;
+    if (isInitialScan && phase === "forward" && (processedCount % 3 === 0 || processedCount === messages.length)) {
+      const livePct = computeForwardProgress(anchorId, topId, msgId);
+      await patchSourceProgress(source.id, { initialScanProgress: livePct });
     }
     if (MESSAGE_PROCESS_DELAY_MS > 0) await sleep(MESSAGE_PROCESS_DELAY_MS);
   }
 
   stats.maxId = maxId;
 
-  let oldestPostedAt: Date | undefined;
-  for (const m of messages) {
-    if (m.postedAt && (!oldestPostedAt || m.postedAt < oldestPostedAt)) {
-      oldestPostedAt = m.postedAt;
-    }
-  }
-  const cutoffDate = new Date(Date.now() - INITIAL_SCAN_MS);
-  const channelOlderThanCutoff = oldestPostedAt != null && oldestPostedAt <= cutoffDate;
-  // Boş sonuçta asla ilk taramayı bitirme — muhtemelen bağlantı/kilitleme sorunu
-  const initialComplete = isInitialScan && messages.length > 0 && (
-    reachedCutoff ||
-    (noMoreMessages && channelOlderThanCutoff)
+  const initialComplete = isInitialScan && phase === "forward" && (
+    (topId > 0 && maxId >= topId) ||
+    (messages.length === 0 && lastId >= topId - 1 && topId > 0) ||
+    (noMoreMessages && maxId >= topId - 1 && topId > 0)
   );
 
-  const prevProgress = source.initialScanProgress ?? 0;
-  const scanProgress = isInitialScan
-    ? computeInitialProgress(prevProgress, messages, reachedCutoff, noMoreMessages, channelOlderThanCutoff, initialComplete)
+  const scanProgress = isInitialScan && phase === "forward"
+    ? (initialComplete ? 100 : computeForwardProgress(anchorId, topId, maxId))
     : 100;
 
   let scanError: string | null = null;
-  if (messages.length === 0) {
-    if (isInitialScan && !reachedCutoff && !noMoreMessages) {
-      scanError = "Mesaj alınamadı — sonraki döngüde offset'ten devam edilecek.";
-    } else if (isInitialScan && noMoreMessages) {
-      scanError = "Kanalda son 30 gün içinde metin mesajı bulunamadı.";
-    }
+  if (messages.length === 0 && !initialComplete && isInitialScan && phase === "forward") {
+    scanError = null;
+  } else if (messages.length === 0 && !isInitialScan) {
+    scanError = null;
   }
 
-  await db.update(sourcesTable)
-    .set({
-      lastCheckedAt: new Date(),
-      lastTelegramMessageId: initialComplete && maxId > lastId
-        ? String(maxId)
-        : (isInitialScan ? source.lastTelegramMessageId : (maxId > lastId ? String(maxId) : source.lastTelegramMessageId)),
-      initialScanOffsetId: initialComplete
-        ? null
-        : (nextOffsetId > 0 ? String(nextOffsetId) : (scanOffset > 0 ? String(scanOffset) : source.initialScanOffsetId)),
-      initialScanDone: initialComplete ? true : source.initialScanDone,
-      initialScanProgress: initialComplete ? 100 : (isInitialScan ? scanProgress : 100),
-      lastScanPublished: stats.added,
-      lastScanMessagesRead: stats.messagesRead,
-      lastScanFound: stats.found,
-      lastScanAdded: stats.added,
-      lastScanDuplicates: stats.duplicates,
-      lastScanErrors: stats.errors,
-      totalImported: (source.totalImported ?? 0) + stats.added,
-      lastError: scanError,
-      isScanning: false,
-    })
-    .where(eq(sourcesTable.id, source.id));
+  await patchSourceProgress(source.id, {
+    lastCheckedAt: new Date(),
+    lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
+    initialScanOffsetId: initialComplete ? null : source.initialScanOffsetId,
+    initialScanDone: initialComplete ? true : source.initialScanDone,
+    initialScanPhase: initialComplete ? null : (isInitialScan ? "forward" : source.initialScanPhase),
+    initialScanProgress: initialComplete ? 100 : (isInitialScan ? scanProgress : 100),
+    lastScanPublished: stats.added,
+    lastScanMessagesRead: stats.messagesRead,
+    lastScanFound: stats.found,
+    lastScanAdded: stats.added,
+    lastScanDuplicates: stats.duplicates,
+    lastScanErrors: stats.errors,
+    totalImported: (source.totalImported ?? 0) + stats.added,
+    lastError: scanError,
+    isScanning: false,
+  });
 
   logger.info({
-    source: source.name,
-    username,
-    messagesRead: stats.messagesRead,
-    found: stats.found,
-    added: stats.added,
-    duplicates: stats.duplicates,
-    errors: stats.errors,
-    lastMessageId: maxId,
-    initialComplete,
-    nextOffsetId,
-    scanProgress,
+    source: source.name, username, phase,
+    messagesRead: stats.messagesRead, added: stats.added,
+    maxId, topId, anchorId, scanProgress, initialComplete,
   }, `scraper: @${username} tarama özeti`);
 
-  if (initialComplete) {
-    void refreshScraperInterval().catch(() => {});
-  }
-
+  if (initialComplete) void refreshScraperInterval().catch(() => {});
   return stats;
 }
 
@@ -836,6 +907,14 @@ async function scanTelegramSources(
 
   const target = pickNextTelegramSource(telegramSources);
   if (!target) return;
+
+  // Sırada bekleyen kaynaklardaki eski bağlantı hatalarını temizle
+  const waiting = telegramSources.filter(s => s.active && !s.initialScanDone && s.id !== target.id);
+  for (const w of waiting) {
+    if (w.lastError?.includes("bağlı değil") || w.lastError?.includes("okuyamadı")) {
+      await patchSourceProgress(w.id, { lastError: "Sırada bekliyor…" });
+    }
+  }
 
   const fresh = await loadSourceById(target.id);
   if (!fresh?.active) return;
@@ -1028,6 +1107,9 @@ export async function resetAllTelegramBots(): Promise<{ deletedListings: number 
     initialScanOffsetId: null,
     initialScanDone: false,
     initialScanProgress: 1,
+    initialScanPhase: "backward",
+    initialScanAnchorId: null,
+    initialScanTopId: null,
     totalImported: 0,
     lastScanPublished: 0,
     lastScanMessagesRead: 0,
@@ -1064,6 +1146,9 @@ export async function resetSingleTelegramSource(sourceId: number): Promise<{ del
     initialScanOffsetId: null,
     initialScanDone: false,
     initialScanProgress: 1,
+    initialScanPhase: "backward",
+    initialScanAnchorId: null,
+    initialScanTopId: null,
     totalImported: 0,
     lastScanPublished: 0,
     lastScanMessagesRead: 0,
@@ -1092,6 +1177,9 @@ export async function triggerDeepRescan30Days(): Promise<void> {
     initialScanDone: false,
     initialScanOffsetId: null,
     initialScanProgress: 1,
+    initialScanPhase: "backward",
+    initialScanAnchorId: null,
+    initialScanTopId: null,
     lastTelegramMessageId: null,
     isScanning: false,
     lastError: null,

@@ -107,27 +107,40 @@ export async function initTelegramClient(): Promise<void> {
 }
 
 /** Sunucu yeniden başladığında veya bağlantı koptuğunda oturumu DB'den yeniden kurar. */
-export async function ensureTelegramConnected(): Promise<boolean> {
+export async function ensureTelegramConnected(retries = 3): Promise<boolean> {
   if (!API_ID || !API_HASH) return false;
 
-  if (client && currentState === "connected") {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    if (client && currentState === "connected") {
+      try {
+        if (await client.isUserAuthorized()) {
+          await client.getMe();
+          return true;
+        }
+      } catch {
+        currentState = "disconnected";
+        try { await client?.disconnect(); } catch { /* ignore */ }
+        client = null;
+      }
+    }
+
     try {
-      if (await client.isUserAuthorized()) return true;
-    } catch {
+      if (await restoreSessionFromDb()) {
+        await client!.getMe();
+        if (attempt > 0) logger.info("telegram-client: oturum yeniden bağlandı");
+        return true;
+      }
+    } catch (e) {
+      logger.warn({ err: e, attempt }, "telegram-client: ensureTelegramConnected failed");
       currentState = "disconnected";
+      client = null;
+    }
+
+    if (attempt < retries - 1) {
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     }
   }
-
-  try {
-    const ok = await restoreSessionFromDb();
-    if (ok) logger.info("telegram-client: oturum yeniden bağlandı");
-    return ok;
-  } catch (e) {
-    logger.warn({ err: e }, "telegram-client: ensureTelegramConnected failed");
-    currentState = "disconnected";
-    client = null;
-    return false;
-  }
+  return false;
 }
 
 export async function startAuth(phone: string): Promise<void> {
@@ -207,6 +220,8 @@ export interface FetchChannelResult {
   reachedCutoff: boolean;
   noMoreMessages: boolean;
   nextOffsetId: number;
+  minIdInBatch: number;
+  maxIdInBatch: number;
 }
 
 function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
@@ -259,7 +274,10 @@ export async function fetchChannelMessages(
   options: { minMessageId?: number; maxAgeDays?: number; offsetId?: number; maxPages?: number } = {},
 ): Promise<FetchChannelResult> {
   const fallbackOffset = options.offsetId ?? 0;
-  const empty: FetchChannelResult = { messages: [], reachedCutoff: false, noMoreMessages: false, nextOffsetId: fallbackOffset };
+  const empty: FetchChannelResult = {
+    messages: [], reachedCutoff: false, noMoreMessages: false,
+    nextOffsetId: fallbackOffset, minIdInBatch: 0, maxIdInBatch: 0,
+  };
   if (!client || !isClientConnected()) return empty;
 
   const minId = options.minMessageId ?? 0;
@@ -301,6 +319,8 @@ export async function fetchChannelMessages(
       reachedCutoff: false,
       noMoreMessages: true,
       nextOffsetId: 0,
+      minIdInBatch: results.length ? Math.min(...results.map(m => Number(m.id))) : 0,
+      maxIdInBatch: results.length ? Math.max(...results.map(m => Number(m.id))) : 0,
     };
   }
 
@@ -309,6 +329,8 @@ export async function fetchChannelMessages(
   const maxPages = options.maxPages ?? PAGES_PER_CYCLE;
   let reachedCutoff = false;
   let noMoreMessages = false;
+  let batchMinId = 0;
+  let batchMaxId = 0;
 
   for (let page = 0; page < maxPages; page++) {
     const batch = await withTelegramRetry(
@@ -324,6 +346,8 @@ export async function fetchChannelMessages(
     }
 
     for (const m of batch) {
+      if (batchMinId === 0 || m.id < batchMinId) batchMinId = m.id;
+      if (m.id > batchMaxId) batchMaxId = m.id;
       const ts = typeof m.date === "number" ? m.date * 1000 : 0;
       if (ts > 0 && ts < cutoffMs) {
         reachedCutoff = true;
@@ -356,6 +380,8 @@ export async function fetchChannelMessages(
     reachedCutoff,
     noMoreMessages,
     nextOffsetId: offsetId,
+    minIdInBatch: batchMinId,
+    maxIdInBatch: batchMaxId,
   };
 }
 

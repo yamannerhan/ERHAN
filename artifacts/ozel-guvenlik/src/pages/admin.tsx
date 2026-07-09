@@ -1237,6 +1237,7 @@ interface Source {
   isScanning?: boolean;
   initialScanOffsetId?: string | null;
   initialScanProgress?: number;
+  initialScanPhase?: string | null;
   createdAt: string;
 }
 
@@ -1440,7 +1441,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   useEffect(() => { void load(); }, []);
 
   useEffect(() => {
-    const ms = scanPhase === "initial" ? 10_000 : 60_000;
+    const ms = scanPhase === "initial" ? 3_000 : 30_000;
     const t = setInterval(() => { void load(); }, ms);
     return () => clearInterval(t);
   }, [scanPhase]);
@@ -1716,7 +1717,9 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     {s.isScanning && <span className="text-[10px] text-amber-400">Taranıyor…</span>}
                     {(s.lastScanAdded ?? 0) > 0 && <span className="text-[10px] text-green-400">Son: +{s.lastScanAdded} eklendi</span>}
                     {!s.initialScanDone && s.platform === "telegram" && (
-                      <span className="text-[10px] text-amber-400">30g tarama %{s.initialScanProgress ?? 1}</span>
+                      <span className="text-[10px] text-amber-400">
+                        {s.initialScanPhase === "forward" ? "Eski→yeni" : "30g geri"} %{s.initialScanProgress ?? 1}
+                      </span>
                     )}
                     {s.initialScanDone && s.platform === "telegram" && (
                       <span className="text-[10px] text-green-400">%100 tamam</span>
@@ -1727,6 +1730,9 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     )}
                     {s.lastCheckedAt && <span className="text-[10px] text-muted-foreground">Son tarama: {new Date(s.lastCheckedAt).toLocaleString("tr-TR")}</span>}
                   </div>
+                  {s.lastError?.includes("Sırada bekliyor") && (
+                    <p className="text-[10px] text-muted-foreground mt-1">{s.lastError}</p>
+                  )}
                   {s.platform === "telegram" && !s.initialScanDone && (
                     <div className="mt-2">
                       <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
@@ -1760,7 +1766,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                       <p className="text-[10px] text-red-300">Sahibinden erişimi engellendi. Kaynak geçici olarak pasif.</p>
                     </div>
                   )}
-                  {s.lastError && s.status !== "blocked" && (
+                  {s.lastError && s.status !== "blocked" && !s.lastError.includes("Sırada bekliyor") && (
                     <div className="flex items-start gap-1 mt-1 bg-destructive/10 rounded p-1.5">
                       <AlertCircle className="w-3 h-3 text-destructive shrink-0 mt-0.5" />
                       <p className="text-[10px] text-destructive">{s.lastError}</p>
