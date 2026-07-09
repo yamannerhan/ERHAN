@@ -1,6 +1,7 @@
 import { db, listingsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
-import { SEO_BASE_URL, toSlug, ALL_LOCATIONS } from "./seo-render";
+import { and, desc, eq } from "drizzle-orm";
+import { ALL_LOCATIONS, SEO_BASE_URL, toSlug } from "./seo-render";
+import { logger } from "./logger";
 
 const SEO_KEYWORD_SLUGS = [
   "silahli-guvenlik-is-ilanlari",
@@ -24,8 +25,46 @@ const SEO_BLOG_SLUGS = [
   "kocaeli-gebze-guvenlik-is-ilanlari",
 ];
 
-export async function generateSitemapXml(): Promise<string> {
-  const staticUrls = [
+type SitemapEntry = {
+  url: string;
+  priority: string;
+  changefreq: string;
+  lastmod?: string;
+};
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function formatLastmod(value?: Date | string | null): string {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString();
+  return date.toISOString();
+}
+
+function buildSitemapXml(entries: SitemapEntry[]): string {
+  const body = entries.map((entry) => {
+    const lastmod = formatLastmod(entry.lastmod);
+    return [
+      "  <url>",
+      `    <loc>${escapeXml(entry.url)}</loc>`,
+      `    <lastmod>${lastmod}</lastmod>`,
+      `    <changefreq>${entry.changefreq}</changefreq>`,
+      `    <priority>${entry.priority}</priority>`,
+      "  </url>",
+    ].join("\n");
+  }).join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`;
+}
+
+function getStaticSitemapEntries(): SitemapEntry[] {
+  const staticUrls: SitemapEntry[] = [
     { url: `${SEO_BASE_URL}/`, priority: "1.0", changefreq: "daily" },
     { url: `${SEO_BASE_URL}/ilanlar`, priority: "0.9", changefreq: "daily" },
     { url: `${SEO_BASE_URL}/blog`, priority: "0.8", changefreq: "weekly" },
@@ -35,50 +74,58 @@ export async function generateSitemapXml(): Promise<string> {
     { url: `${SEO_BASE_URL}/destek`, priority: "0.5", changefreq: "monthly" },
   ];
 
-  const cityUrls = ALL_LOCATIONS.map(name => ({
+  const cityUrls = ALL_LOCATIONS.map((name) => ({
     url: `${SEO_BASE_URL}/${toSlug(name)}-ozel-guvenlik-is-ilanlari`,
     priority: "0.8",
     changefreq: "daily",
   }));
 
-  const keywordUrls = SEO_KEYWORD_SLUGS.map(slug => ({
+  const keywordUrls = SEO_KEYWORD_SLUGS.map((slug) => ({
     url: `${SEO_BASE_URL}/${slug}`,
     priority: "0.75",
     changefreq: "weekly",
   }));
 
-  const companyUrls = SEO_COMPANY_SLUGS.map(slug => ({
+  const companyUrls = SEO_COMPANY_SLUGS.map((slug) => ({
     url: `${SEO_BASE_URL}/${slug}-is-ilanlari`,
     priority: "0.75",
     changefreq: "weekly",
   }));
 
-  const blogUrls = SEO_BLOG_SLUGS.map(slug => ({
+  const blogUrls = SEO_BLOG_SLUGS.map((slug) => ({
     url: `${SEO_BASE_URL}/blog/${slug}`,
     priority: "0.7",
     changefreq: "monthly",
   }));
 
-  let listingUrls: { url: string; priority: string; changefreq: string; lastmod: string }[] = [];
+  return [...staticUrls, ...cityUrls, ...keywordUrls, ...companyUrls, ...blogUrls];
+}
+
+export function generateStaticSitemapXml(): string {
+  return buildSitemapXml(getStaticSitemapEntries());
+}
+
+export async function generateSitemapXml(): Promise<string> {
+  const entries = getStaticSitemapEntries();
+
   try {
     const rows = await db
       .select({ id: listingsTable.id, updatedAt: listingsTable.updatedAt })
       .from(listingsTable)
-      .where(eq(listingsTable.status, "active"))
+      .where(and(eq(listingsTable.status, "active"), eq(listingsTable.isActive, true)))
       .orderBy(desc(listingsTable.updatedAt));
-    listingUrls = rows.map(r => ({
-      url: `${SEO_BASE_URL}/ilan/${r.id}`,
-      priority: "0.8",
-      changefreq: "daily",
-      lastmod: (r.updatedAt ?? new Date()).toISOString(),
-    }));
-  } catch { /* ignore */ }
 
-  const all = [...staticUrls, ...cityUrls, ...keywordUrls, ...companyUrls, ...blogUrls, ...listingUrls];
-  const entries = all.map(u => {
-    const lm = "lastmod" in u ? u.lastmod : new Date().toISOString();
-    return `  <url>\n    <loc>${u.url}</loc>\n    <lastmod>${lm}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`;
-  }).join("\n");
+    for (const row of rows) {
+      entries.push({
+        url: `${SEO_BASE_URL}/ilan/${row.id}`,
+        priority: "0.8",
+        changefreq: "daily",
+        lastmod: formatLastmod(row.updatedAt),
+      });
+    }
+  } catch (err) {
+    logger.warn({ err }, "Sitemap listing query failed; serving static URLs only");
+  }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>`;
+  return buildSitemapXml(entries);
 }

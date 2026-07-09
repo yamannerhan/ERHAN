@@ -6,11 +6,31 @@ import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL } from "./lib/seo-render";
-import { generateSitemapXml } from "./lib/seo-sitemap";
+import { generateSitemapXml, generateStaticSitemapXml } from "./lib/seo-sitemap";
 
 const app: Express = express();
 
+function sendXml(res: Response, xml: string): void {
+  const body = Buffer.from(xml, "utf-8");
+  res
+    .setHeader("Content-Type", "application/xml; charset=utf-8")
+    .setHeader("Content-Length", body.length)
+    .setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600")
+    .setHeader("X-Content-Type-Options", "nosniff")
+    .status(200)
+    .send(body);
+}
+
 /* ── Express app ─────────────────────────────────────────────────────────── */
+
+app.use((req, res, next) => {
+  const host = (req.headers.host ?? "").split(":")[0]?.toLowerCase() ?? "";
+  if (host.startsWith("www.")) {
+    res.redirect(301, `${SEO_BASE_URL}${req.originalUrl}`);
+    return;
+  }
+  next();
+});
 
 app.use((req, _res, next) => {
   logger.info({ method: req.method, path: req.path, url: req.url }, "Incoming request");
@@ -44,18 +64,18 @@ app.get(["/health", "/api/health", "/api/healthz"], (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-app.get("/sitemap.xml", async (_req, res) => {
-  try {
-    const xml = await generateSitemapXml();
-    res
-      .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-      .setHeader("Pragma", "no-cache")
-      .setHeader("Expires", "0")
-      .type("application/xml")
-      .send(xml);
-  } catch {
-    res.status(500).type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><error/>`);
-  }
+app.get("/sitemap.xml", (req, res) => {
+  void (async () => {
+    try {
+      const xml = await generateSitemapXml();
+      sendXml(res, xml);
+    } catch (err) {
+      logger.error({ err, path: req.path, userAgent: req.headers["user-agent"] }, "Sitemap generation failed");
+      if (!res.headersSent) {
+        sendXml(res, generateStaticSitemapXml());
+      }
+    }
+  })();
 });
 
 app.get("/robots.txt", (_req, res) => {
