@@ -29,5 +29,7 @@ export const sourcesTable = pgTable("sources", {
   lastScanAdded: integer("last_scan_added").notNull().default(0),
   lastScanDuplicates: integer("last_scan_duplicates").notNull().default(0),
   lastScanErrors: integer("last_scan_errors").notNull().default(0),
+  /** İlk 30 gün taraması ilerlemesi (1–100) */
+  initialScanProgress: integer("initial_scan_progress").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { isClientConnected } from "../services/telegram-client";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
@@ -49,10 +49,13 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       telegramChatId: s.telegramChatId ?? null,
       lastTelegramMessageId: s.lastTelegramMessageId ?? null,
       initialScanOffsetId: s.initialScanOffsetId ?? null,
+      initialScanProgress: s.initialScanProgress ?? 0,
       createdAt: s.createdAt.toISOString(),
     })),
     telegramTokenSet: isTelegramTokenSet(),
     telegramGramJsConnected: isClientConnected(),
+    effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
+    scanPhase: await getScanPhase(),
   });
 });
 
@@ -138,42 +141,19 @@ router.delete("/admin/sources/:id", authMiddleware, requireAdmin, async (req, re
   res.json({ success: true });
 });
 
-// ── Reset bots & re-scan ──────────────────────────────────────────
-// Yayında olan ilanları SİLMEZ — sadece içe aktarma geçmişini ve tarama imlecini sıfırlar.
+// Botları sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara.
 router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
-  await db.delete(pendingJobsTable);
-  await db.delete(importedPostsTable);
-
-  const telegramSources = await db.select().from(sourcesTable).where(eq(sourcesTable.platform, "telegram"));
-  for (const s of telegramSources) {
-    const cleanUrl = sanitizeTelegramUrl(s.url);
-    if (cleanUrl !== s.url) {
-      await db.update(sourcesTable).set({ url: cleanUrl }).where(eq(sourcesTable.id, s.id));
-    }
+  try {
+    const result = await resetAllTelegramBots();
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      message: `${result.deletedListings} bot ilanı silindi. Gruplar sırayla %1'den %100'e 30 gün taranacak.`,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: msg });
   }
-
-  await db.update(sourcesTable).set({
-    lastCheckedAt: null,
-    lastTelegramMessageId: null,
-    initialScanOffsetId: null,
-    initialScanDone: false,
-    totalImported: 0,
-    lastScanPublished: 0,
-    lastScanMessagesRead: 0,
-    lastScanFound: 0,
-    lastScanAdded: 0,
-    lastScanDuplicates: 0,
-    lastScanErrors: 0,
-    isScanning: false,
-    lastError: null,
-  }).where(eq(sourcesTable.platform, "telegram"));
-
-  void triggerRescan().catch(() => { /* hata logger içinde yakalanır */ });
-
-  res.json({
-    success: true,
-    message: "Tarama geçmişi sıfırlandı. Yayındaki ilanlar korundu; son 30 gün yeniden taranıyor.",
-  });
 });
 
 router.post("/admin/sources/deep-rescan", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {

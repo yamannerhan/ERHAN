@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, adminSettingsTable } from "@workspace/db";
+import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable } from "@workspace/db";
 import { eq, and, isNotNull, lt, or, sql, inArray, like } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
@@ -150,6 +150,9 @@ const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
+const MESSAGE_PROCESS_DELAY_MS = 400;
+const INCREMENTAL_SCAN_INTERVAL_MIN = 30;
+const INITIAL_BACKFILL_INTERVAL_MIN = 3;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 10;
@@ -159,17 +162,79 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function hasIncompleteInitialScan(): Promise<boolean> {
+  const rows = await db.select({ id: sourcesTable.id })
+    .from(sourcesTable)
+    .where(and(
+      eq(sourcesTable.platform, "telegram"),
+      eq(sourcesTable.active, true),
+      eq(sourcesTable.initialScanDone, false),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
 async function getTelegramScanIntervalMinutes(): Promise<number> {
   try {
-    const [row] = await db.select({ m: adminSettingsTable.telegramScanIntervalMinutes }).from(adminSettingsTable).limit(1);
-    const configured = row?.m ?? 10;
-    const base = ALLOWED_SCAN_INTERVALS.includes(configured as typeof ALLOWED_SCAN_INTERVALS[number])
-      ? configured
-      : 10;
+    const incomplete = await hasIncompleteInitialScan();
+    const base = incomplete ? INITIAL_BACKFILL_INTERVAL_MIN : INCREMENTAL_SCAN_INTERVAL_MIN;
     return Math.max(base, scanBackoffMinutes);
   } catch {
-    return Math.max(10, scanBackoffMinutes);
+    return Math.max(INCREMENTAL_SCAN_INTERVAL_MIN, scanBackoffMinutes);
   }
+}
+
+export async function getEffectiveScanIntervalMinutes(): Promise<number> {
+  return getTelegramScanIntervalMinutes();
+}
+
+export async function getScanPhase(): Promise<"initial" | "incremental"> {
+  return (await hasIncompleteInitialScan()) ? "initial" : "incremental";
+}
+
+function computeInitialProgress(
+  current: number,
+  messages: ChannelMessage[],
+  reachedCutoff: boolean,
+  noMoreMessages: boolean,
+  channelOlderThanCutoff: boolean,
+  initialComplete: boolean,
+): number {
+  if (initialComplete) return 100;
+  let next = Math.max(current, 1);
+
+  if (reachedCutoff) next = Math.max(next, 95);
+
+  let oldestMs: number | null = null;
+  for (const m of messages) {
+    if (m.postedAt) {
+      const t = m.postedAt.getTime();
+      if (oldestMs == null || t < oldestMs) oldestMs = t;
+    }
+  }
+  if (oldestMs != null) {
+    const ageMs = Date.now() - oldestMs;
+    const byAge = Math.min(99, Math.max(1, Math.floor((ageMs / INITIAL_SCAN_MS) * 100)));
+    next = Math.max(next, byAge);
+  } else if (messages.length > 0) {
+    next = Math.min(99, next + 2);
+  }
+
+  if (noMoreMessages && channelOlderThanCutoff) next = Math.max(next, 99);
+
+  return Math.min(99, Math.max(1, next));
+}
+
+async function deleteListingsForSource(source: typeof sourcesTable.$inferSelect): Promise<number> {
+  const username = extractTelegramUsername(source.url);
+  const deleteConditions = [eq(listingsTable.sourceId, source.id)];
+  if (username) {
+    deleteConditions.push(like(listingsTable.sourceUrl, `%t.me/${username}/%`));
+  }
+  const deleted = await db.delete(listingsTable)
+    .where(or(...deleteConditions))
+    .returning({ id: listingsTable.id });
+  return deleted.length;
 }
 
 function bumpScanBackoffOnRateLimit(): void {
@@ -664,11 +729,12 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       );
       if (result === "added") { stats.added++; stats.found++; }
       else if (result === "updated") { stats.found++; }
-      else if (result === "duplicate") { stats.duplicates++; stats.found++; }
+      else       if (result === "duplicate") { stats.duplicates++; stats.found++; }
     } catch (e) {
       stats.errors++;
       logger.error(e, `scraper: msg ${msg.id} @${username}`);
     }
+    if (MESSAGE_PROCESS_DELAY_MS > 0) await sleep(MESSAGE_PROCESS_DELAY_MS);
   }
 
   stats.maxId = maxId;
@@ -686,6 +752,11 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     reachedCutoff ||
     (noMoreMessages && channelOlderThanCutoff)
   );
+
+  const prevProgress = source.initialScanProgress ?? 0;
+  const scanProgress = isInitialScan
+    ? computeInitialProgress(prevProgress, messages, reachedCutoff, noMoreMessages, channelOlderThanCutoff, initialComplete)
+    : 100;
 
   let scanError: string | null = null;
   if (messages.length === 0) {
@@ -706,6 +777,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         ? null
         : (nextOffsetId > 0 ? String(nextOffsetId) : (scanOffset > 0 ? String(scanOffset) : source.initialScanOffsetId)),
       initialScanDone: initialComplete ? true : source.initialScanDone,
+      initialScanProgress: initialComplete ? 100 : (isInitialScan ? scanProgress : 100),
       lastScanPublished: stats.added,
       lastScanMessagesRead: stats.messagesRead,
       lastScanFound: stats.found,
@@ -729,9 +801,30 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     lastMessageId: maxId,
     initialComplete,
     nextOffsetId,
+    scanProgress,
   }, `scraper: @${username} tarama özeti`);
 
+  if (initialComplete) {
+    void refreshScraperInterval().catch(() => {});
+  }
+
   return stats;
+}
+
+/** Sıradaki tek Telegram kaynağını seç: önce ilk taraması bitmemiş (id sırası), sonra round-robin. */
+function pickNextTelegramSource(
+  telegramSources: Array<typeof sourcesTable.$inferSelect>,
+): typeof sourcesTable.$inferSelect | null {
+  const active = telegramSources.filter(s => s.active);
+  if (!active.length) return null;
+
+  const byOrder = [...active].sort((a, b) => a.id - b.id);
+  const incomplete = byOrder.filter(s => !s.initialScanDone);
+  if (incomplete.length > 0) return incomplete[0] ?? null;
+
+  return [...byOrder].sort(
+    (a, b) => (a.lastCheckedAt?.getTime() ?? 0) - (b.lastCheckedAt?.getTime() ?? 0),
+  )[0] ?? null;
 }
 
 async function scanTelegramSources(
@@ -740,56 +833,53 @@ async function scanTelegramSources(
 ): Promise<void> {
   await releaseStaleScanLocks();
   const now = new Date();
-  const sorted = [...telegramSources].sort((a, b) => {
-    if (!a.initialScanDone && b.initialScanDone) return -1;
-    if (a.initialScanDone && !b.initialScanDone) return 1;
-    return (a.lastCheckedAt?.getTime() ?? 0) - (b.lastCheckedAt?.getTime() ?? 0);
-  });
+
+  const target = pickNextTelegramSource(telegramSources);
+  if (!target) return;
+
+  const fresh = await loadSourceById(target.id);
+  if (!fresh?.active) return;
+
+  if (fresh.isScanning) {
+    logger.info(`scraper: kaynak #${fresh.id} "${fresh.name}" kilitli, atlanıyor`);
+    return;
+  }
+
+  const username = extractTelegramUsername(fresh.url);
+  const queueIndex = telegramSources.filter(s => s.active).sort((a, b) => a.id - b.id);
+  const pos = queueIndex.findIndex(s => s.id === fresh.id) + 1;
+  logger.info(
+    `scraper: sıra → kaynak #${fresh.id} "${fresh.name}" @${username ?? "?"} ` +
+    `(${pos}/${queueIndex.length}, ilk=${!fresh.initialScanDone}, %${fresh.initialScanProgress ?? 0}, offset=${fresh.initialScanOffsetId ?? "0"})`,
+  );
+
+  const locked = await acquireSourceScanLock(fresh.id);
+  if (!locked) return;
 
   let cycleAdded = 0;
   let cycleErrors = 0;
 
-  for (const source of sorted) {
-    const fresh = await loadSourceById(source.id);
-    if (!fresh?.active) continue;
-
-    if (fresh.isScanning) {
-      logger.info(`scraper: kaynak #${fresh.id} "${fresh.name}" kilitli, atlanıyor`);
-      continue;
-    }
-
-    const username = extractTelegramUsername(fresh.url);
-    logger.info(`scraper: sıra → kaynak #${fresh.id} "${fresh.name}" @${username ?? "?"} (ilk=${!fresh.initialScanDone}, offset=${fresh.initialScanOffsetId ?? "0"})`);
-
-    const locked = await acquireSourceScanLock(fresh.id);
-    if (!locked) continue;
-
-    try {
-      const stats = await checkTelegramSource(fresh);
-      cycleAdded += stats.added;
-      cycleErrors += stats.errors;
-    } catch (e) {
-      cycleErrors++;
-      const errMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(`scraper: telegram source ${fresh.id} (@${username ?? "?"}) failed: ${errMsg}`);
-      await db.update(sourcesTable)
-        .set({
-          lastError: errMsg.slice(0, 500),
-          lastCheckedAt: now,
-          isScanning: false,
-          lastScanErrors: (fresh.lastScanErrors ?? 0) + 1,
-        })
-        .where(eq(sourcesTable.id, fresh.id));
-    } finally {
-      await releaseSourceScanLock(fresh.id);
-    }
-
-    if (sorted.indexOf(source) < sorted.length - 1) {
-      await sleep(SOURCE_SCAN_DELAY_MS);
-    }
+  try {
+    const stats = await checkTelegramSource(fresh);
+    cycleAdded += stats.added;
+    cycleErrors += stats.errors;
+  } catch (e) {
+    cycleErrors++;
+    const errMsg = e instanceof Error ? e.message : String(e);
+    logger.warn(`scraper: telegram source ${fresh.id} (@${username ?? "?"}) failed: ${errMsg}`);
+    await db.update(sourcesTable)
+      .set({
+        lastError: errMsg.slice(0, 500),
+        lastCheckedAt: now,
+        isScanning: false,
+        lastScanErrors: (fresh.lastScanErrors ?? 0) + 1,
+      })
+      .where(eq(sourcesTable.id, fresh.id));
+  } finally {
+    await releaseSourceScanLock(fresh.id);
   }
 
-  logger.info({ sources: sorted.length, cycleAdded, cycleErrors }, "scraper: döngü özeti");
+  logger.info({ sourceId: fresh.id, cycleAdded, cycleErrors }, "scraper: döngü özeti (tek kaynak)");
 }
 
 // ── Main scraper loop ──────────────────────────────────────────────
@@ -857,7 +947,7 @@ export function startScraperWorker(): void {
     : isBotTokenSet()
       ? "Bot API (GramJS bekleniyor)"
       : "GramJS bekleniyor";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tüm kaynaklar/döngü)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tek kaynak/sıra, 3dk→30dk)`);
 
   setInterval(() => {
     void ensureTelegramConnected().catch(() => {});
@@ -910,6 +1000,51 @@ export async function expireImportedListings(): Promise<number> {
   return expired.length;
 }
 
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */
+export async function resetAllTelegramBots(): Promise<{ deletedListings: number }> {
+  await releaseStaleScanLocks(true);
+
+  const telegramSources = await db.select().from(sourcesTable).where(eq(sourcesTable.platform, "telegram"));
+  let totalDeleted = 0;
+
+  for (const s of telegramSources) {
+    totalDeleted += await deleteListingsForSource(s);
+    await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, s.id));
+    await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, s.id));
+  }
+
+  await db.delete(pendingJobsTable);
+
+  for (const s of telegramSources) {
+    const cleanUrl = s.url.trim().replace(/@+$/g, "").replace(/\/+$/g, "");
+    if (cleanUrl !== s.url) {
+      await db.update(sourcesTable).set({ url: cleanUrl }).where(eq(sourcesTable.id, s.id));
+    }
+  }
+
+  await db.update(sourcesTable).set({
+    lastCheckedAt: null,
+    lastTelegramMessageId: null,
+    initialScanOffsetId: null,
+    initialScanDone: false,
+    initialScanProgress: 1,
+    totalImported: 0,
+    lastScanPublished: 0,
+    lastScanMessagesRead: 0,
+    lastScanFound: 0,
+    lastScanAdded: 0,
+    lastScanDuplicates: 0,
+    lastScanErrors: 0,
+    isScanning: false,
+    lastError: null,
+  }).where(eq(sourcesTable.platform, "telegram"));
+
+  logger.info({ sources: telegramSources.length, deletedListings: totalDeleted }, "scraper: tüm botlar sıfırlandı");
+  await refreshScraperInterval();
+  await triggerRescan();
+  return { deletedListings: totalDeleted };
+}
+
 /** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
@@ -918,15 +1053,7 @@ export async function resetSingleTelegramSource(sourceId: number): Promise<{ del
 
   await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, sourceId));
 
-  const username = extractTelegramUsername(source.url);
-  const deleteConditions = [eq(listingsTable.sourceId, sourceId)];
-  if (username) {
-    deleteConditions.push(like(listingsTable.sourceUrl, `%t.me/${username}/%`));
-  }
-
-  const deletedListings = await db.delete(listingsTable)
-    .where(or(...deleteConditions))
-    .returning({ id: listingsTable.id });
+  const deletedListings = await deleteListingsForSource(source);
 
   await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, sourceId));
   await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, sourceId));
@@ -936,6 +1063,7 @@ export async function resetSingleTelegramSource(sourceId: number): Promise<{ del
     lastTelegramMessageId: null,
     initialScanOffsetId: null,
     initialScanDone: false,
+    initialScanProgress: 1,
     totalImported: 0,
     lastScanPublished: 0,
     lastScanMessagesRead: 0,
@@ -947,9 +1075,10 @@ export async function resetSingleTelegramSource(sourceId: number): Promise<{ del
     lastError: null,
   }).where(eq(sourcesTable.id, sourceId));
 
-  logger.info({ sourceId, name: source.name, deletedListings: deletedListings.length }, "scraper: kaynak sıfırlandı");
+  logger.info({ sourceId, name: source.name, deletedListings }, "scraper: kaynak sıfırlandı");
+  await refreshScraperInterval();
   await triggerRescan();
-  return { deletedListings: deletedListings.length };
+  return { deletedListings };
 }
 
 export async function triggerDeepRescan30Days(): Promise<void> {
@@ -962,6 +1091,7 @@ export async function triggerDeepRescan30Days(): Promise<void> {
   await db.update(sourcesTable).set({
     initialScanDone: false,
     initialScanOffsetId: null,
+    initialScanProgress: 1,
     lastTelegramMessageId: null,
     isScanning: false,
     lastError: null,

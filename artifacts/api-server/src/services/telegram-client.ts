@@ -222,8 +222,8 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
 const MAX_INITIAL_PAGES_TOTAL = 200;
-export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 10;
-const BATCH_DELAY_MS = 1_500;
+export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 1;
+const BATCH_DELAY_MS = 4_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
