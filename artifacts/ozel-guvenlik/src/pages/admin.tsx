@@ -1454,6 +1454,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   };
 
   const [resetting, setResetting] = useState(false);
+  const [deepRescanning, setDeepRescanning] = useState(false);
   const [reparsing, setReparsing] = useState(false);
 
   const resetBots = async () => {
@@ -1465,6 +1466,17 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
     finally { setResetting(false); }
+  };
+
+  const deepRescan30Days = async () => {
+    if (!confirm("Tüm Telegram kaynakları son 30 gün geriye taranacak. Yayındaki ilanlar silinmez. Devam?")) return;
+    setDeepRescanning(true);
+    try {
+      const r = await apiCall("/admin/sources/deep-rescan", "POST") as { message?: string };
+      toast({ title: "30 gün taraması başlatıldı", description: r.message ?? "Arka planda devam ediyor." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setDeepRescanning(false); }
   };
 
   const reparseListings = async () => {
@@ -1510,16 +1522,19 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        <button onClick={deepRescan30Days} disabled={deepRescanning} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 transition-colors disabled:opacity-50">
+          <RefreshCw className={`w-3.5 h-3.5 ${deepRescanning ? "animate-spin" : ""}`} /> {deepRescanning ? "Taranıyor…" : "30 Gün Yeniden Tara"}
+        </button>
         <button onClick={resetBots} disabled={resetting} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${resetting ? "animate-spin" : ""}`} /> {resetting ? "Sıfırlanıyor…" : "Botları Sıfırla"}
         </button>
-        <button onClick={reparseListings} disabled={reparsing} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-primary/15 text-primary rounded-lg hover:bg-primary/25 transition-colors disabled:opacity-50">
-          <ListChecks className={`w-3.5 h-3.5 ${reparsing ? "animate-pulse" : ""}`} /> {reparsing ? "Kontrol ediliyor…" : "İlanları Yeniden Kontrol Et"}
+        <button onClick={reparseListings} disabled={reparsing} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors disabled:opacity-50">
+          <ListChecks className={`w-3.5 h-3.5 ${reparsing ? "animate-pulse" : ""}`} /> {reparsing ? "Kontrol…" : "İlanları Yeniden Kontrol Et"}
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>Botları Sıfırla:</strong> tarama geçmişini temizler, 30 günü yeniden tarar (yayındaki ilanlar silinmez). <strong>Yeniden Kontrol Et:</strong> içe aktarılan ilanları tekrar okuyup eksik maaş/cinsiyet bilgisini doldurur.
+        <strong>30 Gün Yeniden Tara:</strong> kaynakları 30 gün geriye tarar (eksik eski ilanlar için). <strong>Botları Sıfırla:</strong> tüm geçmişi sıfırlar. <strong>Yeniden Kontrol Et:</strong> maaş/cinsiyet bilgisini doldurur.
       </p>
 
       <div className="flex justify-between items-center mb-3">

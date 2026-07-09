@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, adminSettingsTable } from "@workspace/db";
 import { eq, and, isNotNull, lt, or, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages } from "../services/telegram-client";
+import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
@@ -110,12 +110,33 @@ async function findActiveListingByPhone(phone: string): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
-async function findDuplicateImported(hash: string): Promise<boolean> {
+async function findDuplicateImported(hash: string, sourceId?: number, externalId?: string): Promise<boolean> {
+  if (sourceId != null && externalId) {
+    const [sameMsg] = await db.select({ id: importedPostsTable.id })
+      .from(importedPostsTable)
+      .where(and(
+        eq(importedPostsTable.sourceId, sourceId),
+        eq(importedPostsTable.externalId, externalId),
+      ))
+      .limit(1);
+    if (sameMsg) return true;
+  }
   const [row] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
     .where(eq(importedPostsTable.duplicateHash, hash))
     .limit(1);
   return !!row;
+}
+
+async function findListingBySourceMessage(sourceId: number, messageId: string): Promise<number | null> {
+  const [row] = await db.select({ id: listingsTable.id })
+    .from(listingsTable)
+    .where(and(
+      eq(listingsTable.sourceId, sourceId),
+      eq(listingsTable.messageId, messageId),
+    ))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
@@ -128,6 +149,7 @@ const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
 const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
+const MAX_INITIAL_PAGES_TOTAL = 200;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 10;
@@ -325,7 +347,10 @@ async function processMessage(
   if (seenExt) return "duplicate";
 
   const hash = createDuplicateHash(text, location, postedAt);
-  if (await findDuplicateImported(hash)) return "duplicate";
+  if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
+
+  const existingByMessage = await findListingBySourceMessage(source.id, messageId);
+  if (existingByMessage) return "duplicate";
 
   const [imported] = await db.insert(importedPostsTable).values({
     sourceId: source.id,
@@ -553,14 +578,53 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
   try {
     if (gramConnected) {
-      const result = await fetchChannelMessages(username, isInitialScan
-        ? { maxAgeDays: INITIAL_SCAN_DAYS, offsetId: scanOffset }
-        : { minMessageId: lastId },
-      );
-      messages = result.messages;
-      reachedCutoff = result.reachedCutoff;
-      noMoreMessages = result.noMoreMessages;
-      nextOffsetId = result.nextOffsetId;
+      if (isInitialScan) {
+        const seenIds = new Set<string>();
+        let offset = scanOffset;
+        let pagesTotal = 0;
+        while (pagesTotal < MAX_INITIAL_PAGES_TOTAL) {
+          const result = await fetchChannelMessages(username, {
+            maxAgeDays: INITIAL_SCAN_DAYS,
+            offsetId: offset,
+            maxPages: PAGES_PER_CYCLE,
+          });
+          for (const m of result.messages) {
+            if (!seenIds.has(m.id)) {
+              seenIds.add(m.id);
+              messages.push(m);
+            }
+          }
+          reachedCutoff = result.reachedCutoff;
+          noMoreMessages = result.noMoreMessages;
+          nextOffsetId = result.nextOffsetId;
+          pagesTotal += PAGES_PER_CYCLE;
+
+          logger.info({
+            username,
+            batch: result.messages.length,
+            total: messages.length,
+            offset,
+            nextOffsetId: result.nextOffsetId,
+            reachedCutoff,
+            noMoreMessages,
+            pagesTotal,
+          }, "scraper: ilk tarama sayfası");
+
+          if (reachedCutoff || noMoreMessages) break;
+          if (result.nextOffsetId <= 0 || result.nextOffsetId === offset) {
+            noMoreMessages = true;
+            break;
+          }
+          offset = result.nextOffsetId;
+          await sleep(SOURCE_SCAN_DELAY_MS);
+        }
+      } else {
+        const result = await fetchChannelMessages(username, { minMessageId: lastId });
+        messages = result.messages;
+        reachedCutoff = result.reachedCutoff;
+        noMoreMessages = result.noMoreMessages;
+        nextOffsetId = result.nextOffsetId;
+      }
     } else {
       messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
       reachedCutoff = isInitialScan;
@@ -601,12 +665,26 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   }
 
   stats.maxId = maxId;
-  const initialComplete = isInitialScan && (reachedCutoff || noMoreMessages);
+
+  let oldestPostedAt: Date | undefined;
+  for (const m of messages) {
+    if (m.postedAt && (!oldestPostedAt || m.postedAt < oldestPostedAt)) {
+      oldestPostedAt = m.postedAt;
+    }
+  }
+  const cutoffDate = new Date(Date.now() - INITIAL_SCAN_MS);
+  const channelOlderThanCutoff = oldestPostedAt != null && oldestPostedAt <= cutoffDate;
+  const initialComplete = isInitialScan && (
+    reachedCutoff ||
+    (noMoreMessages && (messages.length === 0 || channelOlderThanCutoff))
+  );
 
   await db.update(sourcesTable)
     .set({
       lastCheckedAt: new Date(),
-      lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
+      lastTelegramMessageId: initialComplete && maxId > lastId
+        ? String(maxId)
+        : (isInitialScan ? source.lastTelegramMessageId : (maxId > lastId ? String(maxId) : source.lastTelegramMessageId)),
       initialScanOffsetId: initialComplete ? null : (nextOffsetId > 0 ? String(nextOffsetId) : source.initialScanOffsetId),
       initialScanDone: initialComplete ? true : source.initialScanDone,
       lastScanPublished: stats.added,
@@ -800,6 +878,23 @@ export async function expireImportedListings(): Promise<number> {
     logger.info({ count: expired.length, cutoffDays: INITIAL_SCAN_DAYS }, "scraper: eski ilanlar pasife alındı");
   }
   return expired.length;
+}
+
+export async function triggerDeepRescan30Days(): Promise<void> {
+  const telegramSources = await db.select({ id: sourcesTable.id }).from(sourcesTable).where(eq(sourcesTable.platform, "telegram"));
+  const ids = telegramSources.map(s => s.id);
+  if (ids.length > 0) {
+    await db.delete(importedPostsTable).where(inArray(importedPostsTable.sourceId, ids));
+  }
+  await db.update(sourcesTable).set({
+    initialScanDone: false,
+    initialScanOffsetId: null,
+    lastTelegramMessageId: null,
+    isScanning: false,
+    lastError: null,
+  }).where(eq(sourcesTable.platform, "telegram"));
+  logger.info({ sources: ids.length }, "scraper: 30 gün derin tarama başlatıldı");
+  await triggerRescan();
 }
 
 // Botları sıfırlayıp hemen yeniden taramayı tetikler.

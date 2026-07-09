@@ -177,7 +177,8 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 }
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
-const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 25;
+const MAX_INITIAL_PAGES_TOTAL = 200;
+export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 50;
 const BATCH_DELAY_MS = 1_500;
 
 function sleep(ms: number): Promise<void> {
@@ -292,11 +293,16 @@ export async function fetchChannelMessages(
     if (reachedCutoff) break;
 
     const last = batch[batch.length - 1];
-    if (!last || batch.length < 100) {
+    if (!last) {
       noMoreMessages = true;
       break;
     }
+    const prevOffset = offsetId;
     offsetId = last.id;
+    if (offsetId === prevOffset) {
+      noMoreMessages = true;
+      break;
+    }
     if (page < maxPages - 1) await sleep(BATCH_DELAY_MS);
   }
 

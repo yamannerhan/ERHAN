@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days } from "../workers/scraper";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
 const router = Router();
@@ -171,6 +171,14 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
   res.json({
     success: true,
     message: "Tarama geçmişi sıfırlandı. Yayındaki ilanlar korundu; son 30 gün yeniden taranıyor.",
+  });
+});
+
+router.post("/admin/sources/deep-rescan", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  void triggerDeepRescan30Days().catch(() => {});
+  res.json({
+    success: true,
+    message: "30 gün derin tarama başlatıldı. Tüm kaynaklar geriye doğru taranacak (yayındaki ilanlar silinmez).",
   });
 });
 
