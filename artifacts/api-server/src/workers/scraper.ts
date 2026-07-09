@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable } from "@workspace/db";
+import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
 import { eq, and, isNotNull, lt, or, sql, inArray, like } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
@@ -1121,25 +1121,39 @@ export function isTelegramTokenSet(): boolean {
   return isBotTokenSet();
 }
 
-/** 30 günden eski otomatik içe aktarılan ilanları pasife al */
-export async function expireImportedListings(): Promise<number> {
-  const cutoff = new Date(Date.now() - INITIAL_SCAN_MS);
+/** Süresi dolan ilanları kalıcı sil (profilden ve siteden kalkar). */
+export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
-  const expired = await db.update(listingsTable)
-    .set({ status: "expired", isActive: false })
-    .where(and(
-      isNotNull(listingsTable.sourceTag),
-      eq(listingsTable.status, "active"),
-      or(
-        lt(listingsTable.expiresAt, now),
+  const cutoff = new Date(Date.now() - INITIAL_SCAN_MS);
+
+  const rows = await db.select({ id: listingsTable.id })
+    .from(listingsTable)
+    .where(or(
+      and(isNotNull(listingsTable.expiresAt), lt(listingsTable.expiresAt, now)),
+      and(
+        isNotNull(listingsTable.sourceTag),
         lt(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt})`, cutoff),
       ),
-    ))
+    ));
+
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return 0;
+
+  await db.delete(listingLikesTable).where(inArray(listingLikesTable.listingId, ids));
+  await db.delete(listingFavoritesTable).where(inArray(listingFavoritesTable.listingId, ids));
+  const deleted = await db.delete(listingsTable)
+    .where(inArray(listingsTable.id, ids))
     .returning({ id: listingsTable.id });
-  if (expired.length > 0) {
-    logger.info({ count: expired.length, cutoffDays: INITIAL_SCAN_DAYS }, "scraper: eski ilanlar pasife alındı");
+
+  if (deleted.length > 0) {
+    logger.info({ count: deleted.length }, "scraper: süresi dolan ilanlar silindi");
   }
-  return expired.length;
+  return deleted.length;
+}
+
+/** @deprecated purgeExpiredListings kullanın */
+export async function expireImportedListings(): Promise<number> {
+  return purgeExpiredListings();
 }
 
 /** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */

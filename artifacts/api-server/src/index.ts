@@ -5,7 +5,7 @@ import { logger } from "./lib/logger";
 import { onlineSockets } from "./routes/chat";
 import { setBotIo } from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
-import { startScraperWorker, expireImportedListings } from "./workers/scraper";
+import { startScraperWorker, purgeExpiredListings } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
 import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
 import { eq, count, sql, desc, lt, asc, and, isNotNull } from "drizzle-orm";
@@ -927,22 +927,6 @@ async function broadcastOnlineCount() {
   } catch { /* ignore */ }
 }
 
-// ── Süresi dolan ilanları otomatik pasif yap ─────────────────────
-// Elle eklenen ilanlar: expiresAt geçince pasif.
-// Telegram/bot ilanları: scraper expireImportedListings() ile 30 gün sonra pasif.
-async function expireListings() {
-  try {
-    await db.update(listingsTable)
-      .set({ status: "expired", isActive: false })
-      .where(
-        sql`${listingsTable.status} = 'active'
-          AND ${listingsTable.sourceTag} IS NULL
-          AND ${listingsTable.expiresAt} IS NOT NULL
-          AND ${listingsTable.expiresAt} < NOW()`,
-      );
-  } catch { /* ignore */ }
-}
-
 process.on("unhandledRejection", (err) => {
   logger.error({ err }, "Unhandled rejection");
 });
@@ -951,10 +935,9 @@ process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
 });
 
-void expireListings();
-setInterval(() => { void expireListings(); }, 30 * 60 * 1000);
-void expireImportedListings();
-setInterval(() => { void expireImportedListings(); }, 60 * 60 * 1000);
+// Süresi dolan ilanlar otomatik silinir (expiresAt veya Telegram 30 gün).
+void purgeExpiredListings();
+setInterval(() => { void purgeExpiredListings(); }, 30 * 60 * 1000);
 void trimChatHistory();
 setInterval(() => { void trimChatHistory(); }, 5 * 60 * 1000);
 setInterval(() => { void broadcastOnlineCount(); }, 45000);

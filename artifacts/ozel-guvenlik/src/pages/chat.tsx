@@ -47,6 +47,32 @@ function RoleBadge({ role, isVip }: { role: string; isVip?: boolean }) {
   );
 }
 
+function chatNameClass(msg: ChatMessage & { isBot?: boolean }) {
+  if (msg.isVip) return "name-vip";
+  if (msg.userNameAnimated) return "animate-rainbow";
+  if (msg.userNameColor) return "";
+  if (msg.userRole === "admin") return "name-admin";
+  if (msg.userRole === "moderator") return "name-mod";
+  return "name-user";
+}
+
+function chatNameStyle(msg: ChatMessage & { isBot?: boolean }): React.CSSProperties {
+  if (msg.userNameColor && !msg.userNameAnimated && !msg.isVip) return { color: msg.userNameColor };
+  return {};
+}
+
+function ChatDisplayName({ msg, name }: { msg: ChatMessage & { isBot?: boolean }; name: string }) {
+  return (
+    <>
+      <RoleBadge role={msg.userRole ?? "user"} isVip={msg.isVip} />
+      <span className={`text-[13px] font-extrabold leading-tight tracking-wide ${chatNameClass(msg)}`} style={chatNameStyle(msg)}>
+        {msg.isVip && <Crown className="inline w-3 h-3 mr-0.5 text-amber-300 fill-amber-300" />}
+        {name}
+      </span>
+    </>
+  );
+}
+
 function UserAvatar({ src, name, role, isVip }: { src?: string | null; name: string; role: string; isVip?: boolean }) {
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = !!src && !imageFailed;
@@ -493,25 +519,7 @@ export default function Chat() {
             <div className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
               {/* Name + badge */}
               <div className="flex flex-col mb-1 px-1">
-                {isMe ? (
-                  <span className="text-[9px] text-white/30">Sen</span>
-                ) : (
-                  <>
-                    <RoleBadge role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} />
-                    <span className={`text-[13px] font-extrabold leading-tight tracking-wide ${
-                        chatMsg.isVip ? "name-vip"
-                        : chatMsg.userNameAnimated ? "animate-rainbow"
-                        : chatMsg.userNameColor ? ""
-                        : chatMsg.userRole === "admin" ? "name-admin"
-                        : chatMsg.userRole === "moderator" ? "name-mod"
-                        : "name-user"
-                      }`}
-                      style={chatMsg.userNameColor && !chatMsg.userNameAnimated && !chatMsg.isVip ? { color: chatMsg.userNameColor } : {}}>
-                      {chatMsg.isVip && <Crown className="inline w-3 h-3 mr-0.5 text-amber-300 fill-amber-300" />}
-                      {name}
-                    </span>
-                  </>
-                )}
+                <ChatDisplayName msg={chatMsg} name={name} />
               </div>
 
               {/* Bubble */}
