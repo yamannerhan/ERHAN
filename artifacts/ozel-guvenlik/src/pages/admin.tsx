@@ -1550,7 +1550,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         <Radio className="w-4 h-4 text-primary mt-0.5 shrink-0" />
         <div className="text-xs text-primary/80 space-y-1">
           <p><strong>Sıralı tarama:</strong> Her döngüde <strong>tek grup</strong> taranır. İlk grup %100 olunca sıradaki gruba geçilir.</p>
-          <p>İlk tarama: son <strong>30 gün</strong> (her 3 dk bir batch). Tüm gruplar bitince <strong>30 dk</strong> aralıkla yeni ilanlar kontrol edilir.</p>
+          <p>İlk tarama: son <strong>30 gün</strong> (her ~30 sn bir batch, canlı ilerleme). Tüm gruplar bitince <strong>30 dk</strong> aralıkla yeni ilanlar kontrol edilir.</p>
         </div>
       </div>
 
