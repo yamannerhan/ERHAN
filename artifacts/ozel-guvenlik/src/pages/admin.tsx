@@ -1323,6 +1323,21 @@ function TelegramAuthSection({ apiCall, toast }: { apiCall: (path: string, metho
     finally { setLoading(false); }
   };
 
+  const tryReconnect = async () => {
+    setLoading(true);
+    try {
+      const r = await apiCall("/admin/telegram/reconnect", "POST") as { connected?: boolean; message?: string };
+      if (r.connected) {
+        setState("connected");
+        toast({ title: "Bağlantı kuruldu", description: r.message ?? "Telegram oturumu aktif." });
+      } else {
+        toast({ title: "Oturum bulunamadı", description: "Telefon numaranızla yeniden giriş yapın.", variant: "destructive" });
+      }
+    } catch (e: unknown) {
+      toast({ title: "Bağlantı kurulamadı", description: (e as Error).message, variant: "destructive" });
+    } finally { setLoading(false); }
+  };
+
   if (checking) return null;
 
   return (
@@ -1367,6 +1382,16 @@ function TelegramAuthSection({ apiCall, toast }: { apiCall: (path: string, metho
         </div>
       ) : (
         <div className="space-y-3">
+          <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+            <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+            <div className="text-xs text-amber-200 space-y-1">
+              <p><strong>Telegram hesabı bağlı değil.</strong> Botların kanallardan ilan çekebilmesi için hesabınızı bağlamanız gerekir.</p>
+              <p className="text-[10px] text-amber-300/80">Önizlemesi kapalı kanallar web üzerinden okunamaz — sadece bağlı hesap ile erişilir.</p>
+            </div>
+          </div>
+          <Button onClick={tryReconnect} disabled={loading} size="sm" variant="outline" className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10 w-full">
+            {loading ? "Deneniyor…" : "Oturumu yenile (yeniden bağlan)"}
+          </Button>
           <div className="flex items-start gap-2 bg-white/5 border border-white/10 rounded-xl p-3">
             <Radio className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="text-xs text-muted-foreground">
@@ -1388,6 +1413,7 @@ function TelegramAuthSection({ apiCall, toast }: { apiCall: (path: string, metho
 function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [telegramTokenSet, setTelegramTokenSet] = useState(false);
+  const [telegramConnected, setTelegramConnected] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1400,11 +1426,12 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     setLoading(true);
     try {
       const [d, settings] = await Promise.all([
-        apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean }>,
+        apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean; telegramGramJsConnected?: boolean }>,
         apiCall("/admin/settings") as Promise<{ telegramScanIntervalMinutes?: number }>,
       ]);
       setSources(d.sources ?? []);
       setTelegramTokenSet(d.telegramTokenSet ?? false);
+      setTelegramConnected(d.telegramGramJsConnected ?? false);
       setScanInterval(settings.telegramScanIntervalMinutes ?? 10);
     } catch { /* ignore */ } finally { setLoading(false); }
   };
@@ -1457,6 +1484,18 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [resetting, setResetting] = useState(false);
   const [deepRescanning, setDeepRescanning] = useState(false);
   const [reparsing, setReparsing] = useState(false);
+  const [resettingSourceId, setResettingSourceId] = useState<number | null>(null);
+
+  const resetSingleSource = async (id: number, name: string) => {
+    if (!confirm(`"${name}" grubu sıfırlanacak:\n• Bu gruptan gelen tüm ilanlar silinir\n• Son 30 gün yeniden taranır\n\nDevam?`)) return;
+    setResettingSourceId(id);
+    try {
+      const r = await apiCall(`/admin/sources/${id}/reset`, "POST") as { message?: string; deletedListings?: number };
+      toast({ title: "Grup sıfırlandı", description: r.message ?? "Yeniden tarama başlatıldı." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setResettingSourceId(null); }
+  };
 
   const resetBots = async () => {
     if (!confirm("Bot tarama geçmişi sıfırlanacak (yayındaki ilanlar silinmez). Son 30 gün yeniden taranır. Devam?")) return;
@@ -1506,6 +1545,16 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
           <p>İlk tarama: son <strong>30 gün</strong>. Sonraki taramalar <code>last_message_id</code> sonrasından devam eder. Özel kanallar için Telegram hesabını bağlayın.</p>
         </div>
       </div>
+
+      {telegramConnected === false && sources.some(s => s.platform === "telegram" && s.active) && (
+        <div className="flex items-start gap-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 mb-4">
+          <AlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+          <div className="text-xs text-destructive space-y-1">
+            <p><strong>Telegram hesabı bağlı değil!</strong> Botlar çalışmıyor — önizlemesi kapalı kanallardan ilan çekilemez.</p>
+            <p>Sol menüden <strong>Telegram Hesabı</strong> sekmesine gidip giriş yapın veya «Oturumu yenile» butonuna basın.</p>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white/5 rounded-xl p-3 mb-4">
         <p className="text-xs font-semibold text-muted-foreground mb-2">Telegram tarama aralığı (tüm kaynaklar)</p>
@@ -1710,6 +1759,16 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                 <button onClick={() => toggleActive(s.id)} className={`text-[10px] flex items-center gap-0.5 px-2 py-1 rounded-lg transition-colors ${s.active ? "bg-white/10 text-muted-foreground hover:bg-white/20" : "bg-green-500/20 text-green-400 hover:bg-green-500/30"}`}>
                   {s.active ? <><ToggleRight className="w-3 h-3" /> Pasif yap</> : <><ToggleLeft className="w-3 h-3" /> Aktif yap</>}
                 </button>
+                {s.platform === "telegram" && (
+                  <button
+                    onClick={() => void resetSingleSource(s.id, s.name)}
+                    disabled={resettingSourceId === s.id}
+                    className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${resettingSourceId === s.id ? "animate-spin" : ""}`} />
+                    {resettingSourceId === s.id ? "Sıfırlanıyor…" : "30 Gün Sıfırla"}
+                  </button>
+                )}
                 <button onClick={() => startEdit(s)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors">
                   <Edit2 className="w-3 h-3" /> Düzenle
                 </button>

@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, adminSettingsTable } from "@workspace/db";
-import { eq, and, isNotNull, lt, or, sql } from "drizzle-orm";
+import { eq, and, isNotNull, lt, or, sql, inArray, like } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE } from "../services/telegram-client";
+import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
@@ -594,41 +594,49 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   const scanOffset = parseInt(source.initialScanOffsetId ?? "0", 10) || 0;
   const isInitialScan = !source.initialScanDone;
 
+  await ensureTelegramConnected();
+  const gramConnected = isClientConnected();
+
   logger.info(
     `scraper: @${username} ${isInitialScan
       ? `ilk tarama (${INITIAL_SCAN_DAYS}g, offset=${scanOffset})`
-      : `yeni mesajlar (id>${lastId})`} gramjs=${isClientConnected()}`,
+      : `yeni mesajlar (id>${lastId})`} gramjs=${gramConnected}`,
   );
+
+  const GRAMJS_REQUIRED_MSG =
+    "Telegram hesabı bağlı değil — Admin → Telegram Hesabı sekmesinden giriş yapın. " +
+    "Önizlemesi kapalı kanallar için hesap bağlantısı zorunludur.";
+
+  if (!gramConnected) {
+    await db.update(sourcesTable)
+      .set({
+        lastCheckedAt: new Date(),
+        lastError: GRAMJS_REQUIRED_MSG,
+        isScanning: false,
+        lastScanMessagesRead: 0,
+        lastScanFound: 0,
+        lastScanAdded: 0,
+        lastScanDuplicates: 0,
+        lastScanErrors: 0,
+      })
+      .where(eq(sourcesTable.id, source.id));
+    return stats;
+  }
 
   let messages: ChannelMessage[] = [];
   let reachedCutoff = false;
   let noMoreMessages = false;
   let nextOffsetId = scanOffset;
-  const gramConnected = isClientConnected();
 
   try {
-    if (gramConnected) {
-      const result = await fetchChannelMessages(username, isInitialScan
-        ? { maxAgeDays: INITIAL_SCAN_DAYS, offsetId: scanOffset, maxPages: PAGES_PER_CYCLE }
-        : { minMessageId: lastId, maxPages: 15 },
-      );
-      messages = result.messages;
-      reachedCutoff = result.reachedCutoff;
-      noMoreMessages = result.noMoreMessages;
-      nextOffsetId = result.nextOffsetId;
-    } else if (isInitialScan) {
-      try {
-        messages = await scrapeTelegramChannelFiltered(username, 0, INITIAL_SCAN_DAYS);
-        reachedCutoff = messages.length > 0;
-        noMoreMessages = true;
-      } catch (webErr) {
-        const errMsg = webErr instanceof Error ? webErr.message : String(webErr);
-        throw new Error(`GramJS bağlı değil ve web tarama başarısız: ${errMsg}`);
-      }
-    } else {
-      messages = await scrapeTelegramChannelFiltered(username, lastId, INITIAL_SCAN_DAYS);
-      noMoreMessages = true;
-    }
+    const result = await fetchChannelMessages(username, isInitialScan
+      ? { maxAgeDays: INITIAL_SCAN_DAYS, offsetId: scanOffset, maxPages: PAGES_PER_CYCLE }
+      : { minMessageId: lastId, maxPages: 15 },
+    );
+    messages = result.messages;
+    reachedCutoff = result.reachedCutoff;
+    noMoreMessages = result.noMoreMessages;
+    nextOffsetId = result.nextOffsetId;
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) {
@@ -681,9 +689,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
   let scanError: string | null = null;
   if (messages.length === 0) {
-    if (!gramConnected) {
-      scanError = "Telegram hesabı bağlı değil — Admin → Telegram sekmesinden hesabı bağlayın.";
-    } else if (isInitialScan && !reachedCutoff && !noMoreMessages) {
+    if (isInitialScan && !reachedCutoff && !noMoreMessages) {
       scanError = "Mesaj alınamadı — sonraki döngüde offset'ten devam edilecek.";
     } else if (isInitialScan && noMoreMessages) {
       scanError = "Kanalda son 30 gün içinde metin mesajı bulunamadı.";
@@ -801,6 +807,7 @@ async function runScraperCycle(force = false): Promise<void> {
 }
 
 async function runScraperCycleInner(force = false): Promise<void> {
+  await ensureTelegramConnected();
   await processBotUpdates();
 
   const sources = await db.select().from(sourcesTable)
@@ -842,12 +849,19 @@ async function scheduleScraperInterval(): Promise<void> {
 
 export function startScraperWorker(): void {
   void releaseStaleScanLocks(true);
+  void ensureTelegramConnected().then((ok) => {
+    logger.info(`scraper: GramJS ${ok ? "bağlı" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
+  });
   const mode = isClientConnected()
-    ? "GramJS + web fallback"
+    ? "GramJS"
     : isBotTokenSet()
-      ? "Bot API + web fallback"
-      : "web scraping only";
+      ? "Bot API (GramJS bekleniyor)"
+      : "GramJS bekleniyor";
   logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tüm kaynaklar/döngü)`);
+
+  setInterval(() => {
+    void ensureTelegramConnected().catch(() => {});
+  }, 3 * 60 * 1000);
 
   if (isBotTokenSet()) {
     void (async () => {
@@ -894,6 +908,48 @@ export async function expireImportedListings(): Promise<number> {
     logger.info({ count: expired.length, cutoffDays: INITIAL_SCAN_DAYS }, "scraper: eski ilanlar pasife alındı");
   }
   return expired.length;
+}
+
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */
+export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
+  const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
+  if (!source) throw new Error("Kaynak bulunamadı");
+  if (source.platform !== "telegram") throw new Error("Sadece Telegram kaynakları sıfırlanabilir");
+
+  await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, sourceId));
+
+  const username = extractTelegramUsername(source.url);
+  const deleteConditions = [eq(listingsTable.sourceId, sourceId)];
+  if (username) {
+    deleteConditions.push(like(listingsTable.sourceUrl, `%t.me/${username}/%`));
+  }
+
+  const deletedListings = await db.delete(listingsTable)
+    .where(or(...deleteConditions))
+    .returning({ id: listingsTable.id });
+
+  await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, sourceId));
+  await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, sourceId));
+
+  await db.update(sourcesTable).set({
+    lastCheckedAt: null,
+    lastTelegramMessageId: null,
+    initialScanOffsetId: null,
+    initialScanDone: false,
+    totalImported: 0,
+    lastScanPublished: 0,
+    lastScanMessagesRead: 0,
+    lastScanFound: 0,
+    lastScanAdded: 0,
+    lastScanDuplicates: 0,
+    lastScanErrors: 0,
+    isScanning: false,
+    lastError: null,
+  }).where(eq(sourcesTable.id, sourceId));
+
+  logger.info({ sourceId, name: source.name, deletedListings: deletedListings.length }, "scraper: kaynak sıfırlandı");
+  await triggerRescan();
+  return { deletedListings: deletedListings.length };
 }
 
 export async function triggerDeepRescan30Days(): Promise<void> {

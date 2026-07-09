@@ -62,28 +62,71 @@ function buildClient(sessionStr = "") {
   );
 }
 
+async function restoreSessionFromDb(): Promise<boolean> {
+  const row = await getSessionRow();
+  if (row?.authState !== "connected" || !row.sessionString) {
+    currentState = "disconnected";
+    return false;
+  }
+
+  if (client) {
+    try { await client.disconnect(); } catch { /* ignore */ }
+    client = null;
+  }
+
+  client = buildClient(row.sessionString);
+  await client.connect();
+  if (await client.isUserAuthorized()) {
+    currentState = "connected";
+    currentPhone = row.phone ?? null;
+    return true;
+  }
+
+  currentState = "disconnected";
+  client = null;
+  await saveSession({ authState: "disconnected", sessionString: null });
+  return false;
+}
+
 export async function initTelegramClient(): Promise<void> {
   if (!API_ID || !API_HASH) {
     logger.warn("telegram-client: API_ID or API_HASH not configured");
     return;
   }
   try {
-    const row = await getSessionRow();
-    if (row?.authState === "connected" && row.sessionString) {
-      client = buildClient(row.sessionString);
-      await client.connect();
-      if (await client.isUserAuthorized()) {
-        currentState = "connected";
-        currentPhone = row.phone ?? null;
-        logger.info("telegram-client: session restored, connected");
-        return;
-      }
+    if (await restoreSessionFromDb()) {
+      logger.info("telegram-client: session restored, connected");
+      return;
     }
     currentState = "disconnected";
-    await saveSession({ authState: "disconnected" });
   } catch (e) {
     logger.warn({ err: e }, "telegram-client: failed to restore session");
     currentState = "disconnected";
+    client = null;
+  }
+}
+
+/** Sunucu yeniden başladığında veya bağlantı koptuğunda oturumu DB'den yeniden kurar. */
+export async function ensureTelegramConnected(): Promise<boolean> {
+  if (!API_ID || !API_HASH) return false;
+
+  if (client && currentState === "connected") {
+    try {
+      if (await client.isUserAuthorized()) return true;
+    } catch {
+      currentState = "disconnected";
+    }
+  }
+
+  try {
+    const ok = await restoreSessionFromDb();
+    if (ok) logger.info("telegram-client: oturum yeniden bağlandı");
+    return ok;
+  } catch (e) {
+    logger.warn({ err: e }, "telegram-client: ensureTelegramConnected failed");
+    currentState = "disconnected";
+    client = null;
+    return false;
   }
 }
 

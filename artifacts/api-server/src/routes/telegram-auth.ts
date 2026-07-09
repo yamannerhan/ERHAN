@@ -3,17 +3,31 @@ import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import {
   startAuth, verifyCode, verifyPassword, logout,
   getAuthState, getCurrentPhone, isClientConnected,
-  getBotInfo, isBotTokenSet,
+  getBotInfo, isBotTokenSet, ensureTelegramConnected,
 } from "../services/telegram-client";
 
 const router = Router();
 
 router.get("/admin/telegram/status", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  await ensureTelegramConnected();
   const state = getAuthState();
   const phone = getCurrentPhone();
   const connected = isClientConnected();
   const botInfo = isBotTokenSet() ? await getBotInfo() : null;
   res.json({ state, phone, connected, bot: botInfo });
+});
+
+router.post("/admin/telegram/reconnect", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  const connected = await ensureTelegramConnected();
+  if (connected) {
+    res.json({ ok: true, connected: true, message: "Telegram oturumu yeniden bağlandı." });
+    return;
+  }
+  res.status(400).json({
+    ok: false,
+    connected: false,
+    error: "Oturum bulunamadı veya süresi dolmuş. Telefon numarası ile yeniden giriş yapın.",
+  });
 });
 
 router.post("/admin/telegram/auth/start", authMiddleware, requireAdmin, async (req, res): Promise<void> => {

@@ -2,7 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource } from "../workers/scraper";
+import { isClientConnected } from "../services/telegram-client";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
 const router = Router();
@@ -51,6 +52,7 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       createdAt: s.createdAt.toISOString(),
     })),
     telegramTokenSet: isTelegramTokenSet(),
+    telegramGramJsConnected: isClientConnected(),
   });
 });
 
@@ -180,6 +182,23 @@ router.post("/admin/sources/deep-rescan", authMiddleware, requireAdmin, async (_
     success: true,
     message: "30 gün derin tarama başlatıldı. Tüm kaynaklar geriye doğru taranacak (yayındaki ilanlar silinmez).",
   });
+});
+
+/** Tek Telegram grubunu sıfırla: o kaynaktan gelen ilanları sil, son 30 günü yeniden tara. */
+router.post("/admin/sources/:id/reset", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  try {
+    const result = await resetSingleTelegramSource(id);
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      message: `${result.deletedListings} ilan silindi. Son 30 gün yeniden taranıyor.`,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
 });
 
 // ── Re-check / re-parse imported listings ─────────────────────────
