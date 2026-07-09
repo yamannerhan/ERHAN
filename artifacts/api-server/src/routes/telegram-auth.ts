@@ -9,10 +9,9 @@ import {
 const router = Router();
 
 router.get("/admin/telegram/status", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
-  await ensureTelegramConnected();
+  const connected = await ensureTelegramConnected(2);
   const state = getAuthState();
   const phone = getCurrentPhone();
-  const connected = isClientConnected();
   const botInfo = isBotTokenSet() ? await getBotInfo() : null;
   res.json({ state, phone, connected, bot: botInfo });
 });

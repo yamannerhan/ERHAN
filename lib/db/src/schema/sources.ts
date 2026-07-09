@@ -35,5 +35,7 @@ export const sourcesTable = pgTable("sources", {
   initialScanPhase: text("initial_scan_phase"),
   initialScanAnchorId: text("initial_scan_anchor_id"),
   initialScanTopId: text("initial_scan_top_id"),
+  /** Geri taramada şimdiye kadar görülen en eski mesaj tarihi (ilerleme için) */
+  initialScanOldestAt: timestamp("initial_scan_oldest_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

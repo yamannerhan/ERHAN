@@ -3,7 +3,7 @@ import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable }
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
-import { isClientConnected } from "../services/telegram-client";
+import { ensureTelegramConnected } from "../services/telegram-client";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
 const router = Router();
@@ -56,7 +56,7 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       createdAt: s.createdAt.toISOString(),
     })),
     telegramTokenSet: isTelegramTokenSet(),
-    telegramGramJsConnected: isClientConnected(),
+    telegramGramJsConnected: await ensureTelegramConnected(1),
     effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
     scanPhase: await getScanPhase(),
   });

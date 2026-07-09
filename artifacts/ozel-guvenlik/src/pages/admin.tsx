@@ -1441,7 +1441,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   useEffect(() => { void load(); }, []);
 
   useEffect(() => {
-    const ms = scanPhase === "initial" ? 3_000 : 30_000;
+    const ms = scanPhase === "initial" ? 2_000 : 30_000;
     const t = setInterval(() => { void load(); }, ms);
     return () => clearInterval(t);
   }, [scanPhase]);

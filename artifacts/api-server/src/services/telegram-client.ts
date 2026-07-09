@@ -62,11 +62,19 @@ function buildClient(sessionStr = "") {
   );
 }
 
-async function restoreSessionFromDb(): Promise<boolean> {
+async function restoreSessionFromDb(forceReconnect = false): Promise<boolean> {
   const row = await getSessionRow();
   if (row?.authState !== "connected" || !row.sessionString) {
     currentState = "disconnected";
     return false;
+  }
+
+  if (!forceReconnect && client && currentState === "connected") {
+    try {
+      if (await client.isUserAuthorized()) return true;
+    } catch {
+      /* yeniden bağlan */
+    }
   }
 
   if (client) {
@@ -88,6 +96,47 @@ async function restoreSessionFromDb(): Promise<boolean> {
   return false;
 }
 
+let connectMutex: Promise<boolean> | null = null;
+
+async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
+  if (!API_ID || !API_HASH) return false;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    if (client && currentState === "connected") {
+      try {
+        if (await client.isUserAuthorized()) return true;
+      } catch {
+        currentState = "disconnected";
+      }
+    }
+
+    try {
+      if (await restoreSessionFromDb(attempt > 0)) {
+        if (attempt > 0) logger.info("telegram-client: oturum yeniden bağlandı");
+        return true;
+      }
+    } catch (e) {
+      logger.warn({ err: e, attempt }, "telegram-client: ensureTelegramConnected failed");
+      currentState = "disconnected";
+      client = null;
+    }
+
+    if (attempt < retries - 1) {
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  return false;
+}
+
+/** Sunucu yeniden başladığında veya bağlantı koptuğunda oturumu DB'den yeniden kurar. */
+export async function ensureTelegramConnected(retries = 3): Promise<boolean> {
+  if (connectMutex) return connectMutex;
+  connectMutex = ensureTelegramConnectedInner(retries).finally(() => {
+    connectMutex = null;
+  });
+  return connectMutex;
+}
+
 export async function initTelegramClient(): Promise<void> {
   if (!API_ID || !API_HASH) {
     logger.warn("telegram-client: API_ID or API_HASH not configured");
@@ -104,43 +153,6 @@ export async function initTelegramClient(): Promise<void> {
     currentState = "disconnected";
     client = null;
   }
-}
-
-/** Sunucu yeniden başladığında veya bağlantı koptuğunda oturumu DB'den yeniden kurar. */
-export async function ensureTelegramConnected(retries = 3): Promise<boolean> {
-  if (!API_ID || !API_HASH) return false;
-
-  for (let attempt = 0; attempt < retries; attempt++) {
-    if (client && currentState === "connected") {
-      try {
-        if (await client.isUserAuthorized()) {
-          await client.getMe();
-          return true;
-        }
-      } catch {
-        currentState = "disconnected";
-        try { await client?.disconnect(); } catch { /* ignore */ }
-        client = null;
-      }
-    }
-
-    try {
-      if (await restoreSessionFromDb()) {
-        await client!.getMe();
-        if (attempt > 0) logger.info("telegram-client: oturum yeniden bağlandı");
-        return true;
-      }
-    } catch (e) {
-      logger.warn({ err: e, attempt }, "telegram-client: ensureTelegramConnected failed");
-      currentState = "disconnected";
-      client = null;
-    }
-
-    if (attempt < retries - 1) {
-      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-    }
-  }
-  return false;
 }
 
 export async function startAuth(phone: string): Promise<void> {
@@ -278,7 +290,8 @@ export async function fetchChannelMessages(
     messages: [], reachedCutoff: false, noMoreMessages: false,
     nextOffsetId: fallbackOffset, minIdInBatch: 0, maxIdInBatch: 0,
   };
-  if (!client || !isClientConnected()) return empty;
+  const connected = await ensureTelegramConnected(2);
+  if (!connected || !client) return empty;
 
   const minId = options.minMessageId ?? 0;
   const maxAgeDays = options.maxAgeDays ?? 30;
