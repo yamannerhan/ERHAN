@@ -1727,7 +1727,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.platform === "telegram" ? `${effectiveScanInterval}dk` : `${s.checkInterval}dk`}</span>
                     <span className="text-[10px] text-muted-foreground">{s.totalImported} ilan yayınlandı</span>
                     {s.isScanning && <span className="text-[10px] text-amber-400">Taranıyor…</span>}
-                    {(s.lastScanAdded ?? 0) > 0 && <span className="text-[10px] text-green-400">Son: +{s.lastScanAdded} eklendi</span>}
+                    {(s.lastScanPublished ?? 0) > 0 && <span className="text-[10px] text-green-400">Son: +{s.lastScanPublished} eklendi</span>}
                     {!s.initialScanDone && s.platform === "telegram" && (
                       <span className="text-[10px] text-amber-400">
                         {s.initialScanPhase === "forward" ? "Eski→yeni" : "30g geri"} %{s.initialScanProgress ?? 1}
@@ -1761,12 +1761,12 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                   )}
                   {s.platform === "telegram" && (
                     <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-[10px] text-muted-foreground bg-black/20 rounded-lg p-2">
-                      <span>Okunan: {s.lastScanMessagesRead ?? 0}</span>
-                      <span>Bulunan: {s.lastScanFound ?? 0}</span>
-                      <span>Eklenen: {s.lastScanAdded ?? 0}</span>
+                      <span>Toplam okunan: {s.lastScanMessagesRead ?? 0}</span>
+                      <span>Toplam bulunan: {s.lastScanFound ?? 0}</span>
+                      <span>Toplam eklenen: {s.lastScanAdded ?? 0}</span>
                       <span>Duplicate: {s.lastScanDuplicates ?? 0}</span>
                       <span>Hata: {s.lastScanErrors ?? 0}</span>
-                      <span>Son yayın: {s.lastScanPublished ?? 0}</span>
+                      <span>Son tur: +{s.lastScanPublished ?? 0}</span>
                     </div>
                   )}
                   {s.targetCities?.length > 0 && (

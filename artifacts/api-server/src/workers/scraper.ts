@@ -144,10 +144,10 @@ const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
-const MESSAGE_PROCESS_DELAY_MS = 400;
+const MESSAGE_PROCESS_DELAY_MS = 100;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 30;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
-const INITIAL_BACKFILL_INTERVAL_MS = 30_000;
+const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
 const BACKWARD_PAGES_PER_RUN = 5;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
@@ -232,6 +232,25 @@ function computeForwardProgress(anchorId: number, topId: number, lastProcessedId
   if (topId <= anchorId) return 100;
   const ratio = Math.max(0, Math.min(1, (lastProcessedId - anchorId) / (topId - anchorId)));
   return Math.min(99, Math.max(21, 20 + Math.floor(ratio * 79)));
+}
+
+function mergeScanStats(
+  source: typeof sourcesTable.$inferSelect,
+  stats: ScanStats,
+): {
+  lastScanMessagesRead: number;
+  lastScanFound: number;
+  lastScanAdded: number;
+  lastScanDuplicates: number;
+  lastScanErrors: number;
+} {
+  return {
+    lastScanMessagesRead: (source.lastScanMessagesRead ?? 0) + stats.messagesRead,
+    lastScanFound: (source.lastScanFound ?? 0) + stats.found,
+    lastScanAdded: (source.lastScanAdded ?? 0) + stats.added,
+    lastScanDuplicates: (source.lastScanDuplicates ?? 0) + stats.duplicates,
+    lastScanErrors: (source.lastScanErrors ?? 0) + stats.errors,
+  };
 }
 
 async function patchSourceProgress(
@@ -684,6 +703,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     let currentProgress = source.initialScanProgress ?? 1;
     let cumulativeOldest: Date | null = source.initialScanOldestAt ?? null;
     let totalRead = 0;
+    const baseMessagesRead = source.lastScanMessagesRead ?? 0;
 
     for (let page = 0; page < BACKWARD_PAGES_PER_RUN; page++) {
       let result;
@@ -741,11 +761,11 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         initialScanTopId: topId > 0 ? String(topId) : source.initialScanTopId,
         initialScanOldestAt: cumulativeOldest,
         initialScanProgress: currentProgress,
-        lastScanMessagesRead: totalRead,
+        lastScanMessagesRead: baseMessagesRead + totalRead,
         isScanning: page < BACKWARD_PAGES_PER_RUN - 1,
       });
 
-      stats.messagesRead = totalRead;
+      stats.messagesRead = baseMessagesRead + totalRead;
 
       if (discoveryComplete) {
         const forwardStart = anchorId > 0 ? anchorId - 1 : 0;
@@ -776,7 +796,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       }
 
       if (result.noMoreMessages && !result.reachedCutoff) break;
-      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(2_000);
+      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(500);
     }
 
     await patchSourceProgress(source.id, { isScanning: false, lastError: null });
@@ -820,6 +840,11 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   stats.messagesRead = messages.length;
   let maxId = lastId;
   let processedCount = 0;
+  let liveFound = 0;
+  let liveAdded = 0;
+  let liveDuplicates = 0;
+  let liveErrors = 0;
+  const mergedBase = mergeScanStats(source, { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: 0 });
 
   for (const msg of messages) {
     const msgId = parseInt(msg.id, 10);
@@ -835,17 +860,25 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         msg.postedAt,
         isInitialScan,
       );
-      if (procResult === "added") { stats.added++; stats.found++; }
-      else if (procResult === "updated") { stats.found++; }
-      else if (procResult === "duplicate") { stats.duplicates++; stats.found++; }
+      if (procResult === "added") { stats.added++; stats.found++; liveAdded++; liveFound++; }
+      else if (procResult === "updated") { stats.found++; liveFound++; }
+      else if (procResult === "duplicate") { stats.duplicates++; stats.found++; liveDuplicates++; liveFound++; }
     } catch (e) {
       stats.errors++;
+      liveErrors++;
       logger.error(e, `scraper: msg ${msg.id} @${username}`);
     }
     processedCount++;
     if (isInitialScan && phase === "forward" && (processedCount % 3 === 0 || processedCount === messages.length)) {
       const livePct = computeForwardProgress(anchorId, topId, msgId);
-      await patchSourceProgress(source.id, { initialScanProgress: livePct });
+      await patchSourceProgress(source.id, {
+        initialScanProgress: livePct,
+        lastScanMessagesRead: mergedBase.lastScanMessagesRead + processedCount,
+        lastScanFound: mergedBase.lastScanFound + liveFound,
+        lastScanAdded: mergedBase.lastScanAdded + liveAdded,
+        lastScanDuplicates: mergedBase.lastScanDuplicates + liveDuplicates,
+        lastScanErrors: mergedBase.lastScanErrors + liveErrors,
+      });
     }
     if (MESSAGE_PROCESS_DELAY_MS > 0) await sleep(MESSAGE_PROCESS_DELAY_MS);
   }
@@ -869,6 +902,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     scanError = null;
   }
 
+  const cumulativeStats = mergeScanStats(source, stats);
   await patchSourceProgress(source.id, {
     lastCheckedAt: new Date(),
     lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
@@ -877,11 +911,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     initialScanPhase: initialComplete ? null : (isInitialScan ? "forward" : source.initialScanPhase),
     initialScanProgress: initialComplete ? 100 : (isInitialScan ? scanProgress : 100),
     lastScanPublished: stats.added,
-    lastScanMessagesRead: stats.messagesRead,
-    lastScanFound: stats.found,
-    lastScanAdded: stats.added,
-    lastScanDuplicates: stats.duplicates,
-    lastScanErrors: stats.errors,
+    ...cumulativeStats,
     totalImported: (source.totalImported ?? 0) + stats.added,
     lastError: scanError,
     isScanning: false,
@@ -889,7 +919,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
   logger.info({
     source: source.name, username, phase,
-    messagesRead: stats.messagesRead, added: stats.added,
+    messagesRead: cumulativeStats.lastScanMessagesRead, batchRead: stats.messagesRead, added: stats.added,
     maxId, topId, anchorId, scanProgress, initialComplete,
   }, `scraper: @${username} tarama özeti`);
 
@@ -1051,7 +1081,7 @@ export function startScraperWorker(): void {
     : isBotTokenSet()
       ? "Bot API (GramJS bekleniyor)"
       : "GramJS bekleniyor";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tek kaynak/sıra, 30sn zincir)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tek kaynak/sıra, 5sn zincir)`);
 
   void refreshScraperInterval();
 
