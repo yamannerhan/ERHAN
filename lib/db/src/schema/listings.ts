@@ -32,6 +32,8 @@ export const listingsTable = pgTable("listings", {
   companyLogoUrl: text("company_logo_url"),
   authorId: integer("author_id"),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  /** Süre dolunca true=sil, false=pasif yap */
+  autoDeleteOnExpiry: boolean("auto_delete_on_expiry").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

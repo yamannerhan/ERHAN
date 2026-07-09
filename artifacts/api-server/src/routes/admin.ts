@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, usersTable, listingsTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable } from "@workspace/db";
+import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable } from "@workspace/db";
 import { eq, desc, ilike, and, sql, asc, or, isNull, gt, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { onlineSockets } from "./chat";
@@ -1266,6 +1266,7 @@ router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (re
       status: l.status, isFeatured: l.isFeatured, cardTheme: l.cardTheme, likeCount: l.likeCount,
       applyUrl: l.applyUrl, sourceTag: l.sourceTag,
       expiresAt: l.expiresAt?.toISOString() ?? null, createdAt: l.createdAt.toISOString(),
+      autoDeleteOnExpiry: l.autoDeleteOnExpiry ?? true,
     })),
     total: countResult[0]?.count ?? 0,
   });
@@ -1361,15 +1362,16 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
   if (!req.user) { res.status(401).json({ error: "Giriş yapmanız gerekiyor" }); return; }
   const perm = await checkPublishPermission(req.user.id, req.user.role);
   if (!perm.allowed) { res.status(403).json({ error: "İlan paylaşım yetkiniz bulunmuyor" }); return; }
-  const { title, company, city, workType, salary, description, requirements, applyUrl, isFeatured, expiresAt, cardTheme } = req.body as Record<string, unknown>;
+  const { title, company, city, workType, salary, description, requirements, applyUrl, isFeatured, expiresAt, cardTheme, autoDeleteOnExpiry } = req.body as Record<string, unknown>;
   if (!title || !company || !city || !workType) { res.status(400).json({ error: "Başlık, şirket, şehir ve çalışma şekli zorunludur" }); return; }
   const [listing] = await db.insert(listingsTable).values({
     title: String(title), company: String(company), city: String(city), workType: String(workType),
     salary: salary ? String(salary) : null, description: description ? String(description) : null,
     requirements: requirements ? String(requirements) : null, applyUrl: applyUrl ? String(applyUrl) : null,
     isFeatured: Boolean(isFeatured), cardTheme: normalizeListingCardTheme(cardTheme), status: "active",
-    // Süre belirtilmediyse varsayılan 30 gün; admin özel tarih verirse ona göre silinir
+    // Süre belirtilmediyse varsayılan 30 gün; admin özel tarih verirse ona göre silinir/pasife alınır
     expiresAt: expiresAt ? new Date(String(expiresAt)) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
     authorId: req.user.id,
   }).returning();
   if (perm.shouldDecrement && perm.grantId) {
@@ -1385,7 +1387,10 @@ router.patch("/admin/listings/:id/status", authMiddleware, requireAdminOrModerat
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { status, isFeatured, cardTheme } = req.body as { status?: string; isFeatured?: boolean; cardTheme?: unknown };
   const updates: Partial<typeof listingsTable.$inferInsert> = {};
-  if (status && ["active", "pending", "rejected"].includes(status)) updates.status = status;
+  if (status && ["active", "inactive", "pending", "rejected"].includes(status)) {
+    updates.status = status;
+    updates.isActive = status === "active";
+  }
   if (isFeatured !== undefined) updates.isFeatured = Boolean(isFeatured);
   if (cardTheme !== undefined) updates.cardTheme = normalizeListingCardTheme(cardTheme);
   await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id));
@@ -1438,6 +1443,8 @@ router.post("/admin/listings/bulk-delete", authMiddleware, requireAdminOrModerat
     ? [...new Set(ids.map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0))]
     : [];
   if (cleanIds.length === 0) { res.status(400).json({ error: "Silinecek ilan seçilmedi" }); return; }
+  await db.delete(listingLikesTable).where(inArray(listingLikesTable.listingId, cleanIds));
+  await db.delete(listingFavoritesTable).where(inArray(listingFavoritesTable.listingId, cleanIds));
   const deletedRows = await db.delete(listingsTable).where(inArray(listingsTable.id, cleanIds)).returning({ id: listingsTable.id });
   res.json({ success: true, deleted: deletedRows.length });
 });

@@ -247,6 +247,7 @@ function formatListing(listing: typeof listingsTable.$inferSelect, userId?: numb
     isLikedByMe: userId != null && likedIds != null ? likedIds.has(listing.id) : false,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     expiresAt: listing.expiresAt ? listing.expiresAt.toISOString() : null,
+    autoDeleteOnExpiry: listing.autoDeleteOnExpiry ?? true,
     createdAt: listing.createdAt.toISOString(),
   };
 }
@@ -393,7 +394,7 @@ router.get("/listing-images/:filename", (req, res): void => {
 });
 
 router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
-  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme } = req.body as Record<string, string | undefined>;
+  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme, autoDeleteOnExpiry } = req.body as Record<string, string | boolean | undefined>;
 
   if (!title || !company || !city) {
     res.status(400).json({ error: "Başlık, firma ve şehir zorunludur" });
@@ -428,7 +429,9 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     cardTheme: canUseCardTheme(req.user) ? normalizeCardTheme(cardTheme) : null,
     authorId: req.user!.id,
     status: "active",
+    isActive: true,
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
   }).returning();
 
   // Announce new listing in chat if enabled
@@ -582,7 +585,7 @@ router.patch("/listings/:id", authMiddleware, async (req, res): Promise<void> =>
     return;
   }
 
-  const { title, company, city, salary, workType, description, requirements, status, applyUrl, isFeatured, cardTheme } = req.body as Record<string, unknown>;
+  const { title, company, city, salary, workType, description, requirements, status, applyUrl, isFeatured, cardTheme, autoDeleteOnExpiry } = req.body as Record<string, unknown>;
   const updates: Partial<typeof listingsTable.$inferInsert> = {};
   if (title != null) updates.title = String(title);
   if (company != null) updates.company = String(company);
@@ -594,9 +597,13 @@ router.patch("/listings/:id", authMiddleware, async (req, res): Promise<void> =>
   if (status != null) {
     const nextStatus = String(status);
     if (req.user!.role === "admin" || listing.authorId === req.user!.id) {
-      if (["active", "inactive", "pending", "rejected"].includes(nextStatus)) updates.status = nextStatus;
+      if (["active", "inactive", "pending", "rejected", "expired"].includes(nextStatus)) {
+        updates.status = nextStatus;
+        updates.isActive = nextStatus === "active";
+      }
     }
   }
+  if (autoDeleteOnExpiry !== undefined) updates.autoDeleteOnExpiry = Boolean(autoDeleteOnExpiry);
   if (applyUrl !== undefined) updates.applyUrl = applyUrl == null ? null : String(applyUrl);
   if (isFeatured !== undefined && req.user!.role === "admin") updates.isFeatured = Boolean(isFeatured);
   if (cardTheme !== undefined) {
@@ -624,8 +631,30 @@ router.delete("/listings/:id", authMiddleware, async (req, res): Promise<void> =
     return;
   }
 
+  await db.delete(listingLikesTable).where(eq(listingLikesTable.listingId, id));
+  await db.delete(listingFavoritesTable).where(eq(listingFavoritesTable.listingId, id));
   await db.delete(listingsTable).where(eq(listingsTable.id, id));
   res.sendStatus(204);
+});
+
+router.post("/listings/bulk-delete", authMiddleware, async (req, res): Promise<void> => {
+  const { ids } = req.body as { ids?: unknown };
+  const cleanIds = Array.isArray(ids)
+    ? [...new Set(ids.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))]
+    : [];
+  if (cleanIds.length === 0) { res.status(400).json({ error: "Silinecek ilan seçilmedi" }); return; }
+
+  const rows = await db.select().from(listingsTable).where(inArray(listingsTable.id, cleanIds));
+  const allowed = rows.filter(
+    (l) => l.authorId === req.user!.id || req.user!.role === "admin" || req.user!.role === "moderator",
+  );
+  const allowedIds = allowed.map((l) => l.id);
+  if (allowedIds.length === 0) { res.status(403).json({ error: "Silme yetkiniz yok" }); return; }
+
+  await db.delete(listingLikesTable).where(inArray(listingLikesTable.listingId, allowedIds));
+  await db.delete(listingFavoritesTable).where(inArray(listingFavoritesTable.listingId, allowedIds));
+  const deleted = await db.delete(listingsTable).where(inArray(listingsTable.id, allowedIds)).returning({ id: listingsTable.id });
+  res.json({ deleted: deleted.length });
 });
 
 router.post("/listings/:id/republish", authMiddleware, async (req, res): Promise<void> => {
@@ -639,7 +668,7 @@ router.post("/listings/:id/republish", authMiddleware, async (req, res): Promise
   }
   const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   const [updated] = await db.update(listingsTable)
-    .set({ status: "active", expiresAt: newExpiry, createdAt: new Date() })
+    .set({ status: "active", isActive: true, expiresAt: newExpiry, updatedAt: new Date() })
     .where(eq(listingsTable.id, id))
     .returning();
   res.json(formatListing(updated!, req.user!.id, new Set(), new Set(), req.user!.username));

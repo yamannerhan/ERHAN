@@ -14,7 +14,7 @@ import {
   Link, Globe, Radio, AlertCircle, Edit2, ExternalLink, Filter, Zap,
   Cpu, TrendingUp, ShieldCheck, Activity, ArrowUpRight, Bell, BarChart3, PieChart as PieChartIcon, Server, Database, Bot, MessageCircle, Wrench, Terminal, Wifi,
   ChevronRight, Menu, Sun, Moon, FileText, CreditCard, ShieldAlert, LogOut, Globe2, FilePlus, UserCheck, Award,
-  Home, CheckCheck, Heart, MessageCircle, Info, X
+  Home, CheckCheck, Heart, MessageCircle, Info, X, Power
 } from "lucide-react";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -3000,7 +3000,8 @@ export default function AdminDashboard() {
   const [editingAnnouncementContent, setEditingAnnouncementContent] = useState("");
   const [newListing, setNewListing] = useState({
     title: "", company: "", city: "", workType: "Tam Zamanlı",
-    salary: "", description: "", isFeatured: false, cardTheme: "auto", isTimed: false, expiresAt: ""
+    salary: "", description: "", isFeatured: false, cardTheme: "auto", isTimed: false, expiresAt: "",
+    autoDeleteOnExpiry: true,
   });
   const [editingListingId, setEditingListingId] = useState<number | null>(null);
   const [editingListing, setEditingListing] = useState({
@@ -3240,9 +3241,10 @@ export default function AdminDashboard() {
         isFeatured: newListing.isFeatured,
         cardTheme: newListing.cardTheme !== "auto" ? newListing.cardTheme : null,
         expiresAt: newListing.isTimed && newListing.expiresAt ? new Date(newListing.expiresAt).toISOString() : null,
+        autoDeleteOnExpiry: newListing.autoDeleteOnExpiry,
       });
       toast({ title: "İlan eklendi ve yayında" });
-      setNewListing({ title: "", company: "", city: "", workType: "Tam Zamanlı", salary: "", description: "", isFeatured: false, cardTheme: "auto", isTimed: false, expiresAt: "" });
+      setNewListing({ title: "", company: "", city: "", workType: "Tam Zamanlı", salary: "", description: "", isFeatured: false, cardTheme: "auto", isTimed: false, expiresAt: "", autoDeleteOnExpiry: true });
       refetchListings();
       refetchStats();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
@@ -3252,6 +3254,15 @@ export default function AdminDashboard() {
     try {
       await apiCall(`/admin/listings/${id}/status`, "PATCH", { isFeatured: !cur });
       refetchListings();
+    } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
+  };
+
+  const republishListing = async (id: number) => {
+    try {
+      await apiCall(`/listings/${id}/republish`, "POST");
+      toast({ title: "İlan yeniden yayınlandı" });
+      refetchListings();
+      refetchStats();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
 
@@ -3763,6 +3774,19 @@ export default function AdminDashboard() {
               </span>
             </label>
 
+            <label className="flex items-start gap-2 cursor-pointer rounded-xl border border-white/10 bg-white/5 p-3">
+              <input
+                type="checkbox"
+                checked={newListing.autoDeleteOnExpiry}
+                onChange={e => setNewListing(l => ({ ...l, autoDeleteOnExpiry: e.target.checked }))}
+                className="w-4 h-4 mt-0.5 rounded accent-primary shrink-0"
+              />
+              <div>
+                <span className="text-sm font-medium">Bitince otomatik sil</span>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Kapalıysa süre dolunca pasif olur, yeniden yayınlanabilir.</p>
+              </div>
+            </label>
+
             <Button onClick={addListing} className="w-full text-sm bg-gradient-to-r from-primary to-secondary">
               <Plus className="w-4 h-4 mr-1" /> İlanı Yayınla
             </Button>
@@ -4000,6 +4024,7 @@ export default function AdminDashboard() {
               >
                 <option value="all">Tüm durumlar</option>
                 <option value="active">Aktif</option>
+                <option value="inactive">Pasif</option>
                 <option value="pending">Bekleyen</option>
                 <option value="rejected">Reddedilen</option>
               </select>
@@ -4055,9 +4080,10 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                         l.status === "active" ? "bg-green-500/20 text-green-400" :
+                        l.status === "inactive" ? "bg-white/10 text-muted-foreground" :
                         l.status === "pending" ? "bg-amber-500/20 text-amber-400" :
                         "bg-destructive/20 text-destructive"
-                      }`}>{l.status === "active" ? "Aktif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
+                      }`}>{l.status === "active" ? "Aktif" : l.status === "inactive" ? "Pasif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
                       {l.isFeatured && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">Öne Çıkan</span>}
                       {l.expiresAt && <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5" />{formatDate(l.expiresAt)}</span>}
                       <span className="text-[10px] text-muted-foreground">{formatDate(l.createdAt)}</span>
@@ -4104,9 +4130,19 @@ export default function AdminDashboard() {
                   <button onClick={() => startEditListing(l)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-primary/15 text-primary rounded-lg hover:bg-primary/25 transition-colors">
                     <Edit2 className="w-3 h-3" /> Düzenle
                   </button>
+                  {l.status === "active" && (
+                    <button onClick={() => setListingStatus(l.id, "inactive")} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors">
+                      <Power className="w-3 h-3" /> Pasif yap
+                    </button>
+                  )}
+                  {l.status !== "active" && (
+                    <button onClick={() => republishListing(l.id)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-amber-500/20 text-amber-400 rounded-lg hover:bg-amber-500/30 transition-colors">
+                      <RefreshCw className="w-3 h-3" /> Yeniden yayınla
+                    </button>
+                  )}
                   {l.status !== "active" && (
                     <button onClick={() => setListingStatus(l.id, "active")} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-green-500/20 text-green-400 rounded-lg hover:bg-green-500/30 transition-colors">
-                      <CheckCircle className="w-3 h-3" /> Onayla
+                      <CheckCircle className="w-3 h-3" /> Aktif yap
                     </button>
                   )}
                   {l.status !== "rejected" && (

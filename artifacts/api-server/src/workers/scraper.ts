@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
-import { eq, and, isNotNull, lt, or, sql, inArray, like } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
@@ -510,6 +510,7 @@ async function processMessage(
     requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
     status: "active",
     isActive: true,
+    autoDeleteOnExpiry: true,
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
     expiresAt: listingExpiryFrom(postedAt),
@@ -1121,34 +1122,63 @@ export function isTelegramTokenSet(): boolean {
   return isBotTokenSet();
 }
 
-/** Süresi dolan ilanları kalıcı sil (profilden ve siteden kalkar). */
+async function deleteListingsByIds(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  await db.delete(listingLikesTable).where(inArray(listingLikesTable.listingId, ids));
+  await db.delete(listingFavoritesTable).where(inArray(listingFavoritesTable.listingId, ids));
+  const deleted = await db.delete(listingsTable)
+    .where(inArray(listingsTable.id, ids))
+    .returning({ id: listingsTable.id });
+  return deleted.length;
+}
+
+/** Süresi dolan ilanlar: tikli ise sil, tiksiz ise pasif yap. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
   const cutoff = new Date(Date.now() - INITIAL_SCAN_MS);
 
-  const rows = await db.select({ id: listingsTable.id })
+  const toDeleteRows = await db.select({ id: listingsTable.id })
     .from(listingsTable)
     .where(or(
-      and(isNotNull(listingsTable.expiresAt), lt(listingsTable.expiresAt, now)),
+      and(
+        isNotNull(listingsTable.expiresAt),
+        lt(listingsTable.expiresAt, now),
+        or(eq(listingsTable.autoDeleteOnExpiry, true), isNotNull(listingsTable.sourceTag)),
+      ),
       and(
         isNotNull(listingsTable.sourceTag),
         lt(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt})`, cutoff),
       ),
     ));
 
-  const ids = rows.map((r) => r.id);
-  if (ids.length === 0) return 0;
+  const toDeactivateRows = await db.select({ id: listingsTable.id })
+    .from(listingsTable)
+    .where(and(
+      isNotNull(listingsTable.expiresAt),
+      lt(listingsTable.expiresAt, now),
+      eq(listingsTable.autoDeleteOnExpiry, false),
+      isNull(listingsTable.sourceTag),
+      eq(listingsTable.status, "active"),
+    ));
 
-  await db.delete(listingLikesTable).where(inArray(listingLikesTable.listingId, ids));
-  await db.delete(listingFavoritesTable).where(inArray(listingFavoritesTable.listingId, ids));
-  const deleted = await db.delete(listingsTable)
-    .where(inArray(listingsTable.id, ids))
-    .returning({ id: listingsTable.id });
+  const deleteIds = toDeleteRows.map((r) => r.id);
+  const deactivateIds = toDeactivateRows.map((r) => r.id).filter((id) => !deleteIds.includes(id));
 
-  if (deleted.length > 0) {
-    logger.info({ count: deleted.length }, "scraper: süresi dolan ilanlar silindi");
+  let affected = 0;
+  if (deleteIds.length > 0) {
+    const n = await deleteListingsByIds(deleteIds);
+    affected += n;
+    logger.info({ count: n }, "scraper: süresi dolan ilanlar silindi");
   }
-  return deleted.length;
+  if (deactivateIds.length > 0) {
+    const deactivated = await db.update(listingsTable)
+      .set({ status: "inactive", isActive: false })
+      .where(inArray(listingsTable.id, deactivateIds))
+      .returning({ id: listingsTable.id });
+    affected += deactivated.length;
+    logger.info({ count: deactivated.length }, "scraper: süresi dolan ilanlar pasife alındı");
+  }
+  return affected;
 }
 
 /** @deprecated purgeExpiredListings kullanın */

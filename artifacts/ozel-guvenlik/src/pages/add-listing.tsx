@@ -48,7 +48,7 @@ export default function AddListing() {
   const createMutation = useCreateListing();
   const { user } = useAuth();
   const [dupWarning, setDupWarning] = useState<string | null>(null);
-  const [smartText, setSmartText] = useState("");
+  const [autoDeleteOnExpiry, setAutoDeleteOnExpiry] = useState(true);
   const [smartLoading, setSmartLoading] = useState(false);
 
   // Image upload state
@@ -149,6 +149,7 @@ export default function AddListing() {
         applyUrl: values.applyUrl || null,
         companyLogoUrl: values.companyLogoUrl || null,
         cardTheme: values.cardTheme && values.cardTheme !== "auto" ? values.cardTheme : null,
+        autoDeleteOnExpiry,
       };
       await createMutation.mutateAsync({ data: payload as any });
       toast({ title: "İlan başarıyla yayınlandı", description: "İlan 1 ay boyunca yayında kalacaktır. Adminlere inceleme bildirimi gönderildi." });
@@ -438,6 +439,21 @@ export default function AddListing() {
                   {dupWarning}
                 </div>
               )}
+
+              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoDeleteOnExpiry}
+                  onChange={e => setAutoDeleteOnExpiry(e.target.checked)}
+                  className="w-4 h-4 mt-0.5 rounded accent-primary shrink-0"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Bitince otomatik sil</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    İşaretliyse süre dolunca ilan tamamen silinir. Kapalıysa pasif olur, profilinizden yeniden yayınlayabilirsiniz.
+                  </p>
+                </div>
+              </label>
 
               <Button
                 type="submit"
