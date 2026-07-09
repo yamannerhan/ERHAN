@@ -35,8 +35,11 @@ const DISTRICT_TO_CITY: Record<string, { city: string; district: string }> = {
   pendik: { city: "İstanbul", district: "Pendik" }, tuzla: { city: "İstanbul", district: "Tuzla" },
   sultanbeyli: { city: "İstanbul", district: "Sultanbeyli" }, sancaktepe: { city: "İstanbul", district: "Sancaktepe" },
   çekmeköy: { city: "İstanbul", district: "Çekmeköy" }, silivri: { city: "İstanbul", district: "Silivri" },
+  küçükçekmece: { city: "İstanbul", district: "Küçükçekmece" }, büyükçekmece: { city: "İstanbul", district: "Büyükçekmece" },
+  eyüpsultan: { city: "İstanbul", district: "Eyüpsultan" }, beykoz: { city: "İstanbul", district: "Beykoz" },
   gebze: { city: "Kocaeli", district: "Gebze" }, darıca: { city: "Kocaeli", district: "Darıca" },
   çayırova: { city: "Kocaeli", district: "Çayırova" }, dilovası: { city: "Kocaeli", district: "Dilovası" },
+  başiskele: { city: "Kocaeli", district: "Başiskele" },
   keçiören: { city: "Ankara", district: "Keçiören" }, çankaya: { city: "Ankara", district: "Çankaya" },
   yenimahalle: { city: "Ankara", district: "Yenimahalle" }, sincan: { city: "Ankara", district: "Sincan" },
   etimesgut: { city: "Ankara", district: "Etimesgut" }, mamak: { city: "Ankara", district: "Mamak" },
@@ -53,6 +56,18 @@ const NEIGHBORHOODS: Record<string, { city: string; district?: string; neighborh
   ikitelli: { city: "İstanbul", district: "Başakşehir", neighborhood: "İkitelli" },
   dudullu: { city: "İstanbul", district: "Ümraniye", neighborhood: "Dudullu" },
   tuzlaosb: { city: "İstanbul", district: "Tuzla", neighborhood: "Tuzla OSB" },
+  yenibosna: { city: "İstanbul", district: "Bahçelievler", neighborhood: "Yenibosna" },
+  halkalı: { city: "İstanbul", district: "Küçükçekmece", neighborhood: "Halkalı" },
+  atakent: { city: "İstanbul", district: "Küçükçekmece", neighborhood: "Atakent" },
+  maslak: { city: "İstanbul", district: "Sarıyer", neighborhood: "Maslak" },
+  etiler: { city: "İstanbul", district: "Beşiktaş", neighborhood: "Etiler" },
+  kurtköy: { city: "İstanbul", district: "Pendik", neighborhood: "Kurtköy" },
+  kozyatağı: { city: "İstanbul", district: "Kadıköy", neighborhood: "Kozyatağı" },
+  mimaroba: { city: "İstanbul", district: "Büyükçekmece", neighborhood: "Mimaroba" },
+  firuzköy: { city: "İstanbul", district: "Avcılar", neighborhood: "Firuzköy" },
+  ataköy: { city: "İstanbul", district: "Bakırköy", neighborhood: "Ataköy" },
+  ayazağa: { city: "İstanbul", district: "Sarıyer", neighborhood: "Ayazağa" },
+  içmeler: { city: "İstanbul", district: "Tuzla", neighborhood: "İçmeler" },
   ostim: { city: "Ankara", district: "Yenimahalle", neighborhood: "OSTİM" },
   aosb: { city: "İzmir", district: "Çiğli", neighborhood: "Atatürk OSB" },
   nosab: { city: "Bursa", district: "Nilüfer", neighborhood: "NOSAB" },
@@ -224,21 +239,46 @@ export function extractLocation(text: string): ParsedLocation {
   return { city: null, district: null, neighborhood: null, display: null };
 }
 
+const HIRING_SIGNAL = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacakt[ıi]r|al[ıi]n[ıi]cakt[ıi]r|al[ıi]m[ıi]\s+yap[ıi]lacak|al[ıi]m[ıi]\s+olacak|personel\s+al[ıi]m[ıi]|personeli\s+al[ıi]m[ıi]|eleman\s+al[ıi]m[ıi]|görevlisi\s+aran[ıi]yor|ihtiyac[ıi]m[ıi]z|ihtiya[çc][ıi]m[ıi]z|istihdam|kontenjan|görevlendirilmek|çalışma\s+arkadaşları\s+aran|ekip\s+arkadaş)/;
+
+export function isSponsoredPost(text: string): boolean {
+  const t = normalizeTr(text);
+  return /#sponsorlu|sponsorlu\s*·|garanti\s+bbva|sur\s+yap[ıi]|ömür\s+boyu\s+tatil|magfi\b|caz\s+festivali|hemen\s+keşfet/i.test(t);
+}
+
+export function isNonSecurityStaffPosting(text: string): boolean {
+  const t = normalizeTr(text);
+  const staffJob = /(?:temizlik\s+personeli|temizlik\s+görevlisi|temizlik\s+gorevlisi|camc[ıi]\s+temizlik|makineci\s+temizlik|bak[ıi]m\s+personeli|bak[ıi]c[ıi]\s+personeli|hasta\s+bak[ıi]m|kad[ıi]n\s+bak[ıi]m|zemin\s+y[ıi]kama\s+personeli|çöp\s+toplama)/.test(t);
+  if (!staffJob) return false;
+  const securityRole = /(?:özel\s+g[üu]venlik|ögg|g[üu]venlik\s+(?:görevlisi|personeli|amiri|sorumlusu)|5188)/.test(t);
+  return !securityRole;
+}
+
 export function isJobSeekerPost(text: string): boolean {
   const t = normalizeTr(text);
-  return /(?:i[şs]\s+ar[ıi]yorum|i[şs]\s+bak[ıi]yorum|i[şs]\s+istiyorum|g[üu]venlik\s+i[şs]i\s+ar[ıi]yorum|çalışmak\s+istiyorum|sertifikam\s+var|kimli[ğg]im\s+var|tecr[üu]beliyim|cv|özgeçmiş)/.test(t)
-    && !/(?:aran[ıi]yor|al[ıi]nacak|al[ıi]m[ıi]|personel\s+al[ıi]m[ıi]|eleman\s+al[ıi]m[ıi]|görevlisi\s+aran[ıi]yor)/.test(t);
+  const seeking = /(?:i[şs]\s+ar[ıi]yorum|i[şs]\s+bak[ıi]yorum|i[şs]\s+istiyorum|i[şs]\s+aray[ıi][şs][ıi]nday[ıi]m|i[şs]\s+aramaktan|g[üu]venlik\s+i[şs]i\s+ar[ıi]yorum|çalışmak\s+istiyorum|sertifikam\s+var|kimli[ğg]im\s+(?:var|mevcut)|tecr[üu]beliyim|özgeçmiş(?:im)?\s+var|cv\s+(?:gönder|yolla|atsam|atabilir)|part\s*time\s+aray[ıi][şs]|projesi\s+laz[ıi]m|laz[ıi]m\s+varsa\s+dm|işverenler\s+dm|sadece\s+yard[ıi]mc[ıi]\s+olabilecek|başvuru\s+yapan\s+var\s*m[ıi]|bilgisi\s+(?:olan|fikri)|nasıl\s+başvuru|şartlar\s+nedir)/.test(t);
+  if (!seeking) return false;
+  return !HIRING_SIGNAL.test(t);
 }
 
 export function isSecurityJobPosting(text: string): boolean {
-  if (isJobSeekerPost(text) || text.length < 20) return false;
-  const t = normalizeTr(text);
-  const security = /(özel\s+g[üu]venlik|g[üu]venlik\s+i[şs]\s+ilan|g[üu]venlik\s+eleman|g[üu]venlik\s+görev|g[üu]venlik\s+görevlisi|g[üu]venlik\s+personeli|g[üu]venlik|ögg|ogg|silahl[ıi]|silahs[ıi]z|5188|kimlikli|sertifikal[ıi]|koruma\s+görev)/.test(t);
-  if (!security) return false;
+  if (text.length < 15) return false;
+  if (isSponsoredPost(text) || isNonSecurityStaffPosting(text) || isJobSeekerPost(text)) return false;
 
-  const hiring = /(aran[ıi]yor|al[ıi]nacak|al[ıi]m[ıi]|al[ıi]n[ıi]cakt[ıi]r|ihtiya[çc]|personel|eleman|tak[ıi]m|görevlisi|g[öo]rev|ba[şs]vuru|başvur|cv|ileti[şs]im|wp|whatsapp|dm|özelden)/.test(t);
-  const salary = /(?:maa[şs]|[üu]cret|hakedi[şs]|ayl[ıi]k|\d{2,3}\s*bin|\d{1,3}[.,]\d{3}\s*(?:tl|₺|lira)?|asgari\s+[üu]cret|net\s+maa[şs])/.test(t);
-  const details = /(?:0|\+90)?5\d{9}|vardiya|servis|yemek|sgk|proje|avm|site|fabrika|depo|hastane|metro|bay|bayan|erkek|kad[ıi]n/.test(t);
+  const t = normalizeTr(text);
+  const explicitSecurity = /(?:özel\s+g[üu]venlik|ögg\b|ögg\s+kimlik|g[üu]venlik\s+(?:iş\s+ilan[ıi]|eleman[ıi]|görevlisi|personeli|amiri|sorumlusu)|g[üu]venlik\s+görev|bay\s+g[üu]venlik|bayan\s+g[üu]venlik|silahl[ıi]\s+g[üu]venlik|silahs[ıi]z\s+g[üu]venlik|5188|kimlik\s+kart[ıi]|ögg\s+personel|koruma\s+görev|kimlikli\s+(?:özel\s+)?g[üu]venlik|maç\s+günü\s+görev)/.test(t);
+  const broadSecurity = /(?:g[üu]venlik|ögg|ogg|silahl[ıi]|silahs[ıi]z|kimlikli|sertifikal[ıi])/.test(t);
+  const channelSecurityContext = /(?:avm|plaza|site|otel|rezidans|fabrika|depo|holding|stadyum).{0,500}(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]m[ıi]|al[ıi]n[ıi]cakt[ıi]r|ihtiya[çc]|görevlendirilmek)/.test(t)
+    && /(?:ticket|sodexso|setcard|multinet|vardiya|2\s*\+\s*2|ögg|5188|kimlik|g[üu]venlik|44000|45000)/.test(t);
+
+  if (!explicitSecurity && !broadSecurity && !channelSecurityContext) return false;
+
+  const hiring = HIRING_SIGNAL.test(t)
+    || /(?:al[ıi]nacak|al[ıi]m[ıi]|personel|eleman|tak[ıi]m\s+arkadaş|ba[şs]vuru|ileti[şs]im|irtibat|whatsapp|watsapp|wp\b)/.test(t);
+  const salary = /(?:maa[şs]|[üu]cret|hakedi[şs]|ayl[ıi]k|ele\s+ge[çc]en|\d{2,3}\s*bin|\d{1,3}[.,]\d{3}(?:\s*(?:tl|lira))?|asgari\s+[üu]cret|net\s+maa[şs]|görev\s+[üu]creti)/.test(t);
+  const hasPhone = /(?:0|\+90)?[\s-]*5\d{2}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}/.test(t) || /5\d{9}/.test(t);
+  const hasDetails = /vardiya|servis|yemek|sgk|proje|avm|site|fabrika|depo|hastane|metro|bay|bayan|erkek|kadin|2\+2|2\s+\+\s+2/.test(t);
+  const details = hasPhone || hasDetails;
 
   return hiring || salary || details;
 }

@@ -4,16 +4,18 @@ import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like } from "drizzle-
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
-import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { announceNewListing } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
 
 // ── Keyword lists ──────────────────────────────────────────────────
 const CHAT_SKIP_KEYWORDS = [
-  "selam", "merhaba", "nasılsın", "iş var mı", "iş arıyorum",
-  "özelden yaz", "teşekkür", "tamam", "günaydın", "iyi akşam",
-  "kolay gelsin", "iyi günler",
+  "selam", "merhaba", "nasılsın", "iş var mı", "iş arıyorum", "iş arayışı",
+  "özelden yaz", "teşekkür", "tamam", "günaydın", "iyi akşam", "iyi geceler",
+  "kolay gelsin", "iyi günler", "iyi akşamlar", "allaha emanet", "rica ederim",
+  "ne zaman açıklanacak", "sonuçlar", "abla yaz", "atlarız", "hadı hayırlısı",
+  "lazım varsa dm", "iş aramaktan yoruldum", "işverenler dm",
 ];
 
 // ── Text utils ─────────────────────────────────────────────────────
@@ -284,6 +286,7 @@ function listingExpiryFrom(postedAt?: Date): Date {
 
 function isChatMessage(text: string): boolean {
   if (isSecurityJobPosting(text)) return false;
+  if (isSponsoredPost(text) || isJobSeekerPost(text)) return true;
   if (text.length > 500) return false;
   const lower = normalizeText(text);
   return CHAT_SKIP_KEYWORDS.some(kw => lower.includes(kw));
