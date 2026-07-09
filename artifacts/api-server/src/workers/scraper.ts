@@ -7,6 +7,7 @@ import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { announceNewListing } from "../lib/listing-announcements";
+import { emitRealtime } from "../lib/realtime";
 
 // ── Keyword lists ──────────────────────────────────────────────────
 const CHAT_SKIP_KEYWORDS = [
@@ -152,7 +153,7 @@ const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 400;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 30;
-const INITIAL_BACKFILL_INTERVAL_MIN = 3;
+const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 10;
@@ -219,7 +220,7 @@ function computeBackwardProgress(
   reachedCutoff: boolean,
 ): number {
   if (reachedCutoff) return 19;
-  let next = Math.min(18, Math.max(current, 1) + 1);
+  let next = Math.min(18, Math.max(current, 1) + 4);
   const oldest = cumulativeOldest ?? oldestInBatch;
   if (oldest) {
     const ageMs = Math.max(0, Date.now() - oldest.getTime());
@@ -241,6 +242,7 @@ async function patchSourceProgress(
   patch: Partial<typeof sourcesTable.$inferInsert>,
 ): Promise<void> {
   await db.update(sourcesTable).set(patch).where(eq(sourcesTable.id, sourceId));
+  emitRealtime("scraper:source", { sourceId, ...patch });
 }
 
 async function deleteListingsForSource(source: typeof sourcesTable.$inferSelect): Promise<number> {
@@ -692,21 +694,11 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   let anchorId = parseInt(source.initialScanAnchorId ?? "0", 10) || 0;
   let topId = parseInt(source.initialScanTopId ?? "0", 10) || 0;
 
-  const gramConnected = await ensureTelegramConnected(3);
   logger.info(
     `scraper: @${username} ${isInitialScan
       ? `ilk tarama [${phase}] %${source.initialScanProgress ?? 1}`
-      : `yeni mesajlar (id>${lastId})`} gramjs=${gramConnected}`,
+      : `yeni mesajlar (id>${lastId})`}`,
   );
-
-  if (!gramConnected) {
-    await patchSourceProgress(source.id, {
-      lastCheckedAt: new Date(),
-      lastError: CONNECTION_ERR,
-      isScanning: false,
-    });
-    return stats;
-  }
 
   await patchSourceProgress(source.id, { lastError: null, isScanning: true });
 
@@ -722,7 +714,20 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
+      if (!(await ensureTelegramConnected(2))) {
+        await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+        return stats;
+      }
       throw e;
+    }
+
+    if (result.messages.length === 0 && !(await ensureTelegramConnected(1))) {
+      await patchSourceProgress(source.id, {
+        lastCheckedAt: new Date(),
+        lastError: CONNECTION_ERR,
+        isScanning: false,
+      });
+      return stats;
     }
 
     const merged = mergeIdRange(anchorId, topId, result.minIdInBatch, result.maxIdInBatch);
@@ -815,7 +820,20 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
+    if (!(await ensureTelegramConnected(2))) {
+      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+      return stats;
+    }
     throw e;
+  }
+
+  if (messages.length === 0 && !(await ensureTelegramConnected(1)) && isInitialScan) {
+    await patchSourceProgress(source.id, {
+      lastCheckedAt: new Date(),
+      lastError: CONNECTION_ERR,
+      isScanning: false,
+    });
+    return stats;
   }
 
   stats.messagesRead = messages.length;
@@ -973,6 +991,12 @@ async function scanTelegramSources(
   }
 
   logger.info({ sourceId: fresh.id, cycleAdded, cycleErrors }, "scraper: döngü özeti (tek kaynak)");
+
+  emitRealtime("scraper:status", {
+    telegramGramJsConnected: await ensureTelegramConnected(1),
+    scanPhase: await getScanPhase(),
+    effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
+  });
 }
 
 // ── Main scraper loop ──────────────────────────────────────────────

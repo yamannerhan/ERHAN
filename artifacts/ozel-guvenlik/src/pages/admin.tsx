@@ -1424,8 +1424,8 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const defaultForm = { name: "", platform: "telegram", url: "", apiToken: "", active: true, checkInterval: 1, autoPublish: true, requireApproval: false, targetCitiesText: "", publishOnlyTargetCities: false };
   const [form, setForm] = useState<typeof defaultForm>(defaultForm);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [d] = await Promise.all([
         apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean; telegramGramJsConnected?: boolean; effectiveScanIntervalMinutes?: number; scanPhase?: "initial" | "incremental" }>,
@@ -1435,16 +1435,28 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
       setTelegramConnected(d.telegramGramJsConnected ?? false);
       setEffectiveScanInterval(d.effectiveScanIntervalMinutes ?? 30);
       setScanPhase(d.scanPhase ?? "incremental");
-    } catch { /* ignore */ } finally { setLoading(false); }
+    } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   };
 
-  useEffect(() => { void load(); }, []);
-
   useEffect(() => {
-    const ms = scanPhase === "initial" ? 2_000 : 30_000;
-    const t = setInterval(() => { void load(); }, ms);
-    return () => clearInterval(t);
-  }, [scanPhase]);
+    void load();
+    const socket = socketIo(window.location.origin, { path: "/ws", transports: ["websocket", "polling"] });
+    socket.on("scraper:source", (data: Partial<Source> & { sourceId: number }) => {
+      setSources(prev => prev.map(s => s.id === data.sourceId ? {
+        ...s,
+        ...data,
+        lastCheckedAt: data.lastCheckedAt !== undefined
+          ? (typeof data.lastCheckedAt === "string" ? data.lastCheckedAt : s.lastCheckedAt)
+          : s.lastCheckedAt,
+      } : s));
+    });
+    socket.on("scraper:status", (data: { telegramGramJsConnected?: boolean; scanPhase?: "initial" | "incremental"; effectiveScanIntervalMinutes?: number }) => {
+      if (data.telegramGramJsConnected !== undefined) setTelegramConnected(data.telegramGramJsConnected);
+      if (data.scanPhase) setScanPhase(data.scanPhase);
+      if (data.effectiveScanIntervalMinutes) setEffectiveScanInterval(data.effectiveScanIntervalMinutes);
+    });
+    return () => { socket.disconnect(); };
+  }, []);
 
   const saveSource = async () => {
     if (!form.name.trim() || !form.url.trim()) { toast({ title: "Hata", description: "Ad ve URL zorunlu", variant: "destructive" }); return; }

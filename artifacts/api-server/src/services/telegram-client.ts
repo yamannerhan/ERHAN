@@ -87,6 +87,7 @@ async function restoreSessionFromDb(forceReconnect = false): Promise<boolean> {
   if (await client.isUserAuthorized()) {
     currentState = "connected";
     currentPhone = row.phone ?? null;
+    void onTelegramConnected();
     return true;
   }
 
@@ -97,6 +98,27 @@ async function restoreSessionFromDb(forceReconnect = false): Promise<boolean> {
 }
 
 let connectMutex: Promise<boolean> | null = null;
+let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+function startTelegramKeepalive(): void {
+  if (keepaliveTimer) return;
+  keepaliveTimer = setInterval(() => {
+    void (async () => {
+      if (!client || currentState !== "connected") return;
+      try {
+        await client.invoke(new Api.updates.GetState());
+      } catch (e) {
+        logger.warn({ err: e }, "telegram-client: keepalive failed, reconnecting");
+        currentState = "disconnected";
+        await ensureTelegramConnectedInner(3);
+      }
+    })();
+  }, 45_000);
+}
+
+async function onTelegramConnected(): Promise<void> {
+  startTelegramKeepalive();
+}
 
 async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
   if (!API_ID || !API_HASH) return false;
@@ -104,7 +126,10 @@ async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
   for (let attempt = 0; attempt < retries; attempt++) {
     if (client && currentState === "connected") {
       try {
-        if (await client.isUserAuthorized()) return true;
+        if (await client.isUserAuthorized()) {
+          void onTelegramConnected();
+          return true;
+        }
       } catch {
         currentState = "disconnected";
       }
@@ -112,6 +137,7 @@ async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
 
     try {
       if (await restoreSessionFromDb(attempt > 0)) {
+        void onTelegramConnected();
         if (attempt > 0) logger.info("telegram-client: oturum yeniden bağlandı");
         return true;
       }
@@ -186,6 +212,7 @@ export async function verifyCode(code: string): Promise<{ needs2FA: boolean }> {
     currentState = "connected";
     const sessionStr = (client.session as StringSession).save();
     await saveSession({ authState: "connected", sessionString: sessionStr });
+    void onTelegramConnected();
     return { needs2FA: false };
   } catch (e: unknown) {
     const msg = (e as { errorMessage?: string }).errorMessage ?? String(e);
@@ -205,9 +232,11 @@ export async function verifyPassword(password: string): Promise<void> {
   currentState = "connected";
   const sessionStr = (client.session as StringSession).save();
   await saveSession({ authState: "connected", sessionString: sessionStr });
+  void onTelegramConnected();
 }
 
 export async function logout(): Promise<void> {
+  if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
   try { await client?.invoke(new Api.auth.LogOut({})); } catch { /* ignore */ }
   client = null;
   currentState = "disconnected";
