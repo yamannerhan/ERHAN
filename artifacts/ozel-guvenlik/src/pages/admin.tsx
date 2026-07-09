@@ -1235,6 +1235,7 @@ interface Source {
   lastScanDuplicates?: number;
   lastScanErrors?: number;
   isScanning?: boolean;
+  initialScanOffsetId?: string | null;
   createdAt: string;
 }
 
@@ -1673,6 +1674,9 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     {(s.lastScanAdded ?? 0) > 0 && <span className="text-[10px] text-green-400">Son: +{s.lastScanAdded} eklendi</span>}
                     {!s.initialScanDone && s.platform === "telegram" && <span className="text-[10px] text-amber-400">30g ilk tarama…</span>}
                     {s.lastTelegramMessageId && <span className="text-[10px] text-muted-foreground">Son ID: {s.lastTelegramMessageId}</span>}
+                    {s.initialScanOffsetId && !s.initialScanDone && (
+                      <span className="text-[10px] text-amber-400">Offset: {s.initialScanOffsetId}</span>
+                    )}
                     {s.lastCheckedAt && <span className="text-[10px] text-muted-foreground">Son tarama: {new Date(s.lastCheckedAt).toLocaleString("tr-TR")}</span>}
                   </div>
                   {s.platform === "telegram" && (

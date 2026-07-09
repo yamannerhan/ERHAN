@@ -167,10 +167,11 @@ export interface FetchChannelResult {
 }
 
 function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
-  if (!m.message || m.message.length < 10) return null;
+  const text = m.message?.trim() ?? "";
+  if (text.length < 5) return null;
   return {
     id: String(m.id),
-    text: m.message,
+    text: text,
     url: `https://t.me/${username}/${m.id}`,
     postedAt: typeof m.date === "number" ? new Date(m.date * 1000) : undefined,
   };
@@ -178,7 +179,7 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
 const MAX_INITIAL_PAGES_TOTAL = 200;
-export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 50;
+export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 10;
 const BATCH_DELAY_MS = 1_500;
 
 function sleep(ms: number): Promise<void> {
@@ -214,7 +215,8 @@ export async function fetchChannelMessages(
   username: string,
   options: { minMessageId?: number; maxAgeDays?: number; offsetId?: number; maxPages?: number } = {},
 ): Promise<FetchChannelResult> {
-  const empty: FetchChannelResult = { messages: [], reachedCutoff: false, noMoreMessages: true, nextOffsetId: 0 };
+  const fallbackOffset = options.offsetId ?? 0;
+  const empty: FetchChannelResult = { messages: [], reachedCutoff: false, noMoreMessages: false, nextOffsetId: fallbackOffset };
   if (!client || !isClientConnected()) return empty;
 
   const minId = options.minMessageId ?? 0;
