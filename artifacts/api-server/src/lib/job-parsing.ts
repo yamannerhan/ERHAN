@@ -1,4 +1,8 @@
 // Telegram/elle eklenen ilan metinlerinden akıllı ilan bilgisi çıkarımı.
+import {
+  getSupplementalDistricts,
+  getSupplementalNeighborhoods,
+} from "./location-terms";
 const NUM = "(\\d{1,3}(?:[.,]\\d{3})+|\\d{5,6})";
 const CUR = "(?:tl|₺|try|lira)";
 
@@ -48,6 +52,7 @@ const DISTRICT_TO_CITY: Record<string, { city: string; district: string }> = {
   konak: { city: "İzmir", district: "Konak" }, torbalı: { city: "İzmir", district: "Torbalı" },
   nilüfer: { city: "Bursa", district: "Nilüfer" }, osmangazi: { city: "Bursa", district: "Osmangazi" },
   yıldırım: { city: "Bursa", district: "Yıldırım" }, inegöl: { city: "Bursa", district: "İnegöl" },
+  ...getSupplementalDistricts(),
 };
 
 const NEIGHBORHOODS: Record<string, { city: string; district?: string; neighborhood: string }> = {
@@ -71,6 +76,7 @@ const NEIGHBORHOODS: Record<string, { city: string; district?: string; neighborh
   ostim: { city: "Ankara", district: "Yenimahalle", neighborhood: "OSTİM" },
   aosb: { city: "İzmir", district: "Çiğli", neighborhood: "Atatürk OSB" },
   nosab: { city: "Bursa", district: "Nilüfer", neighborhood: "NOSAB" },
+  ...getSupplementalNeighborhoods(),
 };
 
 export interface ParsedLocation {

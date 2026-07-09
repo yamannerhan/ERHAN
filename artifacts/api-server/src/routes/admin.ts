@@ -4,6 +4,7 @@ import { eq, desc, ilike, and, sql, asc, or, isNull, gt, inArray } from "drizzle
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { onlineSockets } from "./chat";
 import { extractGender } from "../lib/job-parsing";
+import { getBuiltinRegionalFilterTerms } from "../lib/location-terms";
 import bcrypt from "bcryptjs";
 
 const router = Router();
@@ -93,6 +94,7 @@ const BUILTIN_LOCATION_FILTER_TERMS: { province: string; term: string; display: 
   { province: "Kocaeli", term: "ford otosan", display: "Kocaeli / Gölcük / Ford Otosan" },
   { province: "Kocaeli", term: "safiport", display: "Kocaeli / Derince / Safiport" },
   { province: "Kocaeli", term: "evyapport", display: "Kocaeli / Körfez / Evyapport" },
+  ...getBuiltinRegionalFilterTerms(),
 ];
 
 function normalizeCompare(value: string | null) {

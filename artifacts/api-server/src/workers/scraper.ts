@@ -6,6 +6,7 @@ import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAG
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
+import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
 
@@ -81,14 +82,19 @@ function matchesTargetCities(
   const plain = text.toLocaleLowerCase("tr-TR");
   const cityNorm = (location.city ?? "").toLocaleLowerCase("tr-TR");
   const displayNorm = (location.display ?? "").toLocaleLowerCase("tr-TR");
+  const districtNorm = (location.district ?? "").toLocaleLowerCase("tr-TR");
+
   const matches = targets.some((raw) => {
     const t = raw.trim().toLocaleLowerCase("tr-TR");
     if (!t) return false;
-    return plain.includes(t) || cityNorm.includes(t) || t.includes(cityNorm)
-      || displayNorm.includes(t) || t.includes(displayNorm);
+    if (plain.includes(t) || cityNorm.includes(t) || districtNorm.includes(t)
+      || displayNorm.includes(t) || t.includes(cityNorm) || t.includes(districtNorm)) {
+      return true;
+    }
+    if (textMatchesProvince(text, raw)) return true;
+    return getProvinceMatchTerms(raw).some(term => plain.includes(term.toLocaleLowerCase("tr-TR")));
   });
   if (matches) return true;
-  // Konum çıkarılamadıysa bölgesel kanaldaki ilanları yine geçir
   if (!location.city && !location.district) return true;
   return false;
 }

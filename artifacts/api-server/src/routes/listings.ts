@@ -7,6 +7,7 @@ import sharp from "sharp";
 import path from "path";
 import fs from "fs";
 import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractSalary, extractTitle, extractWorkType } from "../lib/job-parsing";
+import { getRegionalDistrictProvinces } from "../lib/location-terms";
 
 // ── Listing image upload setup ──────────────────────────────────────────────
 const LISTING_IMAGES_DIR = path.join(process.cwd(), "uploads", "listing-images");
@@ -84,6 +85,8 @@ const DISTRICT_PROVINCES: Record<string, string> = {
   "tepecik", "muallimköy", "muallimkoy", "köseler", "koseler", "cumhuriyet mahallesi", "derince liman", "evyapport", "safiport", "ford otosan",
   "hyundai assan", "assa abloy", "pirelli", "brisa", "gölcük tersane", "golcuk tersane", "ford yeniköy", "ford yenikoy",
 ].forEach(term => { DISTRICT_PROVINCES[term] = "Kocaeli"; });
+
+Object.assign(DISTRICT_PROVINCES, getRegionalDistrictProvinces());
 
 function parseHiddenListingCities(raw: string | null | undefined): string[] {
   if (!raw) return [];
