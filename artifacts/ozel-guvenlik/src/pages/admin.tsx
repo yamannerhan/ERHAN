@@ -1506,12 +1506,14 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                 <SelectItem value="facebook">Facebook</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={String(form.checkInterval)} onValueChange={v => setForm(f => ({ ...f, checkInterval: Number(v) }))}>
-              <SelectTrigger className="h-8 text-xs bg-white/5 border-white/10"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {INTERVALS.map(i => <SelectItem key={i.v} value={String(i.v)}>{i.l}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {form.platform !== "telegram" && (
+              <Select value={String(form.checkInterval)} onValueChange={v => setForm(f => ({ ...f, checkInterval: Number(v) }))}>
+                <SelectTrigger className="h-8 text-xs bg-white/5 border-white/10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {INTERVALS.map(i => <SelectItem key={i.v} value={String(i.v)}>{i.l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <Input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder={form.platform === "telegram" ? "https://t.me/kanal_adi" : form.platform === "sahibinden" ? "https://www.sahibinden.com/..." : "https://facebook.com/sayfaadi"} className="h-8 text-sm bg-white/5 border-white/10" />
           {form.platform === "telegram" && (
@@ -1609,7 +1611,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     <Link className="w-2.5 h-2.5 shrink-0" />{s.url}
                   </a>
                   <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.checkInterval}dk</span>
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.platform === "telegram" ? "1dk" : `${s.checkInterval}dk`}</span>
                     <span className="text-[10px] text-muted-foreground">{s.totalImported} ilan yayınlandı</span>
                     {s.lastScanPublished > 0 && <span className="text-[10px] text-green-400">Son tarama: +{s.lastScanPublished}</span>}
                     {!s.initialScanDone && s.platform === "telegram" && <span className="text-[10px] text-amber-400">30g ilk tarama…</span>}

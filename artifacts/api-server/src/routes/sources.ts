@@ -39,6 +39,7 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       initialScanDone: s.initialScanDone ?? false,
       telegramChatId: s.telegramChatId ?? null,
       lastTelegramMessageId: s.lastTelegramMessageId ?? null,
+      initialScanOffsetId: s.initialScanOffsetId ?? null,
       createdAt: s.createdAt.toISOString(),
     })),
     telegramTokenSet: isTelegramTokenSet(),
@@ -91,7 +92,10 @@ router.patch("/admin/sources/:id", authMiddleware, requireAdmin, async (req, res
   if (apiToken !== undefined) updates.apiToken = apiToken?.trim() || null;
   if (active !== undefined) updates.active = active;
   if (active !== undefined) updates.status = active ? "active" : "inactive";
-  if (checkInterval !== undefined) updates.checkInterval = checkInterval;
+  if (checkInterval !== undefined) {
+    const [existing] = await db.select({ platform: sourcesTable.platform }).from(sourcesTable).where(eq(sourcesTable.id, id));
+    updates.checkInterval = existing?.platform === "telegram" ? 1 : checkInterval;
+  }
   if (autoPublish !== undefined) updates.autoPublish = autoPublish;
   if (requireApproval !== undefined) updates.requireApproval = requireApproval;
 
@@ -137,6 +141,7 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
   await db.update(sourcesTable).set({
     lastCheckedAt: null,
     lastTelegramMessageId: null,
+    initialScanOffsetId: null,
     initialScanDone: false,
     totalImported: 0,
     lastScanPublished: 0,

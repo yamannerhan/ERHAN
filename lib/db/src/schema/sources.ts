@@ -18,6 +18,8 @@ export const sourcesTable = pgTable("sources", {
   totalImported: integer("total_imported").notNull().default(0),
   telegramChatId: text("telegram_chat_id"),
   lastTelegramMessageId: text("last_telegram_message_id"),
+  /** İlk taramada geriye sayfalama imleci (GramJS offsetId) */
+  initialScanOffsetId: text("initial_scan_offset_id"),
   initialScanDone: boolean("initial_scan_done").notNull().default(false),
   lastScanPublished: integer("last_scan_published").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

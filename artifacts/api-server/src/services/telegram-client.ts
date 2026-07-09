@@ -159,6 +159,13 @@ export interface ChannelMessage {
   postedAt?: Date;
 }
 
+export interface FetchChannelResult {
+  messages: ChannelMessage[];
+  reachedCutoff: boolean;
+  noMoreMessages: boolean;
+  nextOffsetId: number;
+}
+
 function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
   if (!m.message || m.message.length < 20) return null;
   return {
@@ -169,12 +176,16 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
   };
 }
 
-/** GramJS ile kanal mesajlarını çeker. İlk tarama: maxAgeDays geriye; sonraki: minMessageId sonrası. */
+const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
+const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 15;
+
+/** GramJS ile kanal mesajlarını çeker. İlk tarama: maxAgeDays geriye sayfalı; sonraki: minMessageId sonrası. */
 export async function fetchChannelMessages(
   username: string,
-  options: { minMessageId?: number; maxAgeDays?: number } = {},
-): Promise<ChannelMessage[]> {
-  if (!client || !isClientConnected()) return [];
+  options: { minMessageId?: number; maxAgeDays?: number; offsetId?: number; maxPages?: number } = {},
+): Promise<FetchChannelResult> {
+  const empty: FetchChannelResult = { messages: [], reachedCutoff: false, noMoreMessages: true, nextOffsetId: 0 };
+  if (!client || !isClientConnected()) return empty;
 
   const minId = options.minMessageId ?? 0;
   const maxAgeDays = options.maxAgeDays ?? 30;
@@ -183,6 +194,7 @@ export async function fetchChannelMessages(
   const results: ChannelMessage[] = [];
   const seen = new Set<number>();
 
+  // Artımlı tarama: son bilinen mesajdan sonrakiler
   if (minId > 0) {
     const batch = await client.getMessages(entity, { limit: 100, minId });
     for (const m of batch) {
@@ -190,18 +202,30 @@ export async function fetchChannelMessages(
       const mapped = mapGramMessage(username, m);
       if (mapped) results.push(mapped);
     }
-    return results.sort((a, b) => Number(a.id) - Number(b.id));
+    return {
+      messages: results.sort((a, b) => Number(a.id) - Number(b.id)),
+      reachedCutoff: false,
+      noMoreMessages: true,
+      nextOffsetId: 0,
+    };
   }
 
-  let offsetId = 0;
-  for (let page = 0; page < 30; page++) {
+  // İlk tarama: geriye doğru sayfalı, her döngüde sınırlı sayfa
+  let offsetId = options.offsetId ?? 0;
+  const maxPages = options.maxPages ?? PAGES_PER_CYCLE;
+  let reachedCutoff = false;
+  let noMoreMessages = false;
+
+  for (let page = 0; page < maxPages; page++) {
     const batch = await client.getMessages(entity, {
       limit: 100,
       ...(offsetId > 0 ? { offsetId } : {}),
     });
-    if (!batch.length) break;
+    if (!batch.length) {
+      noMoreMessages = true;
+      break;
+    }
 
-    let reachedCutoff = false;
     for (const m of batch) {
       const ts = typeof m.date === "number" ? m.date * 1000 : 0;
       if (ts > 0 && ts < cutoffMs) {
@@ -215,12 +239,21 @@ export async function fetchChannelMessages(
     }
 
     if (reachedCutoff) break;
+
     const last = batch[batch.length - 1];
-    if (!last || batch.length < 100) break;
+    if (!last || batch.length < 100) {
+      noMoreMessages = true;
+      break;
+    }
     offsetId = last.id;
   }
 
-  return results.sort((a, b) => Number(a.id) - Number(b.id));
+  return {
+    messages: results.sort((a, b) => Number(a.id) - Number(b.id)),
+    reachedCutoff,
+    noMoreMessages,
+    nextOffsetId: offsetId,
+  };
 }
 
 /** @deprecated fetchChannelMessages kullanın */
