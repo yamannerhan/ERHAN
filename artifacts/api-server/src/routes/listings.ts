@@ -267,6 +267,9 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   }
   if (search) conditions.push(ilike(listingsTable.title, `%${search}%`));
   conditions.push(eq(listingsTable.status, "active"));
+  conditions.push(eq(listingsTable.isActive, true));
+  const activeCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  conditions.push(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
 
   const settings = await db.select({ hiddenListingCities: adminSettingsTable.hiddenListingCities }).from(adminSettingsTable).limit(1);
   const hiddenCities = parseHiddenListingCities(settings[0]?.hiddenListingCities);
@@ -320,7 +323,11 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
   const rows = await db
     .select({ city: listingsTable.city, count: sql<number>`count(*)::int` })
     .from(listingsTable)
-    .where(eq(listingsTable.status, "active"))
+    .where(and(
+      eq(listingsTable.status, "active"),
+      eq(listingsTable.isActive, true),
+      sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)}`,
+    ))
     .groupBy(listingsTable.city)
     .orderBy(sql`count(*) desc`, listingsTable.city);
 

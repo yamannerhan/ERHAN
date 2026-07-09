@@ -384,6 +384,7 @@ function settingsJson(s: typeof adminSettingsTable.$inferSelect) {
     botGuvenlikEnabled: s.botGuvenlikEnabled ?? true,
     botBilgiEnabled: s.botBilgiEnabled ?? true,
     botFakeEnabled: s.botFakeEnabled ?? true,
+    telegramScanIntervalMinutes: s.telegramScanIntervalMinutes ?? 10,
   };
 }
 
@@ -398,7 +399,7 @@ router.get("/admin/settings", authMiddleware, requireAdmin, async (_req, res): P
 });
 
 router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled } = req.body as Record<string, unknown>;
+  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes } = req.body as Record<string, unknown>;
   const updates: Partial<typeof adminSettingsTable.$inferInsert> = {};
   if (chatLocked !== undefined) updates.chatLocked = Boolean(chatLocked);
   if (fakeOnlineBonus !== undefined) updates.fakeOnlineBonus = parseInt(String(fakeOnlineBonus), 10);
@@ -412,6 +413,10 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (botGuvenlikEnabled !== undefined) updates.botGuvenlikEnabled = Boolean(botGuvenlikEnabled);
   if (botBilgiEnabled !== undefined) updates.botBilgiEnabled = Boolean(botBilgiEnabled);
   if (botFakeEnabled !== undefined) updates.botFakeEnabled = Boolean(botFakeEnabled);
+  if (telegramScanIntervalMinutes !== undefined) {
+    const m = parseInt(String(telegramScanIntervalMinutes), 10);
+    if ([1, 5, 10, 30].includes(m)) updates.telegramScanIntervalMinutes = m;
+  }
   if (hiddenListingCities !== undefined) {
     const cities = Array.isArray(hiddenListingCities)
       ? hiddenListingCities.map(c => normalizeCityName(String(c))).filter(Boolean)
@@ -425,6 +430,9 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
     [result] = await db.insert(adminSettingsTable).values({ chatLocked: false, fakeOnlineBonus: 0, maintenanceMode: false, ...updates }).returning();
   } else {
     [result] = await db.update(adminSettingsTable).set(updates).where(eq(adminSettingsTable.id, existing[0].id)).returning();
+  }
+  if (updates.telegramScanIntervalMinutes !== undefined) {
+    void import("../workers/scraper").then((m) => m.refreshScraperInterval()).catch(() => {});
   }
   res.json(settingsJson(result!));
 });

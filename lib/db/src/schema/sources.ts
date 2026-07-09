@@ -22,5 +22,12 @@ export const sourcesTable = pgTable("sources", {
   initialScanOffsetId: text("initial_scan_offset_id"),
   initialScanDone: boolean("initial_scan_done").notNull().default(false),
   lastScanPublished: integer("last_scan_published").notNull().default(0),
+  /** Aynı kaynakta eşzamanlı tarama engeli */
+  isScanning: boolean("is_scanning").notNull().default(false),
+  lastScanMessagesRead: integer("last_scan_messages_read").notNull().default(0),
+  lastScanFound: integer("last_scan_found").notNull().default(0),
+  lastScanAdded: integer("last_scan_added").notNull().default(0),
+  lastScanDuplicates: integer("last_scan_duplicates").notNull().default(0),
+  lastScanErrors: integer("last_scan_errors").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

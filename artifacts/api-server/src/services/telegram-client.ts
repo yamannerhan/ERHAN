@@ -178,6 +178,35 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
 const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 25;
+const BATCH_DELAY_MS = 1_500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseFloodWaitSeconds(err: unknown): number | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.match(/FLOOD_WAIT[_\s](\d+)/i) ?? msg.match(/wait of (\d+) seconds/i);
+  return m?.[1] ? parseInt(m[1], 10) : null;
+}
+
+async function withTelegramRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const waitSec = parseFloodWaitSeconds(err);
+      if (waitSec != null && attempt < 3) {
+        const delay = (waitSec + 1) * 1000;
+        logger.warn({ label, waitSec, attempt }, "telegram-client: rate limit, bekleniyor");
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`telegram-client: ${label} retry exhausted`);
+}
 
 /** GramJS ile kanal mesajlarını çeker. İlk tarama: maxAgeDays geriye sayfalı; sonraki: minMessageId sonrası. */
 export async function fetchChannelMessages(
@@ -190,17 +219,36 @@ export async function fetchChannelMessages(
   const minId = options.minMessageId ?? 0;
   const maxAgeDays = options.maxAgeDays ?? 30;
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-  const entity = await client.getEntity(username);
+  const entity = await withTelegramRetry(() => client!.getEntity(username), `getEntity:${username}`);
   const results: ChannelMessage[] = [];
   const seen = new Set<number>();
 
-  // Artımlı tarama: son bilinen mesajdan sonrakiler
+  // Artımlı tarama: son bilinen mesajdan sonrakiler (100+ mesaj için sayfalı)
   if (minId > 0) {
-    const batch = await client.getMessages(entity, { limit: 100, minId });
-    for (const m of batch) {
-      if (m.id <= minId) continue;
-      const mapped = mapGramMessage(username, m);
-      if (mapped) results.push(mapped);
+    let cursorMinId = minId;
+    let page = 0;
+    const maxPages = options.maxPages ?? 10;
+    while (page < maxPages) {
+      const batch = await withTelegramRetry(
+        () => client!.getMessages(entity, { limit: 100, minId: cursorMinId }),
+        `getMessages:${username}`,
+      );
+      if (!batch.length) break;
+
+      let maxInBatch = cursorMinId;
+      for (const m of batch) {
+        if (m.id <= minId) continue;
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        if (m.id > maxInBatch) maxInBatch = m.id;
+        const mapped = mapGramMessage(username, m);
+        if (mapped) results.push(mapped);
+      }
+
+      if (batch.length < 100 || maxInBatch <= cursorMinId) break;
+      cursorMinId = maxInBatch;
+      page++;
+      await sleep(BATCH_DELAY_MS);
     }
     return {
       messages: results.sort((a, b) => Number(a.id) - Number(b.id)),
@@ -217,10 +265,13 @@ export async function fetchChannelMessages(
   let noMoreMessages = false;
 
   for (let page = 0; page < maxPages; page++) {
-    const batch = await client.getMessages(entity, {
-      limit: 100,
-      ...(offsetId > 0 ? { offsetId } : {}),
-    });
+    const batch = await withTelegramRetry(
+      () => client!.getMessages(entity, {
+        limit: 100,
+        ...(offsetId > 0 ? { offsetId } : {}),
+      }),
+      `getMessages:${username}:page${page}`,
+    );
     if (!batch.length) {
       noMoreMessages = true;
       break;
@@ -246,6 +297,7 @@ export async function fetchChannelMessages(
       break;
     }
     offsetId = last.id;
+    if (page < maxPages - 1) await sleep(BATCH_DELAY_MS);
   }
 
   return {

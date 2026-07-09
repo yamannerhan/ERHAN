@@ -36,6 +36,8 @@ export const adminSettingsTable = pgTable("admin_settings", {
   botGuvenlikEnabled: boolean("bot_guvenlik_enabled").notNull().default(true),
   botBilgiEnabled: boolean("bot_bilgi_enabled").notNull().default(true),
   botFakeEnabled: boolean("bot_fake_enabled").notNull().default(true),
+  /** Telegram tarama aralığı (dakika): 1, 5, 10 veya 30 */
+  telegramScanIntervalMinutes: integer("telegram_scan_interval_minutes").notNull().default(10),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

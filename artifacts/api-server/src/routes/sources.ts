@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval } from "../workers/scraper";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
 const router = Router();
@@ -38,6 +38,12 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       lastError: s.lastError ?? null,
       totalImported: s.totalImported,
       lastScanPublished: s.lastScanPublished ?? 0,
+      lastScanMessagesRead: s.lastScanMessagesRead ?? 0,
+      lastScanFound: s.lastScanFound ?? 0,
+      lastScanAdded: s.lastScanAdded ?? 0,
+      lastScanDuplicates: s.lastScanDuplicates ?? 0,
+      lastScanErrors: s.lastScanErrors ?? 0,
+      isScanning: s.isScanning ?? false,
       initialScanDone: s.initialScanDone ?? false,
       telegramChatId: s.telegramChatId ?? null,
       lastTelegramMessageId: s.lastTelegramMessageId ?? null,
@@ -98,8 +104,7 @@ router.patch("/admin/sources/:id", authMiddleware, requireAdmin, async (req, res
   if (active !== undefined) updates.active = active;
   if (active !== undefined) updates.status = active ? "active" : "inactive";
   if (checkInterval !== undefined) {
-    const [existing] = await db.select({ platform: sourcesTable.platform }).from(sourcesTable).where(eq(sourcesTable.id, id));
-    updates.checkInterval = existing?.platform === "telegram" ? 1 : checkInterval;
+    updates.checkInterval = checkInterval;
   }
   if (autoPublish !== undefined) updates.autoPublish = autoPublish;
   if (requireApproval !== undefined) updates.requireApproval = requireApproval;
@@ -152,6 +157,12 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
     initialScanDone: false,
     totalImported: 0,
     lastScanPublished: 0,
+    lastScanMessagesRead: 0,
+    lastScanFound: 0,
+    lastScanAdded: 0,
+    lastScanDuplicates: 0,
+    lastScanErrors: 0,
+    isScanning: false,
     lastError: null,
   }).where(eq(sourcesTable.platform, "telegram"));
 

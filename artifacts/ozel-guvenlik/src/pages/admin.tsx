@@ -1229,6 +1229,12 @@ interface Source {
   lastTelegramMessageId: string | null;
   lastError: string | null; totalImported: number;
   lastScanPublished: number; initialScanDone: boolean;
+  lastScanMessagesRead?: number;
+  lastScanFound?: number;
+  lastScanAdded?: number;
+  lastScanDuplicates?: number;
+  lastScanErrors?: number;
+  isScanning?: boolean;
   createdAt: string;
 }
 
@@ -1384,16 +1390,33 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [scanInterval, setScanInterval] = useState(10);
+  const [savingInterval, setSavingInterval] = useState(false);
   const defaultForm = { name: "", platform: "telegram", url: "", apiToken: "", active: true, checkInterval: 1, autoPublish: true, requireApproval: false, targetCitiesText: "", publishOnlyTargetCities: false };
   const [form, setForm] = useState<typeof defaultForm>(defaultForm);
 
   const load = async () => {
     setLoading(true);
     try {
-      const d = await apiCall("/admin/sources") as { sources: Source[]; telegramTokenSet: boolean };
+      const [d, settings] = await Promise.all([
+        apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean }>,
+        apiCall("/admin/settings") as Promise<{ telegramScanIntervalMinutes?: number }>,
+      ]);
       setSources(d.sources ?? []);
       setTelegramTokenSet(d.telegramTokenSet ?? false);
+      setScanInterval(settings.telegramScanIntervalMinutes ?? 10);
     } catch { /* ignore */ } finally { setLoading(false); }
+  };
+
+  const saveScanInterval = async (minutes: number) => {
+    setSavingInterval(true);
+    try {
+      await apiCall("/admin/settings", "PATCH", { telegramScanIntervalMinutes: minutes });
+      setScanInterval(minutes);
+      toast({ title: "Tarama aralığı güncellendi", description: `Telegram taraması her ${minutes} dakikada bir çalışacak.` });
+    } catch (e: unknown) {
+      toast({ title: "Hata", description: (e as Error).message, variant: "destructive" });
+    } finally { setSavingInterval(false); }
   };
 
   useEffect(() => { void load(); }, []);
@@ -1458,15 +1481,32 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     setEditingId(s.id); setShowAddForm(true);
   };
 
-  const INTERVALS = [{ v: 1, l: "1 dakika" }, { v: 5, l: "5 dakika" }, { v: 15, l: "15 dakika" }, { v: 30, l: "30 dakika" }, { v: 60, l: "1 saat" }, { v: 1440, l: "1 gün" }];
+  const INTERVALS = [{ v: 1, l: "1 dakika" }, { v: 5, l: "5 dakika" }, { v: 10, l: "10 dakika" }, { v: 30, l: "30 dakika" }];
+  const TG_INTERVALS = [{ v: 1, l: "1 dk" }, { v: 5, l: "5 dk" }, { v: 10, l: "10 dk" }, { v: 30, l: "30 dk" }];
 
   return (
     <Section title="İlan Kaynakları" icon={Radio}>
       <div className="flex items-start gap-2 bg-primary/10 border border-primary/20 rounded-xl p-3 mb-4">
         <Radio className="w-4 h-4 text-primary mt-0.5 shrink-0" />
         <div className="text-xs text-primary/80 space-y-1">
-          <p><strong>Tam otomatik bot:</strong> Telegram kanalı ekleyin — her <strong>1 dakikada</strong> taranır, ilanlar <strong>otomatik yayınlanır</strong> (admin onayı yok).</p>
-          <p>İlk tarama: son <strong>30 gün</strong>. Sonraki taramalar kaldığı mesajdan devam eder. Özel kanallar için aşağıdan Telegram hesabınızı bağlayın.</p>
+          <p><strong>Tam otomatik bot:</strong> Tüm Telegram kaynakları her döngüde taranır, ilanlar <strong>otomatik yayınlanır</strong>.</p>
+          <p>İlk tarama: son <strong>30 gün</strong>. Sonraki taramalar <code>last_message_id</code> sonrasından devam eder. Özel kanallar için Telegram hesabını bağlayın.</p>
+        </div>
+      </div>
+
+      <div className="bg-white/5 rounded-xl p-3 mb-4">
+        <p className="text-xs font-semibold text-muted-foreground mb-2">Telegram tarama aralığı (tüm kaynaklar)</p>
+        <div className="flex flex-wrap gap-2">
+          {TG_INTERVALS.map(opt => (
+            <button
+              key={opt.v}
+              disabled={savingInterval}
+              onClick={() => void saveScanInterval(opt.v)}
+              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${scanInterval === opt.v ? "bg-primary text-primary-foreground" : "bg-white/10 text-muted-foreground hover:bg-white/20"}`}
+            >
+              {opt.l}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1612,13 +1652,24 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                     <Link className="w-2.5 h-2.5 shrink-0" />{s.url}
                   </a>
                   <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.platform === "telegram" ? "1dk" : `${s.checkInterval}dk`}</span>
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Clock className="w-2.5 h-2.5" />{s.platform === "telegram" ? `${scanInterval}dk` : `${s.checkInterval}dk`}</span>
                     <span className="text-[10px] text-muted-foreground">{s.totalImported} ilan yayınlandı</span>
-                    {s.lastScanPublished > 0 && <span className="text-[10px] text-green-400">Son tarama: +{s.lastScanPublished}</span>}
+                    {s.isScanning && <span className="text-[10px] text-amber-400">Taranıyor…</span>}
+                    {(s.lastScanAdded ?? 0) > 0 && <span className="text-[10px] text-green-400">Son: +{s.lastScanAdded} eklendi</span>}
                     {!s.initialScanDone && s.platform === "telegram" && <span className="text-[10px] text-amber-400">30g ilk tarama…</span>}
                     {s.lastTelegramMessageId && <span className="text-[10px] text-muted-foreground">Son ID: {s.lastTelegramMessageId}</span>}
-                    {s.lastCheckedAt && <span className="text-[10px] text-muted-foreground">Son: {new Date(s.lastCheckedAt).toLocaleString("tr-TR")}</span>}
+                    {s.lastCheckedAt && <span className="text-[10px] text-muted-foreground">Son tarama: {new Date(s.lastCheckedAt).toLocaleString("tr-TR")}</span>}
                   </div>
+                  {s.platform === "telegram" && (
+                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-[10px] text-muted-foreground bg-black/20 rounded-lg p-2">
+                      <span>Okunan: {s.lastScanMessagesRead ?? 0}</span>
+                      <span>Bulunan: {s.lastScanFound ?? 0}</span>
+                      <span>Eklenen: {s.lastScanAdded ?? 0}</span>
+                      <span>Duplicate: {s.lastScanDuplicates ?? 0}</span>
+                      <span>Hata: {s.lastScanErrors ?? 0}</span>
+                      <span>Son yayın: {s.lastScanPublished ?? 0}</span>
+                    </div>
+                  )}
                   {s.targetCities?.length > 0 && (
                     <p className="text-[10px] text-cyan-300/80 mt-1">Hedef: {s.targetCities.join(", ")}</p>
                   )}

@@ -22,6 +22,13 @@ export const listingsTable = pgTable("listings", {
   applyUrl: text("apply_url"),
   // Otomatik içe aktarılan ilanların kaynağı ('telegram'/'facebook'); elle eklenenlerde null
   sourceTag: text("source_tag"),
+  sourceId: integer("source_id"),
+  messageId: text("message_id"),
+  sourceUrl: text("source_url"),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  rawText: text("raw_text"),
   companyLogoUrl: text("company_logo_url"),
   authorId: integer("author_id"),
   expiresAt: timestamp("expires_at", { withTimezone: true }),

@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable } from "@workspace/db";
-import { eq, and, isNotNull, lt } from "drizzle-orm";
+import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, adminSettingsTable } from "@workspace/db";
+import { eq, and, isNotNull, lt, or, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
@@ -86,15 +86,16 @@ function matchesTargetCities(
   });
 }
 
-function createDuplicateHash(text: string, location: ParsedLocation): string {
+function createDuplicateHash(text: string, location: ParsedLocation, postedAt?: Date): string {
   const phone = extractPhone(text);
-  // Aynı telefon farklı gruplarda tekrar paylaşılsa bile tek ilan
-  if (phone) {
-    return crypto.createHash("sha256").update(`tel:${phone}`).digest("hex");
-  }
   const city = location.city ?? "";
+  const dateKey = postedAt ? postedAt.toISOString().slice(0, 10) : "";
+  const title = normalizeText(extractTitle(text) ?? "").slice(0, 80);
   const normalized = normalizeText(text).slice(0, 250);
-  return crypto.createHash("sha256").update(`${city}|${normalized}`).digest("hex");
+  if (phone) {
+    return crypto.createHash("sha256").update(`tel:${phone}|${city}|${dateKey}`).digest("hex");
+  }
+  return crypto.createHash("sha256").update(`${city}|${dateKey}|${title}|${normalized.slice(0, 100)}`).digest("hex");
 }
 
 // Aynı telefona sahip aktif ilan var mı? (gruplar arası çift kayıt engeli)
@@ -126,7 +127,35 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
 const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
-const TELEGRAM_SCAN_INTERVAL_MS = 60_000; // sabit 1 dakika
+const SOURCE_SCAN_DELAY_MS = 2_000;
+const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
+
+let scanBackoffMinutes = 10;
+let scraperIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getTelegramScanIntervalMinutes(): Promise<number> {
+  try {
+    const [row] = await db.select({ m: adminSettingsTable.telegramScanIntervalMinutes }).from(adminSettingsTable).limit(1);
+    const configured = row?.m ?? 10;
+    const base = ALLOWED_SCAN_INTERVALS.includes(configured as typeof ALLOWED_SCAN_INTERVALS[number])
+      ? configured
+      : 10;
+    return Math.max(base, scanBackoffMinutes);
+  } catch {
+    return Math.max(10, scanBackoffMinutes);
+  }
+}
+
+function bumpScanBackoffOnRateLimit(): void {
+  if (scanBackoffMinutes < 5) scanBackoffMinutes = 5;
+  else if (scanBackoffMinutes < 10) scanBackoffMinutes = 10;
+  else scanBackoffMinutes = 30;
+  logger.warn({ scanBackoffMinutes }, "scraper: rate limit — tarama aralığı artırıldı");
+}
 
 function listingExpiryFrom(postedAt?: Date): Date {
   const base = postedAt ?? new Date();
@@ -261,7 +290,7 @@ async function scrapeTelegramChannel(username: string): Promise<ScrapedMessage[]
 }
 
 // ── Core processing ────────────────────────────────────────────────
-type ProcessResult = { isNew: boolean };
+type ProcessResult = "added" | "duplicate" | "updated" | "skipped";
 
 async function processMessage(
   source: typeof sourcesTable.$inferSelect,
@@ -271,17 +300,20 @@ async function processMessage(
   postedAt?: Date,
   isInitialScan = false,
 ): Promise<ProcessResult> {
-  if (!text?.trim() || isChatMessage(text)) return { isNew: false };
-  if (!isSecurityJobPosting(text)) return { isNew: false };
+  if (!text?.trim() || isChatMessage(text)) return "skipped";
+  if (!isSecurityJobPosting(text)) return "skipped";
 
   if (isInitialScan && postedAt && Date.now() - postedAt.getTime() > INITIAL_SCAN_MS) {
-    return { isNew: false };
+    return "skipped";
   }
 
   const location = extractLocation(text);
   if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
-    return { isNew: false };
+    return "skipped";
   }
+
+  const messageId = externalId.includes("_") ? externalId.split("_").pop()! : externalId;
+  const now = new Date();
 
   const [seenExt] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
@@ -290,10 +322,10 @@ async function processMessage(
       eq(importedPostsTable.externalId, externalId),
     ))
     .limit(1);
-  if (seenExt) return { isNew: false };
+  if (seenExt) return "duplicate";
 
-  const hash = createDuplicateHash(text, location);
-  if (await findDuplicateImported(hash)) return { isNew: false };
+  const hash = createDuplicateHash(text, location, postedAt);
+  if (await findDuplicateImported(hash)) return "duplicate";
 
   const [imported] = await db.insert(importedPostsTable).values({
     sourceId: source.id,
@@ -306,13 +338,22 @@ async function processMessage(
     status: "pending",
   }).returning();
 
-  if (!imported) return { isNew: false };
+  if (!imported) return "skipped";
 
   const title = extractTitle(text);
   const city = resolveListingCity(location);
   const salary = extractSalary(text);
   const phone = extractPhone(text);
   const gender = extractGender(text);
+  const listingMeta = {
+    sourceId: source.id,
+    messageId,
+    sourceUrl,
+    publishedAt: postedAt ?? now,
+    firstSeenAt: now,
+    lastSeenAt: now,
+    rawText: text,
+  };
 
   if (!shouldAutoPublish(source)) {
     await db.insert(pendingJobsTable).values({
@@ -332,7 +373,7 @@ async function processMessage(
       duplicateHash: hash,
       ...(postedAt ? { createdAt: postedAt } : {}),
     });
-    return { isNew: false };
+    return "skipped";
   }
 
   const existingListingId = phone ? await findActiveListingByPhone(phone) : null;
@@ -345,13 +386,16 @@ async function processMessage(
       requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
       status: "active",
       isActive: true,
-      updatedAt: new Date(),
-      ...(postedAt ? { createdAt: postedAt, expiresAt: listingExpiryFrom(postedAt) } : {}),
+      updatedAt: now,
+      lastSeenAt: now,
+      sourceUrl,
+      rawText: text,
+      ...(postedAt ? { createdAt: postedAt, publishedAt: postedAt, expiresAt: listingExpiryFrom(postedAt) } : {}),
     }).where(eq(listingsTable.id, existingListingId));
     await db.update(importedPostsTable)
       .set({ status: "approved" })
       .where(eq(importedPostsTable.id, imported.id));
-    return { isNew: false };
+    return "updated";
   }
 
   const [newListing] = await db.insert(listingsTable).values({
@@ -367,9 +411,10 @@ async function processMessage(
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
     expiresAt: listingExpiryFrom(postedAt),
+    ...listingMeta,
     ...(postedAt ? { createdAt: postedAt } : {}),
   }).returning();
-  if (!newListing) return { isNew: false };
+  if (!newListing) return "skipped";
 
   await db.update(importedPostsTable)
     .set({ status: "approved" })
@@ -384,7 +429,7 @@ async function processMessage(
     }).catch((err) => logger.error({ err }, "scraper: announceNewListing failed"));
   }
 
-  return { isNew: true };
+  return "added";
 }
 
 // ── Bot API polling state ──────────────────────────────────────────
@@ -459,13 +504,35 @@ async function scrapeTelegramChannelFiltered(
 }
 
 // ── Tek Telegram kaynağını tara ────────────────────────────────────
-async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Promise<void> {
+type ScanStats = {
+  messagesRead: number;
+  found: number;
+  added: number;
+  duplicates: number;
+  errors: number;
+  maxId: number;
+};
+
+async function acquireSourceScanLock(sourceId: number): Promise<boolean> {
+  const locked = await db.update(sourcesTable)
+    .set({ isScanning: true })
+    .where(and(eq(sourcesTable.id, sourceId), eq(sourcesTable.isScanning, false)))
+    .returning({ id: sourcesTable.id });
+  return locked.length > 0;
+}
+
+async function releaseSourceScanLock(sourceId: number): Promise<void> {
+  await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, sourceId));
+}
+
+async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
+  const stats: ScanStats = { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: parseInt(source.lastTelegramMessageId ?? "0", 10) || 0 };
   const username = extractTelegramUsername(source.url);
   if (!username) {
     await db.update(sourcesTable)
       .set({ lastError: "Geçersiz Telegram kanal linki. Örnek: https://t.me/kanal_adi" })
       .where(eq(sourcesTable.id, source.id));
-    return;
+    return stats;
   }
 
   const lastId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
@@ -496,20 +563,18 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       nextOffsetId = result.nextOffsetId;
     } else {
       messages = await scrapeTelegramChannelFiltered(username, isInitialScan ? 0 : lastId, INITIAL_SCAN_DAYS);
-      // Web önizleme tek sayfa — ilk tarama bir döngüde biter
       reachedCutoff = isInitialScan;
       noMoreMessages = true;
     }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    if (gramConnected) {
-      logger.warn(`scraper: GramJS failed for @${username}: ${errMsg}`);
-      throw e;
+    if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) {
+      bumpScanBackoffOnRateLimit();
     }
     throw e;
   }
 
-  let published = 0;
+  stats.messagesRead = messages.length;
   let maxId = lastId;
 
   for (const msg of messages) {
@@ -526,12 +591,16 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         msg.postedAt,
         isInitialScan,
       );
-      if (result.isNew) published++;
+      if (result === "added") { stats.added++; stats.found++; }
+      else if (result === "updated") { stats.found++; }
+      else if (result === "duplicate") { stats.duplicates++; stats.found++; }
     } catch (e) {
+      stats.errors++;
       logger.error(e, `scraper: msg ${msg.id} @${username}`);
     }
   }
 
+  stats.maxId = maxId;
   const initialComplete = isInitialScan && (reachedCutoff || noMoreMessages);
 
   await db.update(sourcesTable)
@@ -540,33 +609,34 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
       initialScanOffsetId: initialComplete ? null : (nextOffsetId > 0 ? String(nextOffsetId) : source.initialScanOffsetId),
       initialScanDone: initialComplete ? true : source.initialScanDone,
-      lastScanPublished: published,
-      totalImported: (source.totalImported ?? 0) + published,
+      lastScanPublished: stats.added,
+      lastScanMessagesRead: stats.messagesRead,
+      lastScanFound: stats.found,
+      lastScanAdded: stats.added,
+      lastScanDuplicates: stats.duplicates,
+      lastScanErrors: stats.errors,
+      totalImported: (source.totalImported ?? 0) + stats.added,
       lastError: messages.length === 0 && !gramConnected
         ? "Telegram hesabı bağlı değil — özel kanallar için admin panelden bağlayın."
         : null,
+      isScanning: false,
     })
     .where(eq(sourcesTable.id, source.id));
 
-  logger.info(
-    `scraper: @${username} — ${messages.length} mesaj, ${published} yayınlandı, sonId=${maxId}` +
-    (isInitialScan ? `, offset=${nextOffsetId}, bitti=${initialComplete}` : ""),
-  );
-}
+  logger.info({
+    source: source.name,
+    username,
+    messagesRead: stats.messagesRead,
+    found: stats.found,
+    added: stats.added,
+    duplicates: stats.duplicates,
+    errors: stats.errors,
+    lastMessageId: maxId,
+    initialComplete,
+    nextOffsetId,
+  }, `scraper: @${username} tarama özeti`);
 
-// Sıradaki Telegram grubunu seç: önce bitmemiş ilk tarama, sonra en az taranan grup
-function pickNextTelegramSource(
-  sources: Array<typeof sourcesTable.$inferSelect>,
-): typeof sourcesTable.$inferSelect | null {
-  if (sources.length === 0) return null;
-  const sorted = [...sources].sort((a, b) => a.id - b.id);
-  const pendingInitial = sorted.find(s => !s.initialScanDone);
-  if (pendingInitial) return pendingInitial;
-  return sorted.reduce((oldest, s) => {
-    const t = s.lastCheckedAt?.getTime() ?? 0;
-    const o = oldest.lastCheckedAt?.getTime() ?? 0;
-    return t < o ? s : oldest;
-  });
+  return stats;
 }
 
 async function scanTelegramSources(
@@ -574,32 +644,53 @@ async function scanTelegramSources(
   force: boolean,
 ): Promise<void> {
   const now = new Date();
-  const toScan = force
-    ? [...telegramSources].sort((a, b) => a.id - b.id)
-    : (() => {
-      const next = pickNextTelegramSource(telegramSources);
-      return next ? [next] : [];
-    })();
+  const sorted = [...telegramSources].sort((a, b) => {
+    if (!a.initialScanDone && b.initialScanDone) return -1;
+    if (a.initialScanDone && !b.initialScanDone) return 1;
+    return (a.lastCheckedAt?.getTime() ?? 0) - (b.lastCheckedAt?.getTime() ?? 0);
+  });
 
-  for (const source of toScan) {
+  let cycleAdded = 0;
+  let cycleErrors = 0;
+
+  for (const source of sorted) {
+    if (source.isScanning) {
+      logger.info(`scraper: kaynak #${source.id} "${source.name}" zaten taranıyor, atlandı`);
+      continue;
+    }
+
     const username = extractTelegramUsername(source.url);
     logger.info(`scraper: sıra → kaynak #${source.id} "${source.name}" @${username ?? "?"} (ilk=${!source.initialScanDone})`);
+
+    const locked = await acquireSourceScanLock(source.id);
+    if (!locked) continue;
+
     try {
-      await checkTelegramSource(source);
+      const stats = await checkTelegramSource(source);
+      cycleAdded += stats.added;
+      cycleErrors += stats.errors;
     } catch (e) {
+      cycleErrors++;
       const errMsg = e instanceof Error ? e.message : String(e);
       logger.warn(`scraper: telegram source ${source.id} (@${username ?? "?"}) failed: ${errMsg}`);
-      if (!isClientConnected()) {
-        await db.update(sourcesTable)
-          .set({ lastError: errMsg.slice(0, 500), lastCheckedAt: now })
-          .where(eq(sourcesTable.id, source.id));
-      } else {
-        await db.update(sourcesTable)
-          .set({ lastCheckedAt: now, lastError: null })
-          .where(eq(sourcesTable.id, source.id));
-      }
+      await db.update(sourcesTable)
+        .set({
+          lastError: errMsg.slice(0, 500),
+          lastCheckedAt: now,
+          isScanning: false,
+          lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+        })
+        .where(eq(sourcesTable.id, source.id));
+    } finally {
+      await releaseSourceScanLock(source.id);
+    }
+
+    if (sorted.indexOf(source) < sorted.length - 1) {
+      await sleep(SOURCE_SCAN_DELAY_MS);
     }
   }
+
+  logger.info({ sources: sorted.length, cycleAdded, cycleErrors }, "scraper: döngü özeti");
 }
 
 // ── Main scraper loop ──────────────────────────────────────────────
@@ -645,30 +736,45 @@ async function runScraperCycleInner(force = false): Promise<void> {
 }
 
 // ── Public API ─────────────────────────────────────────────────────
+async function scheduleScraperInterval(): Promise<void> {
+  const minutes = await getTelegramScanIntervalMinutes();
+  const ms = minutes * 60_000;
+  if (scraperIntervalHandle) clearInterval(scraperIntervalHandle);
+  scraperIntervalHandle = setInterval(async () => {
+    try { await runScraperCycle(); }
+    catch (e) { logger.error(e, "scraper: cycle error"); }
+  }, ms);
+  logger.info({ minutes, ms }, "scraper: tarama aralığı ayarlandı");
+}
+
 export function startScraperWorker(): void {
   const mode = isClientConnected()
     ? "GramJS + web fallback"
     : isBotTokenSet()
       ? "Bot API + web fallback"
       : "web scraping only";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, 1dk/grup sıralı)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tüm kaynaklar/döngü)`);
 
   if (isBotTokenSet()) {
-    setInterval(async () => {
-      try { await processBotUpdates(); }
-      catch (e) { logger.error(e, "scraper: bot poll error"); }
-    }, TELEGRAM_SCAN_INTERVAL_MS);
+    void (async () => {
+      const minutes = await getTelegramScanIntervalMinutes();
+      setInterval(async () => {
+        try { await processBotUpdates(); }
+        catch (e) { logger.error(e, "scraper: bot poll error"); }
+      }, minutes * 60_000);
+    })();
   }
 
-  setInterval(async () => {
-    try { await runScraperCycle(); }
-    catch (e) { logger.error(e, "scraper: cycle error"); }
-  }, TELEGRAM_SCAN_INTERVAL_MS);
+  void scheduleScraperInterval();
 
   setTimeout(async () => {
     try { await runScraperCycle(); }
     catch (e) { logger.error(e, "scraper: initial run error"); }
   }, 5_000);
+}
+
+export async function refreshScraperInterval(): Promise<void> {
+  await scheduleScraperInterval();
 }
 
 export function isTelegramTokenSet(): boolean {
@@ -678,16 +784,20 @@ export function isTelegramTokenSet(): boolean {
 /** 30 günden eski otomatik içe aktarılan ilanları pasife al */
 export async function expireImportedListings(): Promise<number> {
   const cutoff = new Date(Date.now() - INITIAL_SCAN_MS);
+  const now = new Date();
   const expired = await db.update(listingsTable)
     .set({ status: "expired", isActive: false })
     .where(and(
       isNotNull(listingsTable.sourceTag),
       eq(listingsTable.status, "active"),
-      lt(listingsTable.createdAt, cutoff),
+      or(
+        lt(listingsTable.expiresAt, now),
+        lt(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt})`, cutoff),
+      ),
     ))
     .returning({ id: listingsTable.id });
   if (expired.length > 0) {
-    logger.info(`scraper: ${expired.length} eski ilan pasife alındı (>${INITIAL_SCAN_DAYS}g)`);
+    logger.info({ count: expired.length, cutoffDays: INITIAL_SCAN_DAYS }, "scraper: eski ilanlar pasife alındı");
   }
   return expired.length;
 }
