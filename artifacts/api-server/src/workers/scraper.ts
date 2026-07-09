@@ -91,21 +91,14 @@ function matchesTargetCities(
   return false;
 }
 
-function createDuplicateHash(text: string, location: ParsedLocation, postedAt?: Date): string {
-  const phone = extractPhone(text);
-  const city = location.city ?? "";
-  const district = location.district ?? "";
-  const dateKey = postedAt ? postedAt.toISOString().slice(0, 10) : "";
-  const title = normalizeText(extractTitle(text) ?? "").slice(0, 80);
-  const normalized = normalizeText(text).slice(0, 250);
-  if (phone) {
-    return crypto.createHash("sha256").update(`tel:${phone}|${city}|${district}|${dateKey}|${normalized.slice(0, 120)}`).digest("hex");
-  }
-  return crypto.createHash("sha256").update(`${city}|${district}|${dateKey}|${title}|${normalized.slice(0, 100)}`).digest("hex");
+function createDuplicateHash(text: string): string {
+  // Sadece metin birebir aynıysa duplicate — telefon/şehir/tarih tek başına yetmez
+  const normalized = normalizeText(text);
+  return crypto.createHash("sha256").update(`content:${normalized}`).digest("hex");
 }
 
-async function findDuplicateImported(hash: string, sourceId?: number, externalId?: string): Promise<boolean> {
-  if (sourceId != null && externalId) {
+async function findDuplicateImported(hash: string, sourceId: number, externalId?: string): Promise<boolean> {
+  if (externalId) {
     const [sameMsg] = await db.select({ id: importedPostsTable.id })
       .from(importedPostsTable)
       .where(and(
@@ -117,7 +110,10 @@ async function findDuplicateImported(hash: string, sourceId?: number, externalId
   }
   const [row] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
-    .where(eq(importedPostsTable.duplicateHash, hash))
+    .where(and(
+      eq(importedPostsTable.duplicateHash, hash),
+      eq(importedPostsTable.sourceId, sourceId),
+    ))
     .limit(1);
   return !!row;
 }
@@ -145,7 +141,8 @@ const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
-const INCREMENTAL_SCAN_INTERVAL_MIN = 30;
+const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
+const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
 const BACKWARD_PAGES_PER_RUN = 5;
@@ -448,7 +445,7 @@ async function processMessage(
     .limit(1);
   if (seenExt) return "duplicate";
 
-  const hash = createDuplicateHash(text, location, postedAt);
+  const hash = createDuplicateHash(text);
   if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
 
   const existingByMessage = await findListingBySourceMessage(source.id, messageId);
@@ -927,20 +924,25 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
-/** Sıradaki tek Telegram kaynağını seç: önce ilk taraması bitmemiş (id sırası), sonra round-robin. */
+/** Sıradaki tek Telegram kaynağını seç: önce ilk taraması bitmemiş (id sırası), sonra id sırasıyla round-robin. */
 function pickNextTelegramSource(
   telegramSources: Array<typeof sourcesTable.$inferSelect>,
 ): typeof sourcesTable.$inferSelect | null {
-  const active = telegramSources.filter(s => s.active);
+  const active = [...telegramSources.filter(s => s.active)].sort((a, b) => a.id - b.id);
   if (!active.length) return null;
 
-  const byOrder = [...active].sort((a, b) => a.id - b.id);
-  const incomplete = byOrder.filter(s => !s.initialScanDone);
+  const incomplete = active.filter(s => !s.initialScanDone);
   if (incomplete.length > 0) return incomplete[0] ?? null;
 
-  return [...byOrder].sort(
-    (a, b) => (a.lastCheckedAt?.getTime() ?? 0) - (b.lastCheckedAt?.getTime() ?? 0),
-  )[0] ?? null;
+  const allDone = active.every(s => s.initialScanDone);
+  if (allDone) {
+    const oldest = [...active].sort(
+      (a, b) => (a.lastCheckedAt?.getTime() ?? 0) - (b.lastCheckedAt?.getTime() ?? 0),
+    )[0];
+    return oldest ?? null;
+  }
+
+  return active[0] ?? null;
 }
 
 async function scanTelegramSources(
@@ -1013,6 +1015,10 @@ async function scanTelegramSources(
     setTimeout(() => {
       void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
     }, INITIAL_BACKFILL_INTERVAL_MS);
+  } else if (telegramSources.some(s => s.active)) {
+    setTimeout(() => {
+      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: incremental chain error"));
+    }, INCREMENTAL_SOURCE_GAP_MS);
   }
 }
 
@@ -1081,7 +1087,7 @@ export function startScraperWorker(): void {
     : isBotTokenSet()
       ? "Bot API (GramJS bekleniyor)"
       : "GramJS bekleniyor";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tek kaynak/sıra, 5sn zincir)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tamamlanınca gruplar 1dk arayla)`);
 
   void refreshScraperInterval();
 
