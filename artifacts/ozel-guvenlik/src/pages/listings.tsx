@@ -165,6 +165,10 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const totalCount = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / 20));
 
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   // Client-side sub-filter for Anadolu/Avrupa
   const displayListings = useMemo(() => {
     if (activeSubFilter === "anadolu") {

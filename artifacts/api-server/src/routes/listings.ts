@@ -670,8 +670,9 @@ router.post("/listings/:id/republish", authMiddleware, async (req, res): Promise
     res.status(403).json({ error: "Bu ilanı yeniden yayınlama yetkiniz yok" }); return;
   }
   const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const now = new Date();
   const [updated] = await db.update(listingsTable)
-    .set({ status: "active", isActive: true, expiresAt: newExpiry, updatedAt: new Date() })
+    .set({ status: "active", isActive: true, expiresAt: newExpiry, publishedAt: now, updatedAt: now })
     .where(eq(listingsTable.id, id))
     .returning();
   res.json(formatListing(updated!, req.user!.id, new Set(), new Set(), req.user!.username));

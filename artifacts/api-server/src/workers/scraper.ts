@@ -1,6 +1,5 @@
-import crypto from "crypto";
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
-import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
@@ -9,6 +8,7 @@ import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
+import { createDuplicateHash, isLikelyDuplicateJob } from "../lib/job-dedup";
 
 // ── Keyword lists ──────────────────────────────────────────────────
 const CHAT_SKIP_KEYWORDS = [
@@ -99,12 +99,6 @@ function matchesTargetCities(
   return false;
 }
 
-function createDuplicateHash(text: string): string {
-  // Sadece metin birebir aynıysa duplicate — telefon/şehir/tarih tek başına yetmez
-  const normalized = normalizeText(text);
-  return crypto.createHash("sha256").update(`content:${normalized}`).digest("hex");
-}
-
 async function findDuplicateImported(hash: string, sourceId: number, externalId?: string): Promise<boolean> {
   if (externalId) {
     const [sameMsg] = await db.select({ id: importedPostsTable.id })
@@ -118,12 +112,33 @@ async function findDuplicateImported(hash: string, sourceId: number, externalId?
   }
   const [row] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
-    .where(and(
-      eq(importedPostsTable.duplicateHash, hash),
-      eq(importedPostsTable.sourceId, sourceId),
-    ))
+    .where(eq(importedPostsTable.duplicateHash, hash))
     .limit(1);
   return !!row;
+}
+
+async function findDuplicateActiveListing(text: string, hash: string): Promise<number | null> {
+  const recent = await db.select({
+    id: listingsTable.id,
+    description: listingsTable.description,
+    rawText: listingsTable.rawText,
+  })
+    .from(listingsTable)
+    .where(and(
+      eq(listingsTable.status, "active"),
+      eq(listingsTable.isActive, true),
+      isNotNull(listingsTable.sourceTag),
+    ))
+    .orderBy(desc(listingsTable.createdAt))
+    .limit(500);
+
+  for (const row of recent) {
+    const content = row.rawText ?? row.description ?? "";
+    if (!content) continue;
+    if (createDuplicateHash(content) === hash) return row.id;
+    if (isLikelyDuplicateJob(text, content)) return row.id;
+  }
+  return null;
 }
 
 async function findListingBySourceMessage(sourceId: number, messageId: string): Promise<number | null> {
@@ -456,6 +471,14 @@ async function processMessage(
 
   const hash = createDuplicateHash(text);
   if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
+
+  const duplicateListingId = await findDuplicateActiveListing(text, hash);
+  if (duplicateListingId) {
+    await db.update(listingsTable)
+      .set({ lastSeenAt: now })
+      .where(eq(listingsTable.id, duplicateListingId));
+    return "duplicate";
+  }
 
   const existingByMessage = await findListingBySourceMessage(source.id, messageId);
   if (existingByMessage) return "duplicate";
@@ -1141,23 +1164,51 @@ async function deleteListingsByIds(ids: number[]): Promise<number> {
   return deleted.length;
 }
 
+/** Mevcut aktif Telegram ilanlarından çift kopyaları temizle (en eskisini koru). */
+export async function dedupeExistingListings(): Promise<{ removed: number; kept: number }> {
+  const rows = await db.select({
+    id: listingsTable.id,
+    title: listingsTable.title,
+    description: listingsTable.description,
+    rawText: listingsTable.rawText,
+    createdAt: listingsTable.createdAt,
+  })
+    .from(listingsTable)
+    .where(and(
+      eq(listingsTable.status, "active"),
+      eq(listingsTable.isActive, true),
+      isNotNull(listingsTable.sourceTag),
+    ))
+    .orderBy(listingsTable.createdAt);
+
+  const survivors: typeof rows = [];
+  const toRemove: number[] = [];
+
+  for (const row of rows) {
+    const content = row.rawText ?? row.description ?? row.title ?? "";
+    const isDupe = survivors.some((s) => {
+      const sContent = s.rawText ?? s.description ?? s.title ?? "";
+      return isLikelyDuplicateJob(content, sContent);
+    });
+    if (isDupe) toRemove.push(row.id);
+    else survivors.push(row);
+  }
+
+  const removed = await deleteListingsByIds(toRemove);
+  logger.info({ removed, kept: survivors.length }, "scraper: çift ilanlar temizlendi");
+  return { removed, kept: survivors.length };
+}
+
 /** Süresi dolan ilanlar: tikli ise sil, tiksiz ise pasif yap. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
-  const cutoff = new Date(Date.now() - INITIAL_SCAN_MS);
 
   const toDeleteRows = await db.select({ id: listingsTable.id })
     .from(listingsTable)
-    .where(or(
-      and(
-        isNotNull(listingsTable.expiresAt),
-        lt(listingsTable.expiresAt, now),
-        or(eq(listingsTable.autoDeleteOnExpiry, true), isNotNull(listingsTable.sourceTag)),
-      ),
-      and(
-        isNotNull(listingsTable.sourceTag),
-        lt(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt})`, cutoff),
-      ),
+    .where(and(
+      isNotNull(listingsTable.expiresAt),
+      lt(listingsTable.expiresAt, now),
+      eq(listingsTable.autoDeleteOnExpiry, true),
     ));
 
   const toDeactivateRows = await db.select({ id: listingsTable.id })
@@ -1166,7 +1217,6 @@ export async function purgeExpiredListings(): Promise<number> {
       isNotNull(listingsTable.expiresAt),
       lt(listingsTable.expiresAt, now),
       eq(listingsTable.autoDeleteOnExpiry, false),
-      isNull(listingsTable.sourceTag),
       eq(listingsTable.status, "active"),
     ));
 

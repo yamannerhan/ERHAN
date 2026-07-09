@@ -1435,6 +1435,8 @@ router.patch("/admin/listings/:id", authMiddleware, requireAdminOrModerator, asy
 router.delete("/admin/listings/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  await db.delete(listingLikesTable).where(eq(listingLikesTable.listingId, id));
+  await db.delete(listingFavoritesTable).where(eq(listingFavoritesTable.listingId, id));
   await db.delete(listingsTable).where(eq(listingsTable.id, id));
   res.sendStatus(204);
 });

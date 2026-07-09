@@ -1493,6 +1493,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [resetting, setResetting] = useState(false);
   const [deepRescanning, setDeepRescanning] = useState(false);
   const [reparsing, setReparsing] = useState(false);
+  const [deduping, setDeduping] = useState(false);
   const [resettingSourceId, setResettingSourceId] = useState<number | null>(null);
 
   const resetSingleSource = async (id: number, name: string) => {
@@ -1537,6 +1538,17 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     finally { setReparsing(false); }
   };
 
+  const dedupeListings = async () => {
+    if (!confirm("Aynı başlık/içerikli çift ilanlar silinecek (en eski kopya kalır). Devam?")) return;
+    setDeduping(true);
+    try {
+      const r = await apiCall("/admin/sources/dedupe-listings", "POST") as { message?: string };
+      toast({ title: "Çift ilanlar temizlendi", description: r.message ?? "Tamamlandı." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setDeduping(false); }
+  };
+
   const startEdit = (s: Source) => {
     setForm({ name: s.name, platform: s.platform, url: s.url, apiToken: s.apiToken || "", active: s.active, checkInterval: s.checkInterval, autoPublish: s.autoPublish, requireApproval: s.requireApproval, targetCitiesText: (s.targetCities ?? []).join(", "), publishOnlyTargetCities: s.publishOnlyTargetCities });
     setEditingId(s.id); setShowAddForm(true);
@@ -1579,19 +1591,22 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
         <button onClick={deepRescan30Days} disabled={deepRescanning} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${deepRescanning ? "animate-spin" : ""}`} /> {deepRescanning ? "Taranıyor…" : "30 Gün Yeniden Tara"}
         </button>
         <button onClick={resetBots} disabled={resetting} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${resetting ? "animate-spin" : ""}`} /> {resetting ? "Sıfırlanıyor…" : "Botları Sıfırla"}
         </button>
+        <button onClick={dedupeListings} disabled={deduping} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-rose-500/15 text-rose-300 rounded-lg hover:bg-rose-500/25 transition-colors disabled:opacity-50">
+          <Trash2 className={`w-3.5 h-3.5 ${deduping ? "animate-pulse" : ""}`} /> {deduping ? "Temizleniyor…" : "Çift İlanları Temizle"}
+        </button>
         <button onClick={reparseListings} disabled={reparsing} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors disabled:opacity-50">
           <ListChecks className={`w-3.5 h-3.5 ${reparsing ? "animate-pulse" : ""}`} /> {reparsing ? "Kontrol…" : "İlanları Yeniden Kontrol Et"}
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>30 Gün Yeniden Tara:</strong> kaynakları 30 gün geriye tarar (ilanlar silinmez). <strong>Botları Sıfırla:</strong> bot ilanlarını siler, sırayla yeniden tarar. <strong>Yeniden Kontrol Et:</strong> maaş/cinsiyet bilgisini doldurur.
+        <strong>30 Gün Yeniden Tara:</strong> kaynakları 30 gün geriye tarar (ilanlar silinmez). <strong>Botları Sıfırla:</strong> bot ilanlarını siler, sırayla yeniden tarar. <strong>Çift İlanları Temizle:</strong> aynı içerikli kopyaları siler. <strong>Yeniden Kontrol Et:</strong> maaş/cinsiyet bilgisini doldurur.
       </p>
 
       <div className="flex justify-between items-center mb-3">
@@ -3350,6 +3365,10 @@ export default function AdminDashboard() {
 
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "2-digit" });
   const listingTotalPages = Math.max(1, Math.ceil((listingsData?.total ?? 0) / 50));
+
+  useEffect(() => {
+    if (listingPage > listingTotalPages) setListingPage(listingTotalPages);
+  }, [listingPage, listingTotalPages]);
 
   return (
     <div className="min-h-screen bg-[#0a0e1c] text-slate-100 flex">

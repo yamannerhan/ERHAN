@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
 import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
 
@@ -165,6 +165,21 @@ router.post("/admin/sources/deep-rescan", authMiddleware, requireAdmin, async (_
     success: true,
     message: "30 gün derin tarama başlatıldı. Tüm kaynaklar geriye doğru taranacak (yayındaki ilanlar silinmez).",
   });
+});
+
+router.post("/admin/sources/dedupe-listings", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  try {
+    const result = await dedupeExistingListings();
+    res.json({
+      success: true,
+      removed: result.removed,
+      kept: result.kept,
+      message: `${result.removed} çift ilan silindi, ${result.kept} benzersiz ilan kaldı.`,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: msg });
+  }
 });
 
 /** Tek Telegram grubunu sıfırla: o kaynaktan gelen ilanları sil, son 30 günü yeniden tara. */
