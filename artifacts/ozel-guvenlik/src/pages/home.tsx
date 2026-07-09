@@ -15,6 +15,7 @@ import { getListingImage } from "@/lib/listing-image";
 import { displayCompany } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { buildHomeTitle, buildHomeDescription, SEO_BASE_URL, SEO_OG_IMAGE, breadcrumbSchema } from "@/lib/seo-config";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -174,11 +175,11 @@ const OTHER_CITIES = [
 
 export default function Home() {
   useDocumentMeta({
-    title: "Özel Güvenlik İş İlanları | Bay Bayan Güvenlik Personeli Alımı",
-    description: "Türkiye genelinde özel güvenlik iş ilanları, bay bayan güvenlik görevlisi alımları, ücretsiz CV oluşturma, yapay zeka destekli iş bulma ve ücretsiz ilan verme platformu.",
+    title: buildHomeTitle(),
+    description: buildHomeDescription(),
     keywords: "özel güvenlik iş ilanları, güvenlik görevlisi alımı, bay bayan güvenlik ilanları, silahlı güvenlik iş ilanları, silahsız güvenlik iş ilanları, İstanbul özel güvenlik iş ilanları, Kocaeli özel güvenlik iş ilanları, Gebze güvenlik iş ilanları, GOSB güvenlik ilanları, TOSB güvenlik ilanları, avm güvenlik, fabrika güvenlik, site güvenlik, özel güvenlik maaşları, ögg iş ilanları",
-    canonical: BASE_URL,
-    ogImage: `${BASE_URL}/og-image.jpg`,
+    canonical: SEO_BASE_URL,
+    ogImage: SEO_OG_IMAGE,
     ogType: "website",
     jsonLd: [
       {

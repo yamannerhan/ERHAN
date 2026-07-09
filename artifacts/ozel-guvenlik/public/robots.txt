@@ -4,6 +4,8 @@ Disallow: /admin/
 Disallow: /moderator/
 Disallow: /profil/
 Disallow: /api/
+Disallow: /ilanlar?*
+Disallow: /*?search=
 
 User-agent: Googlebot
 Allow: /

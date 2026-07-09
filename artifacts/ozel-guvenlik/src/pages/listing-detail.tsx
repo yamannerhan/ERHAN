@@ -13,8 +13,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { getListingImage } from "@/lib/listing-image";
 import { displayCompany } from "@/lib/utils";
+import {
+  SEO_BASE_URL, SEO_OG_IMAGE, buildListingTitle, buildListingDescription,
+  buildJobPostingSchema, breadcrumbSchema,
+} from "@/lib/seo-config";
 
-const BASE_URL = "https://ozelguvenlik.online";
+const BASE_URL = SEO_BASE_URL;
 
 // Renders description with masked contact info placeholders as lock badges
 function MaskedDescription({ text }: { text: string }) {
@@ -68,69 +72,66 @@ export default function ListingDetail() {
   const toggleFavorite = useToggleListingFavorite();
   const canManageListing = user?.role === "admin" || user?.role === "moderator";
 
-  /* ── SEO useEffect: her zaman aynı sırada çağrılmalı ─────────────── */
-  const pageUrl = `${BASE_URL}/ilan/${listingId}`;
+  /* ── SEO useEffect ───────────────────────────────────────────────── */
+  const pageUrl = `${SEO_BASE_URL}/ilan/${listingId}`;
   useEffect(() => {
     if (!listing) return;
-    const validThrough = (listing as any).expiresAt
-      ? new Date((listing as any).expiresAt).toISOString()
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
+    const title = buildListingTitle(listing.title, displayCompany(listing.company));
+    const description = buildListingDescription(
+      listing.city, displayCompany(listing.company), listing.workType, listing.salary, listing.description,
+    );
     const originalTitle = document.title;
-    document.title = `${listing.title} | ${displayCompany(listing.company)} — Özel Güvenlik İş İlanları`;
+    document.title = title;
 
     let metaDesc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
     if (!metaDesc) { metaDesc = document.createElement("meta"); metaDesc.setAttribute("name", "description"); document.head.appendChild(metaDesc); }
-    metaDesc.setAttribute("content", `${listing.city} bölgesinde ${displayCompany(listing.company)} firmasına ${listing.workType || "Tam Zamanlı"} özel güvenlik görevlisi alımı. ${listing.salary ? listing.salary + " maaş." : ""} Hemen başvur.`);
-
-    let metaKeywords = document.querySelector('meta[name="keywords"]') as HTMLMetaElement | null;
-    if (!metaKeywords) { metaKeywords = document.createElement("meta"); metaKeywords.setAttribute("name", "keywords"); document.head.appendChild(metaKeywords); }
-    metaKeywords.setAttribute("content", `ozel guvenlik is ilanlari, ${listing.city} guvenlik, silahli guvenlik, silahsiz guvenlik, bay bayan guvenlik, AVM guvenlik, fabrika guvenlik, site guvenlik`);
+    metaDesc.setAttribute("content", description);
 
     let can = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
     if (!can) { can = document.createElement("link"); can.setAttribute("rel", "canonical"); document.head.appendChild(can); }
     can.setAttribute("href", pageUrl);
 
-    let ogTitle = document.querySelector('meta[property="og:title"]') as HTMLMetaElement | null;
-    if (!ogTitle) { ogTitle = document.createElement("meta"); ogTitle.setAttribute("property", "og:title"); document.head.appendChild(ogTitle); }
-    ogTitle.setAttribute("content", listing.title);
-
-    let ogDesc = document.querySelector('meta[property="og:description"]') as HTMLMetaElement | null;
-    if (!ogDesc) { ogDesc = document.createElement("meta"); ogDesc.setAttribute("property", "og:description"); document.head.appendChild(ogDesc); }
-    ogDesc.setAttribute("content", `${listing.city} bölgesinde ${displayCompany(listing.company)} firmasına ${listing.workType || "Tam Zamanlı"} özel güvenlik görevlisi alımı.`);
-
-    let ogImg = document.querySelector('meta[property="og:image"]') as HTMLMetaElement | null;
-    if (!ogImg) { ogImg = document.createElement("meta"); ogImg.setAttribute("property", "og:image"); document.head.appendChild(ogImg); }
-    ogImg.setAttribute("content", listing.companyLogoUrl || `${BASE_URL}/og-image.jpg`);
-
-    let ogUrl = document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null;
-    if (!ogUrl) { ogUrl = document.createElement("meta"); ogUrl.setAttribute("property", "og:url"); document.head.appendChild(ogUrl); }
-    ogUrl.setAttribute("content", pageUrl);
-
-    let ogType = document.querySelector('meta[property="og:type"]') as HTMLMetaElement | null;
-    if (!ogType) { ogType = document.createElement("meta"); ogType.setAttribute("property", "og:type"); document.head.appendChild(ogType); }
-    ogType.setAttribute("content", "article");
+    const setOg = (prop: string, val: string) => {
+      let el = document.querySelector(`meta[property="${prop}"]`) as HTMLMetaElement | null;
+      if (!el) { el = document.createElement("meta"); el.setAttribute("property", prop); document.head.appendChild(el); }
+      el.setAttribute("content", val);
+    };
+    setOg("og:title", title);
+    setOg("og:description", description);
+    setOg("og:image", listing.companyLogoUrl || SEO_OG_IMAGE);
+    setOg("og:url", pageUrl);
+    setOg("og:type", "article");
 
     const prevLd = document.head.querySelectorAll('script[data-dynamic-ld="1"]');
     prevLd.forEach(el => el.remove());
-    const script = document.createElement("script");
-    script.setAttribute("type", "application/ld+json");
-    script.setAttribute("data-dynamic-ld", "1");
-    script.textContent = JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "JobPosting",
-      "title": listing.title,
-      "description": (listing.description || "").slice(0, 250) + ((listing.description || "").length > 250 ? "..." : ""),
-      "identifier": { "@type": "PropertyValue", "name": "Özel Güvenlik Online", "value": `#${listing.id}` },
-      "datePosted": listing.createdAt || new Date().toISOString(),
-      "validThrough": validThrough,
-      "employmentType": listing.workType || "Tam Zamanlı",
-      "hiringOrganization": { "@type": "Organization", "name": displayCompany(listing.company), "sameAs": BASE_URL },
-      "jobLocation": { "@type": "Place", "address": { "@type": "PostalAddress", "addressLocality": listing.city, "addressCountry": "TR" } },
-      "baseSalary": { "@type": "MonetaryAmount", "currency": "TRY", "value": { "@type": "QuantitativeValue", "text": listing.salary || "Belirtilmedi" } },
-      "image": listing.companyLogoUrl || `${BASE_URL}/og-image.jpg`,
+
+    const jobSchema = buildJobPostingSchema({
+      id: listing.id,
+      title: listing.title,
+      description: listing.description,
+      company: listing.company,
+      city: listing.city,
+      salary: listing.salary,
+      workType: listing.workType,
+      companyLogoUrl: listing.companyLogoUrl,
+      createdAt: listing.createdAt,
+      expiresAt: (listing as { expiresAt?: string | null }).expiresAt,
+      applyUrl: listing.applyUrl,
     });
-    document.head.appendChild(script);
+    const crumbs = breadcrumbSchema([
+      { name: "Ana Sayfa", item: SEO_BASE_URL },
+      { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+      { name: listing.title ?? "İlan", item: pageUrl },
+    ]);
+
+    for (const schema of [jobSchema, crumbs]) {
+      const script = document.createElement("script");
+      script.setAttribute("type", "application/ld+json");
+      script.setAttribute("data-dynamic-ld", "1");
+      script.textContent = JSON.stringify(schema);
+      document.head.appendChild(script);
+    }
 
     return () => {
       document.title = originalTitle;

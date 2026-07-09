@@ -53,7 +53,7 @@ function makeCitySeo(name: string): SeoCityContent {
   const isDistrict = SEO_DISTRICTS.includes(name);
   const prefix = isDistrict ? `${name} Özel Güvenlik` : `${name} Özel Güvenlik`;
   return {
-    title: `${prefix} İş İlanları | Bay Bayan Güvenlik Personeli Alımı`,
+    title: `${prefix} İş İlanları | Güncel Güvenlik Personeli Alımları`,
     description: `${loc} silahlı, silahsız, AVM, fabrika, site, hastane ve plaza güvenliği bay bayan özel güvenlik görevlisi iş ilanları. Güncel maaşlı personel alımları ve ücretsiz başvuru.`,
     keywords: `${slug} ozel guvenlik is ilanlari, ${slug} guvenlik gorevlisi alimi, ${slug} bay bayan guvenlik, ${slug} silahli guvenlik, ${slug} silahsiz guvenlik`,
   };
@@ -61,7 +61,7 @@ function makeCitySeo(name: string): SeoCityContent {
 
 const OVERRIDES: Record<string, SeoCityContent> = {
   "İstanbul": {
-    title: "İstanbul Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı 2025",
+    title: "İstanbul Özel Güvenlik İş İlanları | Güncel Güvenlik Personeli Alımları",
     description: "İstanbul Anadolu ve Avrupa Yakası'nda silahlı, silahsız, AVM, fabrika, site, plaza, hastane ve otel güvenliği bay bayan özel güvenlik görevlisi iş ilanları. Güncel maaşlar ve anında başvuru.",
     keywords: "istanbul ozel guvenlik is ilanlari, istanbul anadolu yakasi guvenlik, istanbul avrupa yakasi guvenlik, istanbul silahli guvenlik, istanbul silahsiz guvenlik, istanbul avm guvenlik, istanbul fabrika guvenlik, istanbul site guvenlik, istanbul hastane guvenlik, istanbul ozel guvenlik maaslari"
   },

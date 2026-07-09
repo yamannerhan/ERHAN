@@ -4,103 +4,11 @@ import pinoHttp from "pino-http";
 import path from "path";
 import fs from "fs";
 import router from "./routes";
-import { db, listingsTable, usersTable, chatMessagesTable } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
-import { getSeoMetaForPath, injectSeoIntoHtml } from "./lib/seo-render";
+import { getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL } from "./lib/seo-render";
+import { generateSitemapXml } from "./lib/seo-sitemap";
 
 const app: Express = express();
-
-/* ── Sitemap helpers ─────────────────────────────────────────────────────── */
-const BASE_URL = "https://ozelguvenlik.online";
-
-function toSlug(txt: string): string {
-  return txt
-    .toLocaleLowerCase("tr-TR")
-    .replace(/ğ/g,"g").replace(/ü/g,"u").replace(/ş/g,"s")
-    .replace(/ı/g,"i").replace(/ö/g,"o").replace(/ç/g,"c")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-const ALL_PROVINCES = [
-  "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
-  "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
-  "Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun",
-  "Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri",
-  "Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin",
-  "Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas",
-  "Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray",
-  "Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova",
-  "Karabük","Kilis","Osmaniye","Düzce"
-];
-
-const SEO_DISTRICTS = [
-  "Gebze","Darıca","Çayırova","Dilovası","İzmit","GOSB","TOSB",
-  "İstanbul Anadolu Yakası","İstanbul Avrupa Yakası",
-];
-
-function provinceUrl(name: string) {
-  return `${BASE_URL}/${toSlug(name)}-ozel-guvenlik-is-ilanlari`;
-}
-function districtUrl(name: string) {
-  return `${BASE_URL}/${toSlug(name)}-ozel-guvenlik-is-ilanlari`;
-}
-
-async function generateSitemapXml(): Promise<string> {
-  const staticUrls = [
-    { url: `${BASE_URL}/`,          priority: "1.0", changefreq: "daily" },
-    { url: `${BASE_URL}/ilanlar`,   priority: "0.9", changefreq: "daily" },
-    { url: `${BASE_URL}/ilan-ekle`, priority: "0.5", changefreq: "monthly" },
-    { url: `${BASE_URL}/cv-olustur`,priority: "0.6", changefreq: "monthly" },
-    { url: `${BASE_URL}/part-time`,priority: "0.6", changefreq: "weekly" },
-    { url: `${BASE_URL}/destek`,   priority: "0.5", changefreq: "monthly" },
-    { url: `${BASE_URL}/sohbet`,   priority: "0.6", changefreq: "weekly" },
-    { url: `${BASE_URL}/duyurular`,priority: "0.6", changefreq: "daily" },
-  ];
-
-  const provinceUrls = ALL_PROVINCES.map(name => ({
-    url: provinceUrl(name), priority: "0.7", changefreq: "daily"
-  }));
-  const districtUrls = SEO_DISTRICTS.map(name => ({
-    url: districtUrl(name), priority: "0.7", changefreq: "daily"
-  }));
-
-  const EXTRA_KEYWORDS = [
-    "avm-guvenlik-is-ilanlari",
-    "fabrika-guvenlik-is-ilanlari",
-    "site-guvenlik-is-ilanlari",
-    "silahli-guvenlik-is-ilanlari",
-    "silahsiz-guvenlik-is-ilanlari",
-  ];
-  const keywordUrls = EXTRA_KEYWORDS.map(slug => ({
-    url: `${BASE_URL}/${slug}`, priority: "0.7", changefreq: "weekly"
-  }));
-
-  let listingUrls: { url: string; priority: string; changefreq: string; lastmod: string }[] = [];
-  try {
-    const rows = await db
-      .select({ id: listingsTable.id, updatedAt: listingsTable.updatedAt })
-      .from(listingsTable)
-      .where(eq(listingsTable.status, "active"))
-      .orderBy(desc(listingsTable.updatedAt));
-    listingUrls = rows.map(r => ({
-      url: `${BASE_URL}/ilan/${r.id}`,
-      priority: "0.8",
-      changefreq: "daily",
-      lastmod: (r.updatedAt ?? new Date()).toISOString(),
-    }));
-  } catch { /* ignore DB errors */ }
-
-  const all = [...staticUrls, ...provinceUrls, ...districtUrls, ...keywordUrls, ...listingUrls];
-
-  const entries = all.map(u => {
-    const lm = "lastmod" in u ? u.lastmod : new Date().toISOString();
-    return `  <url>\n    <loc>${u.url}</loc>\n    <lastmod>${lm}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`;
-  }).join("\n");
-
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>`;
-}
 
 /* ── Express app ─────────────────────────────────────────────────────────── */
 
@@ -158,6 +66,8 @@ app.get("/robots.txt", (_req, res) => {
     "Disallow: /moderator/",
     "Disallow: /profil/",
     "Disallow: /api/",
+    "Disallow: /ilanlar?*",
+    "Disallow: /*?search=",
     "",
     "User-agent: Googlebot",
     "Allow: /",
@@ -168,7 +78,7 @@ app.get("/robots.txt", (_req, res) => {
     "User-agent: Bingbot",
     "Allow: /",
     "",
-    `Sitemap: ${BASE_URL}/sitemap.xml`,
+    `Sitemap: ${SEO_BASE_URL}/sitemap.xml`,
     "",
   ].join("\n");
   res

@@ -27,7 +27,7 @@ const DISTRICTS = [
   "İstanbul Anadolu Yakası","İstanbul Avrupa Yakası",
 ];
 
-const ALL_LOCATIONS = [...PROVINCES, ...DISTRICTS];
+export const ALL_LOCATIONS = [...PROVINCES, ...DISTRICTS];
 
 export function toSlug(txt: string): string {
   return txt
@@ -71,9 +71,9 @@ function buildHomeMeta(): SeoMeta {
     .join(" · ");
 
   return {
-    title: "Özel Güvenlik İş İlanları | Bay Bayan Güvenlik Personeli Alımı",
+    title: "Özel Güvenlik İş İlanları | Güncel Bay Bayan Güvenlik Personeli Alımları",
     description:
-      "Türkiye genelinde özel güvenlik iş ilanları, bay bayan güvenlik görevlisi alımları, ücretsiz CV oluşturma, yapay zeka destekli iş bulma ve ücretsiz ilan verme platformu.",
+      "Türkiye genelinde güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru fırsatları.",
     canonical: `${SEO_BASE_URL}/`,
     ogImage: `${SEO_BASE_URL}/og-image.jpg`,
     ogType: "website",
@@ -114,6 +114,24 @@ function buildHomeMeta(): SeoMeta {
 </ul>
 </main>`,
   };
+}
+
+function buildCityLongContentServer(city: string): string {
+  const slug = toSlug(city);
+  const hash = slug.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const sectors = ["AVM güvenliği", "fabrika güvenliği", "site güvenliği", "plaza güvenliği", "hastane güvenliği"];
+  const s = sectors[hash % sectors.length]!;
+  return `
+<h2>${escapeHtml(city)} Özel Güvenlik Sektörü Hakkında</h2>
+<p>${escapeHtml(city)} bölgesinde özel güvenlik sektörü her yıl büyümektedir. Silahlı ve silahsız özel güvenlik görevlisi, güvenlik amiri ve vardiya sorumlusu pozisyonlarında bay ve bayan personel alımları düzenli olarak yapılmaktadır. ${escapeHtml(city)} özel güvenlik iş ilanları arasında ${escapeHtml(s)} öne çıkan alanlardandır.</p>
+<h2>${escapeHtml(city)} Silahlı ve Silahsız Güvenlik İş İlanları</h2>
+<p>${escapeHtml(city)} silahlı güvenlik iş ilanları kimlikli silahlı personel gerektirir. Silahsız güvenlik iş ilanları AVM, site, fabrika ve plaza güvenliğinde daha yaygındır. Her iki pozisyonda da geçerli özel güvenlik kimlik kartı ve temiz sabıka kaydı şarttır.</p>
+<h2>${escapeHtml(city)} Bay Bayan Personel Alımları</h2>
+<p>${escapeHtml(city)} bölgesinde bay ve bayan güvenlik görevlisi alımları ayrı veya karma pozisyonlar halinde yayınlanır. Kadın güvenlik personeline AVM ve hastane güvenliğinde yoğun talep vardır. Erkek adaylar için askerlik durumu önemlidir.</p>
+<h2>${escapeHtml(city)} Özel Güvenlik Maaşları</h2>
+<p>${escapeHtml(city)} özel güvenlik maaşları pozisyon tipine göre değişir. Silahlı pozisyonlar genellikle daha yüksek ücret sunar. Yemek, servis ve SGK imkânlarını ilan metninde kontrol edin.</p>
+<h2>${escapeHtml(city)} İş Arama İpuçları</h2>
+<p>${escapeHtml(city)} özel güvenlik iş ilanlarını günlük takip edin. Ücretsiz CV oluşturma aracı ile başvurularınızı güçlendirin. Birden fazla ilana başvurarak süreci hızlandırın.</p>`;
 }
 
 /* ───────────── CITY ───────────── */
@@ -224,6 +242,7 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
 <h2>${escapeHtml(city)} Özel Güvenlik İş Bulma Avantajları</h2>
 <p>Özel Güvenlik Online platformu, ${escapeHtml(city)} özel güvenlik sektöründe iş arayan tüm adaylara ücretsiz hizmet sunar: yapay zeka destekli iş asistanı, ücretsiz dijital CV oluşturma, anlık ilan bildirimleri, mobil uyumlu arayüz, doğrudan firma iletişimi ve favori ilan listesi gibi özelliklerle ${escapeHtml(city)} bölgesindeki özel güvenlik görevlisi alımlarına en hızlı şekilde başvurabilirsiniz.</p>
 ${listingLinks}
+${buildCityLongContentServer(city)}
 <h2>Diğer İllerdeki İlanlar</h2>
 <nav>${otherCityLinks}</nav>
 <p><a href="${SEO_BASE_URL}/ilanlar">Tüm Aktif İlanları Görüntüle</a> · <a href="${SEO_BASE_URL}/ilan-ekle">Ücretsiz İlan Ver</a> · <a href="${SEO_BASE_URL}/cv-olustur">Ücretsiz CV Oluştur</a></p>
@@ -243,13 +262,18 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
     if (!listing || listing.status !== "active") return null;
 
     const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
-    const title = `${listing.title} - ${listing.company || ""} ${listing.city || ""}`.trim().slice(0, 200);
+    const company = (listing.company || "").trim() || "Belirtilmemiş";
+    const city = (listing.city || "").trim() || "Türkiye";
+    const title = `${listing.title || "Güvenlik Personeli"} | ${company} | Özel Güvenlik İş İlanları`;
     const desc = ((listing.description || "") + "")
       .replace(/\s+/g, " ")
-      .slice(0, 280) || `${listing.city} bölgesinde ${listing.company || "firma"} özel güvenlik görevlisi alımı.`;
+      .slice(0, 158) || `${city} bölgesinde ${company} özel güvenlik görevlisi alımı.`;
     const validThrough = listing.expiresAt
-      ? new Date(listing.expiresAt as any).toISOString()
+      ? new Date(listing.expiresAt as Date).toISOString()
       : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const datePosted = listing.createdAt
+      ? new Date(listing.createdAt as Date).toISOString()
+      : new Date().toISOString();
 
     return {
       title,
@@ -261,23 +285,20 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
         {
           "@context": "https://schema.org",
           "@type": "JobPosting",
-          title: listing.title,
+          title: listing.title || "Güvenlik Personeli Aranıyor",
           description: listing.description || desc,
-          identifier: { "@type": "PropertyValue", name: "Özel Güvenlik Online", value: `#${listing.id}` },
-          datePosted: (listing.createdAt as any) || new Date().toISOString(),
+          identifier: { "@type": "PropertyValue", name: "Özel Güvenlik Online", value: String(listing.id) },
+          datePosted,
           validThrough,
-          employmentType: (listing as any).workType || "FULL_TIME",
-          hiringOrganization: { "@type": "Organization", name: listing.company || "Firma", sameAs: SEO_BASE_URL },
+          employmentType: "FULL_TIME",
+          directApply: true,
+          hiringOrganization: { "@type": "Organization", name: company, sameAs: SEO_BASE_URL },
           jobLocation: {
             "@type": "Place",
-            address: { "@type": "PostalAddress", addressLocality: listing.city || "Türkiye", addressCountry: "TR" },
+            address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" },
           },
-          baseSalary: {
-            "@type": "MonetaryAmount",
-            currency: "TRY",
-            value: { "@type": "QuantitativeValue", value: (listing as any).salary || "Belirtilmedi", unitText: "MONTH" },
-          },
-          image: (listing as any).companyLogoUrl || `${SEO_BASE_URL}/og-image.jpg`,
+          url: pageUrl,
+          image: (listing as { companyLogoUrl?: string | null }).companyLogoUrl || `${SEO_BASE_URL}/og-image.jpg`,
         },
         {
           "@context": "https://schema.org",
@@ -313,6 +334,89 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
   const clean = pathname.split("?")[0]!.replace(/\/+$/, "") || "/";
 
   if (clean === "/" || clean === "") return buildHomeMeta();
+
+  if (clean === "/ilanlar") {
+    return {
+      title: "Güncel Özel Güvenlik İş İlanları | Bay Bayan Personel Alımları",
+      description: "Aktif özel güvenlik iş ilanlarını şehir, maaş ve pozisyona göre filtreleyin. Silahlı, silahsız, AVM, fabrika ve site güvenliği bay bayan personel alımları.",
+      canonical: `${SEO_BASE_URL}/ilanlar`,
+      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogType: "website",
+      jsonLd: [{
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        name: "Özel Güvenlik İş İlanları",
+        url: `${SEO_BASE_URL}/ilanlar`,
+      }],
+      bodyHtml: `<header><h1>Güncel Özel Güvenlik İş İlanları</h1></header><main><p>Türkiye genelinde aktif özel güvenlik iş ilanları.</p></main>`,
+    };
+  }
+
+  if (clean === "/blog") {
+    return {
+      title: "Özel Güvenlik Blog | İş Arama Rehberi",
+      description: "Özel güvenlik sektörü blog yazıları, maaş rehberleri ve iş arama ipuçları.",
+      canonical: `${SEO_BASE_URL}/blog`,
+      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogType: "website",
+      bodyHtml: `<header><h1>Özel Güvenlik Blog</h1></header>`,
+    };
+  }
+
+  const blogMatch = clean.match(/^\/blog\/([a-z0-9-]+)$/i);
+  if (blogMatch) {
+    const slug = blogMatch[1]!;
+    const titles: Record<string, string> = {
+      "ozel-guvenlik-is-ilanlari-nasil-bulunur": "Özel Güvenlik İş İlanları Nasıl Bulunur? 2026 Rehberi",
+      "silahli-silahsiz-guvenlik-maaslari": "Silahlı ve Silahsız Güvenlik Maaşları 2026",
+      "ozel-guvenlik-kimlik-karti-nasil-alinir": "Özel Güvenlik Kimlik Kartı Nasıl Alınır?",
+      "istanbul-ozel-guvenlik-is-ilanlari-rehberi": "İstanbul Özel Güvenlik İş İlanları Rehberi",
+      "kocaeli-gebze-guvenlik-is-ilanlari": "Kocaeli ve Gebze Güvenlik İş İlanları",
+    };
+    const title = titles[slug] ?? "Özel Güvenlik Blog";
+    const pageUrl = `${SEO_BASE_URL}/blog/${slug}`;
+    return {
+      title: `${title} | Özel Güvenlik Blog`,
+      description: `${title} — özel güvenlik sektörü rehber yazısı.`,
+      canonical: pageUrl,
+      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogType: "article",
+      bodyHtml: `<article><h1>${escapeHtml(title)}</h1></article>`,
+    };
+  }
+
+  const slugIlanMatch = clean.match(/^\/([a-z0-9-]+)-is-ilanlari$/i);
+  if (slugIlanMatch) {
+    const slug = slugIlanMatch[1]!;
+    const companies: Record<string, string> = {
+      securitas: "Securitas", "tepe-savunma": "Tepe Savunma", iss: "ISS", g4s: "G4S",
+      desmer: "Desmer", pronet: "Pronet", "koruma-grubu": "Koruma Grubu", prosegur: "Prosegur",
+    };
+    const keywords: Record<string, string> = {
+      "silahli-guvenlik": "Silahlı Güvenlik İş İlanları",
+      "silahsiz-guvenlik": "Silahsız Güvenlik İş İlanları",
+      "avm-guvenlik": "AVM Güvenlik İş İlanları",
+      "fabrika-guvenlik": "Fabrika Güvenlik İş İlanları",
+      "site-guvenlik": "Site Güvenlik İş İlanları",
+      "bay-guvenlik": "Bay Güvenlik İş İlanları",
+      "bayan-guvenlik": "Bayan Güvenlik İş İlanları",
+    };
+    const company = companies[slug];
+    const kwKey = slug.replace(/-is-ilanlari$/, "");
+    const keyword = keywords[kwKey];
+    const label = company ?? keyword;
+    if (label) {
+      const pageUrl = `${SEO_BASE_URL}/${slug}-is-ilanlari`;
+      return {
+        title: company ? `${company} İş İlanları | Özel Güvenlik İş İlanları` : `${label} | Güncel Personel Alımları`,
+        description: `${label} ve güncel özel güvenlik personel alımları. Bay bayan güvenlik görevlisi pozisyonlarına hemen başvurun.`,
+        canonical: pageUrl,
+        ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+        ogType: "website",
+        bodyHtml: `<header><h1>${escapeHtml(label)}</h1></header>`,
+      };
+    }
+  }
 
   const cityMatch = clean.match(/^\/([a-z0-9-]+)-ozel-guvenlik-is-ilanlari$/i);
   if (cityMatch) {

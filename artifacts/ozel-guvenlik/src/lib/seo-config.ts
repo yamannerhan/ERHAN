@@ -1,0 +1,193 @@
+/** Merkezi SEO sabitleri ve null-güvenli yardımcılar (yalnızca SEO katmanı). */
+
+export const SEO_BASE_URL = "https://ozelguvenlik.online";
+export const SEO_SITE_NAME = "Özel Güvenlik İş İlanları";
+export const SEO_OG_IMAGE = `${SEO_BASE_URL}/og-image.jpg`;
+
+export function safeText(value: unknown, fallback: string): string {
+  if (value == null) return fallback;
+  const s = String(value).trim();
+  if (!s || s === "null" || s === "undefined") return fallback;
+  return s;
+}
+
+export function truncateDescription(text: string, max = 158): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1).trim()}…`;
+}
+
+export function buildHomeTitle(): string {
+  return "Özel Güvenlik İş İlanları | Güncel Bay Bayan Güvenlik Personeli Alımları";
+}
+
+export function buildHomeDescription(): string {
+  return truncateDescription(
+    "Türkiye genelinde güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru fırsatları.",
+  );
+}
+
+export function buildListingsTitle(): string {
+  return "Güncel Özel Güvenlik İş İlanları | Bay Bayan Personel Alımları";
+}
+
+export function buildListingsDescription(): string {
+  return truncateDescription(
+    "Aktif özel güvenlik iş ilanlarını şehir, maaş ve pozisyona göre filtreleyin. Silahlı, silahsız, AVM, fabrika ve site güvenliği bay bayan personel alımları.",
+  );
+}
+
+export function buildCityTitle(city: string): string {
+  return `${safeText(city, "Türkiye")} Özel Güvenlik İş İlanları | Güncel Güvenlik Personeli Alımları`;
+}
+
+export function buildCityDescription(city: string): string {
+  return truncateDescription(
+    `${city} bölgesinde güncel özel güvenlik iş ilanları. Silahlı, silahsız, AVM, fabrika, site ve OSB güvenliği bay bayan personel alımları. Ücretsiz başvuru.`,
+  );
+}
+
+export function buildCompanyTitle(company: string): string {
+  return `${safeText(company, "Firma")} İş İlanları | Özel Güvenlik İş İlanları`;
+}
+
+export function buildCompanyDescription(company: string): string {
+  return truncateDescription(
+    `${company} özel güvenlik iş ilanları ve güncel personel alımları. Silahlı, silahsız bay bayan güvenlik görevlisi pozisyonlarına hemen başvurun.`,
+  );
+}
+
+export function buildListingTitle(title: unknown, company: unknown): string {
+  const t = safeText(title, "Güvenlik Personeli Aranıyor");
+  const c = safeText(company, "Belirtilmemiş");
+  return `${t} | ${c} | Özel Güvenlik İş İlanları`;
+}
+
+export function buildListingDescription(
+  city: unknown,
+  company: unknown,
+  workType: unknown,
+  salary: unknown,
+  description: unknown,
+): string {
+  const c = safeText(city, "Türkiye");
+  const co = safeText(company, "firma");
+  const wt = safeText(workType, "Tam Zamanlı");
+  const sal = salary ? ` Maaş: ${safeText(salary, "")}.` : "";
+  const desc = safeText(description, "").slice(0, 80);
+  return truncateDescription(
+    `${c} bölgesinde ${co} firması ${wt} özel güvenlik görevlisi alımı.${sal} ${desc}`.trim(),
+  );
+}
+
+export function buildNotFoundTitle(): string {
+  return "Sayfa Bulunamadı | Özel Güvenlik İş İlanları";
+}
+
+export function buildNotFoundDescription(): string {
+  return truncateDescription(
+    "Aradığınız sayfa bulunamadı. Güncel özel güvenlik iş ilanlarına ana sayfadan veya ilanlar bölümünden ulaşabilirsiniz.",
+  );
+}
+
+export function toIsoDate(value: unknown): string {
+  if (!value) return new Date().toISOString();
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+export function mapEmploymentType(workType: unknown): string {
+  const t = safeText(workType, "").toLocaleLowerCase("tr-TR");
+  if (/part|yarı\s*zaman|yarim\s*zaman|günlük|gunluk/.test(t)) return "PART_TIME";
+  if (/proje|geçici|gecici|dönemsel|donemsel/.test(t)) return "TEMPORARY";
+  if (/sözleşmeli|sozlesmeli|kontrat/.test(t)) return "CONTRACTOR";
+  if (/staj|intern/.test(t)) return "INTERN";
+  return "FULL_TIME";
+}
+
+export function parseSalaryNumber(salary: unknown): number | null {
+  const raw = safeText(salary, "");
+  if (!raw || /görüş|belirtil|asgari/i.test(raw)) return null;
+  const digits = raw.replace(/[^\d]/g, "");
+  const n = Number(digits);
+  return Number.isFinite(n) && n >= 1000 ? n : null;
+}
+
+export function buildJobPostingSchema(listing: {
+  id: number;
+  title?: string | null;
+  description?: string | null;
+  company?: string | null;
+  city?: string | null;
+  salary?: string | null;
+  workType?: string | null;
+  companyLogoUrl?: string | null;
+  createdAt?: string | null;
+  expiresAt?: string | null;
+  applyUrl?: string | null;
+}) {
+  const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
+  const title = safeText(listing.title, "Güvenlik Personeli Aranıyor");
+  const company = safeText(listing.company, "Belirtilmemiş");
+  const city = safeText(listing.city, "Türkiye");
+  const description = safeText(listing.description, `${city} bölgesinde ${company} özel güvenlik görevlisi alımı.`);
+  const validThrough = listing.expiresAt
+    ? toIsoDate(listing.expiresAt)
+    : toIsoDate(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const salaryNum = parseSalaryNumber(listing.salary);
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title,
+    description,
+    identifier: {
+      "@type": "PropertyValue",
+      name: SEO_SITE_NAME,
+      value: String(listing.id),
+    },
+    datePosted: toIsoDate(listing.createdAt),
+    validThrough,
+    employmentType: mapEmploymentType(listing.workType),
+    directApply: true,
+    hiringOrganization: {
+      "@type": "Organization",
+      name: company,
+      sameAs: SEO_BASE_URL,
+    },
+    jobLocation: {
+      "@type": "Place",
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: city,
+        addressCountry: "TR",
+      },
+    },
+    baseSalary: salaryNum
+      ? {
+          "@type": "MonetaryAmount",
+          currency: "TRY",
+          value: {
+            "@type": "QuantitativeValue",
+            value: salaryNum,
+            unitText: "MONTH",
+          },
+        }
+      : undefined,
+    image: listing.companyLogoUrl || SEO_OG_IMAGE,
+    url: pageUrl,
+  };
+}
+
+export function breadcrumbSchema(items: { name: string; item: string }[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((entry, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: entry.name,
+      item: entry.item,
+    })),
+  };
+}

@@ -62,12 +62,12 @@ const OTHER_CITIES = [
   "Mersin", "Kayseri", "Eskişehir", "Sakarya", "Tekirdağ", "Samsun", "Trabzon",
 ];
 
-export default function Listings({ initialCity }: { initialCity?: string }) {
+export default function Listings({ initialCity, initialSearch }: { initialCity?: string; initialSearch?: string }) {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const savedState = getSavedListingsState();
-  const [search, setSearch] = useState(savedState.search);
+  const [search, setSearch] = useState(initialSearch ?? savedState.search);
   const [city, setCity] = useState(initialCity ?? savedState.city);
   const [page, setPage] = useState(savedState.page);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);

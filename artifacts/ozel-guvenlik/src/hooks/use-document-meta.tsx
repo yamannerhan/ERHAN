@@ -42,9 +42,15 @@ export function useDocumentMeta(meta: DocumentMeta) {
   useEffect(() => {
     const originalTitle = document.title;
 
-    if (meta.title) document.title = meta.title;
-    if (meta.description) setMetaTag('meta[name="description"]', "name", meta.description);
+    const title = meta.title?.trim();
+    const description = meta.description?.trim();
+
+    if (title) document.title = title;
+    if (description) setMetaTag('meta[name="description"]', "name", description);
     if (meta.keywords) setMetaTag('meta[name="keywords"]', "name", meta.keywords);
+
+    setMetaTag('meta[name="robots"]', "name", "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1");
+
     if (meta.canonical) {
       setLinkRel("canonical", meta.canonical);
       setMetaTag('meta[property="og:url"]', "property", meta.canonical);
@@ -54,6 +60,18 @@ export function useDocumentMeta(meta: DocumentMeta) {
       setMetaTag('meta[name="twitter:image"]', "name", meta.ogImage);
     }
     if (meta.ogType) setMetaTag('meta[property="og:type"]', "property", meta.ogType);
+
+    if (title) {
+      setMetaTag('meta[property="og:title"]', "property", title);
+      setMetaTag('meta[name="twitter:title"]', "name", title);
+    }
+    if (description) {
+      setMetaTag('meta[property="og:description"]', "property", description);
+      setMetaTag('meta[name="twitter:description"]', "name", description);
+    }
+    setMetaTag('meta[name="twitter:card"]', "name", "summary_large_image");
+    setMetaTag('meta[property="og:site_name"]', "property", "Özel Güvenlik İş İlanları");
+    setMetaTag('meta[property="og:locale"]', "property", "tr_TR");
 
     /* hreflang */
     const trAlt = document.querySelector<HTMLLinkElement>('link[hreflang="tr-TR"]');
