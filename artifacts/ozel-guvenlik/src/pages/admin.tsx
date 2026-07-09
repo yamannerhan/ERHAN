@@ -1517,13 +1517,14 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
           </div>
           <Input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder={form.platform === "telegram" ? "https://t.me/kanal_adi" : form.platform === "sahibinden" ? "https://www.sahibinden.com/..." : "https://facebook.com/sayfaadi"} className="h-8 text-sm bg-white/5 border-white/10" />
           {form.platform === "telegram" && (
-            <p className="text-[10px] text-muted-foreground">Kanal linki yeterli. Bot 1 dk&apos;da bir tarar, ilanları otomatik yayınlar.</p>
+            <p className="text-[10px] text-muted-foreground">Her dakika sırayla 1 grup taranır. İlk tarama son 30 gün; bitince yeni ilanlar yakalanır.</p>
           )}
+          <div className="space-y-1">
+            <Input value={form.targetCitiesText} onChange={e => setForm(f => ({ ...f, targetCitiesText: e.target.value }))} placeholder="Hedef şehir/ilçe: İstanbul, Kocaeli, Gebze, Ankara" className="h-8 text-sm bg-white/5 border-white/10" />
+            <p className="text-[10px] text-muted-foreground">Virgülle ayır. İl/ilçe metinden otomatik yerleştirilir. &quot;Sadece hedef şehirleri yayınla&quot; işaretliyse filtre uygulanır.</p>
+          </div>
           {form.platform !== "telegram" && (
-            <div className="space-y-1">
-              <Input value={form.targetCitiesText} onChange={e => setForm(f => ({ ...f, targetCitiesText: e.target.value }))} placeholder="Hedef şehir/ilçe/semt: İstanbul, Gebze, Ankara, İzmir" className="h-8 text-sm bg-white/5 border-white/10" />
-              <p className="text-[10px] text-muted-foreground">Virgülle ayır. Sistem il/ilçe/semt yakalayıp eşleştirir.</p>
-            </div>
+            <div className="space-y-1" />
           )}
           <div className="flex gap-4 flex-wrap">
             {form.platform !== "telegram" && (

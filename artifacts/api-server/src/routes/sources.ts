@@ -32,6 +32,8 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
       checkInterval: s.checkInterval,
       autoPublish: s.autoPublish,
       requireApproval: s.requireApproval,
+      targetCities: s.targetCities ?? [],
+      publishOnlyTargetCities: s.publishOnlyTargetCities ?? false,
       lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
       lastError: s.lastError ?? null,
       totalImported: s.totalImported,
@@ -48,9 +50,9 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
 
 // ── Create source ─────────────────────────────────────────────────
 router.post("/admin/sources", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { name, platform, url, apiToken, active, checkInterval, autoPublish, requireApproval } = req.body as {
+  const { name, platform, url, apiToken, active, checkInterval, autoPublish, requireApproval, targetCities, publishOnlyTargetCities } = req.body as {
     name?: string; platform?: string; url?: string; apiToken?: string; active?: boolean; checkInterval?: number;
-    autoPublish?: boolean; requireApproval?: boolean;
+    autoPublish?: boolean; requireApproval?: boolean; targetCities?: string[]; publishOnlyTargetCities?: boolean;
   };
 
   if (!name?.trim()) { res.status(400).json({ error: "Kaynak adı zorunlu" }); return; }
@@ -68,6 +70,8 @@ router.post("/admin/sources", authMiddleware, requireAdmin, async (req, res): Pr
     checkInterval: checkInterval ?? (isTelegram ? 1 : 15),
     autoPublish: isTelegram ? true : (autoPublish ?? false),
     requireApproval: isTelegram ? false : (requireApproval ?? true),
+    targetCities: targetCities?.length ? targetCities : undefined,
+    publishOnlyTargetCities: publishOnlyTargetCities ?? false,
   }).returning();
 
   res.json(source);
@@ -78,9 +82,10 @@ router.patch("/admin/sources/:id", authMiddleware, requireAdmin, async (req, res
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
 
-  const { name, url, apiToken, active, checkInterval, autoPublish, requireApproval } = req.body as {
+  const { name, url, apiToken, active, checkInterval, autoPublish, requireApproval, targetCities, publishOnlyTargetCities } = req.body as {
     name?: string; url?: string; apiToken?: string; active?: boolean;
     checkInterval?: number; autoPublish?: boolean; requireApproval?: boolean;
+    targetCities?: string[]; publishOnlyTargetCities?: boolean;
   };
 
   const updates: Partial<typeof sourcesTable.$inferInsert> = {};
@@ -98,6 +103,8 @@ router.patch("/admin/sources/:id", authMiddleware, requireAdmin, async (req, res
   }
   if (autoPublish !== undefined) updates.autoPublish = autoPublish;
   if (requireApproval !== undefined) updates.requireApproval = requireApproval;
+  if (targetCities !== undefined) updates.targetCities = targetCities;
+  if (publishOnlyTargetCities !== undefined) updates.publishOnlyTargetCities = publishOnlyTargetCities;
 
   await db.update(sourcesTable).set(updates).where(eq(sourcesTable.id, id));
   res.json({ success: true });

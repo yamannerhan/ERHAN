@@ -167,7 +167,7 @@ export interface FetchChannelResult {
 }
 
 function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
-  if (!m.message || m.message.length < 20) return null;
+  if (!m.message || m.message.length < 10) return null;
   return {
     id: String(m.id),
     text: m.message,
@@ -177,7 +177,7 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 }
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
-const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 15;
+const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 25;
 
 /** GramJS ile kanal mesajlarını çeker. İlk tarama: maxAgeDays geriye sayfalı; sonraki: minMessageId sonrası. */
 export async function fetchChannelMessages(

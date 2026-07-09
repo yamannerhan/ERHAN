@@ -4,38 +4,16 @@ import { eq, and, isNotNull, lt } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
-import { extractSalary, extractGender } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting } from "../lib/job-parsing";
+import type { ParsedLocation } from "../lib/job-parsing";
 import { announceNewListing } from "../lib/listing-announcements";
 
 // ── Keyword lists ──────────────────────────────────────────────────
-const JOB_KEYWORDS = [
-  "özel güvenlik", "güvenlik görevlisi", "silahlı", "silahsız",
-  "personel aranıyor", "eleman aranıyor", "vardiya", "maaş",
-  "yol ", "yemek", "sgk", "başvuru", "iletişim", "telefon", "şehir", "firma",
-];
 const CHAT_SKIP_KEYWORDS = [
   "selam", "merhaba", "nasılsın", "iş var mı", "iş arıyorum",
   "özelden yaz", "teşekkür", "tamam", "günaydın", "iyi akşam",
   "kolay gelsin", "iyi günler",
 ];
-const TR_CITIES = [
-  "istanbul", "ankara", "izmir", "bursa", "antalya", "adana", "konya",
-  "gaziantep", "kocaeli", "mersin", "diyarbakır", "hatay", "manisa",
-  "kayseri", "samsun", "tekirdağ", "balıkesir", "sakarya", "denizli",
-  "trabzon", "malatya", "eskişehir", "erzurum", "rize", "ordu",
-  "zonguldak", "van", "şanlıurfa", "afyon", "aydın", "muğla",
-];
-const CITY_DISPLAY: Record<string, string> = {
-  istanbul: "İstanbul", ankara: "Ankara", izmir: "İzmir",
-  bursa: "Bursa", antalya: "Antalya", adana: "Adana", konya: "Konya",
-  gaziantep: "Gaziantep", kocaeli: "Kocaeli", mersin: "Mersin",
-  diyarbakır: "Diyarbakır", hatay: "Hatay", manisa: "Manisa",
-  kayseri: "Kayseri", samsun: "Samsun", tekirdağ: "Tekirdağ",
-  balıkesir: "Balıkesir", sakarya: "Sakarya", denizli: "Denizli",
-  trabzon: "Trabzon", malatya: "Malatya", eskişehir: "Eskişehir",
-  erzurum: "Erzurum", rize: "Rize", ordu: "Ordu", zonguldak: "Zonguldak",
-  van: "Van", şanlıurfa: "Şanlıurfa", afyon: "Afyon", aydın: "Aydın", muğla: "Muğla",
-};
 
 // ── Text utils ─────────────────────────────────────────────────────
 function normalizeText(text: string): string {
@@ -86,63 +64,57 @@ function extractContactName(text: string): string | null {
   return null;
 }
 
-function extractCity(text: string): string | null {
-  const lower = normalizeText(text);
-  const found = TR_CITIES.find(c => lower.includes(c));
-  return found ? (CITY_DISPLAY[found] ?? found) : null;
+function resolveListingCity(location: ParsedLocation): string {
+  return location.display ?? location.district ?? location.city ?? "Türkiye";
 }
 
-function extractTitle(text: string): string {
-  const lower = normalizeText(text);
-  // Try to extract location for richer title
-  const city = extractCity(text);
-
-  const TITLE_MAP: [string, string][] = [
-    ["silahlı güvenlik görevlisi", "Silahlı Güvenlik Görevlisi"],
-    ["silahsız güvenlik görevlisi", "Silahsız Güvenlik Görevlisi"],
-    ["özel güvenlik görevlisi", "Özel Güvenlik Görevlisi"],
-    ["özel güvenlik personeli", "Özel Güvenlik Personeli"],
-    ["güvenlik amiri", "Güvenlik Amiri"],
-    ["güvenlik şefi", "Güvenlik Şefi"],
-    ["güvenlik müdürü", "Güvenlik Müdürü"],
-    ["güvenlik personeli", "Güvenlik Personeli"],
-    ["güvenlik görevlisi", "Güvenlik Görevlisi"],
-    ["özel güvenlik", "Özel Güvenlik Personeli"],
-    ["silahlı", "Silahlı Güvenlik Görevlisi"],
-    ["silahsız", "Silahsız Güvenlik Görevlisi"],
-  ];
-  for (const [kw, label] of TITLE_MAP) {
-    if (lower.includes(kw)) {
-      return city ? `${label} — ${city}` : `${label} Aranıyor`;
-    }
-  }
-  return city ? `Güvenlik Personeli — ${city}` : "Güvenlik Personeli Aranıyor";
+function matchesTargetCities(
+  text: string,
+  location: ParsedLocation,
+  targets: string[] | null | undefined,
+  strict: boolean,
+): boolean {
+  if (!strict || !targets?.length) return true;
+  const plain = text.toLocaleLowerCase("tr-TR");
+  const cityNorm = (location.city ?? "").toLocaleLowerCase("tr-TR");
+  const displayNorm = (location.display ?? "").toLocaleLowerCase("tr-TR");
+  return targets.some((raw) => {
+    const t = raw.trim().toLocaleLowerCase("tr-TR");
+    if (!t) return false;
+    return plain.includes(t) || cityNorm.includes(t) || t.includes(cityNorm)
+      || displayNorm.includes(t) || t.includes(displayNorm);
+  });
 }
 
-function createDuplicateHash(text: string): string {
+function createDuplicateHash(text: string, location: ParsedLocation): string {
   const phone = extractPhone(text);
-  const city = extractCity(text) ?? "";
-  // Telefon varsa onu birincil imza yap: aynı iletişim numarası farklı gruplarda
-  // paylaşılsa bile (mesaj başlık/altlık farklı olsa da) tek ilan sayılır.
+  // Aynı telefon farklı gruplarda tekrar paylaşılsa bile tek ilan
   if (phone) {
-    return crypto.createHash("sha256").update(`tel:${phone}|${city}`).digest("hex");
+    return crypto.createHash("sha256").update(`tel:${phone}`).digest("hex");
   }
-  // Telefon yoksa metnin gövdesine düş
+  const city = location.city ?? "";
   const normalized = normalizeText(text).slice(0, 250);
   return crypto.createHash("sha256").update(`${city}|${normalized}`).digest("hex");
 }
 
-// Aynı telefon + şehre sahip yayında (aktif) bir ilan var mı?
-async function findActiveListingByPhone(phone: string, city: string): Promise<number | null> {
+// Aynı telefona sahip aktif ilan var mı? (gruplar arası çift kayıt engeli)
+async function findActiveListingByPhone(phone: string): Promise<number | null> {
   const rows = await db.select({ id: listingsTable.id })
     .from(listingsTable)
     .where(and(
       eq(listingsTable.applyUrl, `tel:${phone}`),
-      eq(listingsTable.city, city),
       eq(listingsTable.status, "active"),
     ))
     .limit(1);
   return rows[0]?.id ?? null;
+}
+
+async function findDuplicateImported(hash: string): Promise<boolean> {
+  const [row] = await db.select({ id: importedPostsTable.id })
+    .from(importedPostsTable)
+    .where(eq(importedPostsTable.duplicateHash, hash))
+    .limit(1);
+  return !!row;
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
@@ -159,13 +131,6 @@ const TELEGRAM_SCAN_INTERVAL_MS = 60_000; // sabit 1 dakika
 function listingExpiryFrom(postedAt?: Date): Date {
   const base = postedAt ?? new Date();
   return new Date(base.getTime() + INITIAL_SCAN_MS);
-}
-
-function isJobPosting(text: string): boolean {
-  if (text.length < 30) return false;
-  const lower = normalizeText(text);
-  const count = JOB_KEYWORDS.filter(kw => lower.includes(kw)).length;
-  return count >= 3;
 }
 
 function isChatMessage(text: string): boolean {
@@ -307,9 +272,14 @@ async function processMessage(
   isInitialScan = false,
 ): Promise<ProcessResult> {
   if (!text?.trim() || isChatMessage(text)) return { isNew: false };
-  if (!isJobPosting(text)) return { isNew: false };
+  if (!isSecurityJobPosting(text)) return { isNew: false };
 
   if (isInitialScan && postedAt && Date.now() - postedAt.getTime() > INITIAL_SCAN_MS) {
+    return { isNew: false };
+  }
+
+  const location = extractLocation(text);
+  if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
     return { isNew: false };
   }
 
@@ -322,7 +292,8 @@ async function processMessage(
     .limit(1);
   if (seenExt) return { isNew: false };
 
-  const hash = createDuplicateHash(text);
+  const hash = createDuplicateHash(text, location);
+  if (await findDuplicateImported(hash)) return { isNew: false };
 
   const [imported] = await db.insert(importedPostsTable).values({
     sourceId: source.id,
@@ -338,7 +309,7 @@ async function processMessage(
   if (!imported) return { isNew: false };
 
   const title = extractTitle(text);
-  const city = extractCity(text) ?? "Türkiye";
+  const city = resolveListingCity(location);
   const salary = extractSalary(text);
   const phone = extractPhone(text);
   const gender = extractGender(text);
@@ -364,17 +335,18 @@ async function processMessage(
     return { isNew: false };
   }
 
-  const existingListingId = phone ? await findActiveListingByPhone(phone, city) : null;
+  const existingListingId = phone ? await findActiveListingByPhone(phone) : null;
   if (existingListingId) {
     await db.update(listingsTable).set({
       title: title ?? "Güvenlik Personeli Aranıyor",
+      city,
       salary: salary ?? undefined,
       description: text,
       requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
       status: "active",
       isActive: true,
       updatedAt: new Date(),
-      createdAt: new Date(),
+      ...(postedAt ? { createdAt: postedAt, expiresAt: listingExpiryFrom(postedAt) } : {}),
     }).where(eq(listingsTable.id, existingListingId));
     await db.update(importedPostsTable)
       .set({ status: "approved" })
@@ -582,6 +554,54 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   );
 }
 
+// Sıradaki Telegram grubunu seç: önce bitmemiş ilk tarama, sonra en az taranan grup
+function pickNextTelegramSource(
+  sources: Array<typeof sourcesTable.$inferSelect>,
+): typeof sourcesTable.$inferSelect | null {
+  if (sources.length === 0) return null;
+  const sorted = [...sources].sort((a, b) => a.id - b.id);
+  const pendingInitial = sorted.find(s => !s.initialScanDone);
+  if (pendingInitial) return pendingInitial;
+  return sorted.reduce((oldest, s) => {
+    const t = s.lastCheckedAt?.getTime() ?? 0;
+    const o = oldest.lastCheckedAt?.getTime() ?? 0;
+    return t < o ? s : oldest;
+  });
+}
+
+async function scanTelegramSources(
+  telegramSources: Array<typeof sourcesTable.$inferSelect>,
+  force: boolean,
+): Promise<void> {
+  const now = new Date();
+  const toScan = force
+    ? [...telegramSources].sort((a, b) => a.id - b.id)
+    : (() => {
+      const next = pickNextTelegramSource(telegramSources);
+      return next ? [next] : [];
+    })();
+
+  for (const source of toScan) {
+    const username = extractTelegramUsername(source.url);
+    logger.info(`scraper: sıra → kaynak #${source.id} "${source.name}" @${username ?? "?"} (ilk=${!source.initialScanDone})`);
+    try {
+      await checkTelegramSource(source);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`scraper: telegram source ${source.id} (@${username ?? "?"}) failed: ${errMsg}`);
+      if (!isClientConnected()) {
+        await db.update(sourcesTable)
+          .set({ lastError: errMsg.slice(0, 500), lastCheckedAt: now })
+          .where(eq(sourcesTable.id, source.id));
+      } else {
+        await db.update(sourcesTable)
+          .set({ lastCheckedAt: now, lastError: null })
+          .where(eq(sourcesTable.id, source.id));
+      }
+    }
+  }
+}
+
 // ── Main scraper loop ──────────────────────────────────────────────
 // Aynı anda iki tarama döngüsü çalışmasın (interval + manuel tetikleme yarışını önler).
 let cycleRunning = false;
@@ -597,35 +617,19 @@ async function runScraperCycle(force = false): Promise<void> {
 }
 
 async function runScraperCycleInner(force = false): Promise<void> {
-  // 1) Pull all updates the bot received across all its chats
   await processBotUpdates();
 
-  // 2) For sources that have web preview enabled, also scrape periodically
   const sources = await db.select().from(sourcesTable)
     .where(eq(sourcesTable.active, true));
 
   const now = new Date();
+  const telegramSources = sources.filter(s => s.platform === "telegram");
+  if (telegramSources.length > 0) {
+    await scanTelegramSources(telegramSources, force);
+  }
 
   for (const source of sources) {
-    // Telegram: sabit 1 dakika — kaynak başına değişken aralık yok
-    if (source.platform === "telegram") {
-      try {
-        await checkTelegramSource(source);
-      } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        logger.warn(`scraper: telegram source ${source.id} failed: ${errMsg}`);
-        if (!isClientConnected()) {
-          await db.update(sourcesTable)
-            .set({ lastError: errMsg.slice(0, 500), lastCheckedAt: now })
-            .where(eq(sourcesTable.id, source.id));
-        } else {
-          await db.update(sourcesTable)
-            .set({ lastCheckedAt: now, lastError: null })
-            .where(eq(sourcesTable.id, source.id));
-        }
-      }
-      continue;
-    }
+    if (source.platform === "telegram") continue;
 
     const intervalMin = source.checkInterval ?? 15;
     const intervalMs = intervalMin * 60 * 1000;
@@ -647,7 +651,7 @@ export function startScraperWorker(): void {
     : isBotTokenSet()
       ? "Bot API + web fallback"
       : "web scraping only";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, 1dk döngü)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, 1dk/grup sıralı)`);
 
   if (isBotTokenSet()) {
     setInterval(async () => {
@@ -709,7 +713,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (!text?.trim()) continue;
 
     const newTitle = extractTitle(text);
-    const newCity = extractCity(text);
+    const newCity = resolveListingCity(extractLocation(text));
     const newSalary = extractSalary(text);
     const newGender = extractGender(text);
     const newPhone = extractPhone(text);
