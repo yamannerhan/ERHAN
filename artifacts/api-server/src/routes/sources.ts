@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
@@ -298,9 +298,58 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     checkInterval: 5,
     autoPublish: true,
     requireApproval: false,
+    initialScanDone: false,
+    initialScanProgress: 1,
+    initialScanPhase: "forward",
+    lastTelegramMessageId: null,
   }).returning();
 
   res.json({ success: true, source });
+});
+
+router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req, res) => {
+  const sources = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "whatsapp"))
+    .orderBy(desc(sourcesTable.createdAt));
+
+  const withCounts = await Promise.all(sources.map(async (s) => {
+    const [row] = await db.select({ c: count() })
+      .from(listingsTable)
+      .where(and(eq(listingsTable.sourceId, s.id), eq(listingsTable.status, "active")));
+    return {
+      id: s.id,
+      name: s.name,
+      url: s.url,
+      active: s.active,
+      checkInterval: s.checkInterval,
+      initialScanDone: s.initialScanDone ?? false,
+      initialScanProgress: s.initialScanProgress ?? 0,
+      isScanning: s.isScanning ?? false,
+      totalImported: s.totalImported ?? 0,
+      listingCount: row?.c ?? 0,
+      lastScanMessagesRead: s.lastScanMessagesRead ?? 0,
+      lastScanFound: s.lastScanFound ?? 0,
+      lastScanAdded: s.lastScanAdded ?? 0,
+      lastScanDuplicates: s.lastScanDuplicates ?? 0,
+      lastScanErrors: s.lastScanErrors ?? 0,
+      lastScanPublished: s.lastScanPublished ?? 0,
+      lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
+      lastError: s.lastError ?? null,
+    };
+  }));
+
+  const totals = withCounts.reduce(
+    (acc, s) => {
+      acc.groups += 1;
+      acc.totalImported += s.totalImported;
+      acc.listingCount += s.listingCount;
+      acc.lastAdded += s.lastScanAdded;
+      return acc;
+    },
+    { groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 },
+  );
+
+  res.json({ sources: withCounts, totals });
 });
 
 router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_req, res) => {
@@ -310,10 +359,15 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
       res.status(503).json({ error: "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın." });
       return;
     }
+    const totalAdded = result.results.reduce((n, r) => n + r.added, 0);
+    const detail = result.results
+      .map((r) => `${r.name}: +${r.added} ilan (${r.messagesRead} mesaj)`)
+      .join(" · ");
     res.json({
       success: true,
       scanned: result.scanned,
-      message: `${result.scanned} WhatsApp grubu tarandı.`,
+      results: result.results,
+      message: `${result.scanned} grup tarandı, ${totalAdded} yeni ilan. ${detail}`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

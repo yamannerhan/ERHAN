@@ -270,27 +270,60 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     }));
 }
 
+/**
+ * Grup mesajlarını çek.
+ * - İlk tarama: son maxAgeDays içindeki mesajlar (limit yükselterek 30 güne yaklaşır)
+ * - Sonraki: afterTimestampMs sonrası yeni mesajlar
+ */
 export async function fetchWhatsAppMessages(
   groupJid: string,
-  opts: { afterTimestampMs?: number; limit?: number; maxAgeDays?: number } = {},
+  opts: {
+    afterTimestampMs?: number;
+    limit?: number;
+    maxAgeDays?: number;
+    deep?: boolean;
+  } = {},
 ): Promise<WhatsAppMessage[]> {
   if (!client || !isReady) return [];
   const chat = await client.getChatById(groupJid);
   if (!chat) return [];
 
-  const limit = opts.limit ?? 100;
-  const msgs = await chat.fetchMessages({ limit });
-  const cutoff = opts.afterTimestampMs
-    ?? (Date.now() - (opts.maxAgeDays ?? 30) * 24 * 60 * 60 * 1000);
+  const cutoff = opts.afterTimestampMs != null
+    ? opts.afterTimestampMs
+    : (Date.now() - (opts.maxAgeDays ?? 30) * 24 * 60 * 60 * 1000);
+
+  // WhatsApp Web tek seferde sınırlı döner — derin taramada limiti kademeli artır
+  const limits = opts.deep
+    ? [200, 500, 1000, 1500, 2000]
+    : [Math.min(opts.limit ?? 100, 200)];
+
+  let best: any[] = [];
+  for (const limit of limits) {
+    const batch = await chat.fetchMessages({ limit });
+    best = batch;
+    if (!opts.deep) break;
+    // En eski mesaj cutoff'tan eskiyse yeterince geri gittik
+    let oldest = Date.now();
+    for (const m of batch) {
+      const ts = (m.timestamp ?? 0) * 1000;
+      if (ts > 0 && ts < oldest) oldest = ts;
+    }
+    if (batch.length < limit || oldest <= cutoff) break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
 
   const out: WhatsAppMessage[] = [];
-  for (const m of msgs) {
+  const seen = new Set<string>();
+  for (const m of best) {
+    const id = m.id?._serialized;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
     const ts = (m.timestamp ?? 0) * 1000;
     if (!ts || ts <= cutoff) continue;
     const text = String(m.body ?? "").trim();
     if (!text) continue;
     out.push({
-      id: m.id._serialized,
+      id,
       remoteJid: groupJid,
       text,
       timestamp: ts,

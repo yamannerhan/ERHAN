@@ -1839,6 +1839,15 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; selected?: boolean }>>([]);
   const [errorLog, setErrorLog] = useState<string>("");
   const [lastScanAt, setLastScanAt] = useState<string>("Henüz taranmadı");
+  const [savedSources, setSavedSources] = useState<Array<{
+    id: number; name: string; url: string; active: boolean; checkInterval: number;
+    initialScanDone: boolean; initialScanProgress: number; isScanning: boolean;
+    totalImported: number; listingCount: number;
+    lastScanMessagesRead: number; lastScanFound: number; lastScanAdded: number;
+    lastScanDuplicates: number; lastScanErrors: number;
+    lastCheckedAt: string | null; lastError: string | null;
+  }>>([]);
+  const [totals, setTotals] = useState({ groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 });
   const [form, setForm] = useState({
     sourceName: "",
     phoneNumber: "",
@@ -1868,6 +1877,15 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
         });
       }
+
+      try {
+        const src = await apiCall("/admin/whatsapp/sources", "GET") as {
+          sources?: typeof savedSources;
+          totals?: typeof totals;
+        };
+        setSavedSources(src.sources ?? []);
+        if (src.totals) setTotals(src.totals);
+      } catch { /* ignore */ }
     } catch (error) {
       setErrorLog(error instanceof Error ? error.message : "Bilinmeyen hata");
       setQrStatus("failed");
@@ -1938,8 +1956,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         });
         ok++;
       }
-      toast({ title: `${ok} grup kaydedildi`, description: "Scraper otomatik tarayacak." });
+      toast({ title: `${ok} grup kaydedildi`, description: "İlk tarama: son 30 gün. Sonra her 5 dk devam." });
       setLastScanAt(new Date().toLocaleString("tr-TR"));
+      await refresh();
     } catch (error) {
       toast({ title: "Kaynak kaydedilemedi", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
@@ -1950,9 +1969,13 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const scanNow = async () => {
     setLoading(true);
     try {
-      const r = await apiCall("/admin/whatsapp/scan-now", "POST") as { message?: string };
+      const r = await apiCall("/admin/whatsapp/scan-now", "POST") as {
+        message?: string;
+        results?: Array<{ name: string; added: number; messagesRead: number }>;
+      };
       setLastScanAt(new Date().toLocaleString("tr-TR"));
       toast({ title: "Tarama tamamlandı", description: r.message });
+      await refresh();
     } catch (error) {
       toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
@@ -1971,9 +1994,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• Bir kez QR veya onay kodu ile bağlan — oturum sunucuda kalır</div>
-              <div>• Seçili gruplardan ilan çekilir (Telegram gibi)</div>
-              <div>• Her 5 dakikada otomatik tarama</div>
+              <div>• İlk tarama: son <strong className="text-slate-200">30 gün</strong> — filtreli ilanlar</div>
+              <div>• Sonra her <strong className="text-slate-200">5 dakikada</strong> kaldığı yerden devam</div>
+              <div>• Telegram ile aynı güvenlik / şehir / çift ilan filtresi</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2018,7 +2041,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             </div>
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">
-                WhatsApp Web oturumu aktif. Grupları seçip kaydedin, sonra «Şimdi Tara» ile ilan çekin.
+                WhatsApp Web oturumu aktif. Grupları seçip kaydedin, sonra «Şimdi Tara» ile 30 gün ilk taramayı başlatın.
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">
@@ -2043,6 +2066,67 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <textarea value={errorLog || "Hata yok"} readOnly className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-300 outline-none" />
           </div>
         </div>
+      </div>
+
+      {/* İstatistik özeti */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Kayıtlı Grup</div>
+          <div className="text-2xl font-black text-white mt-1">{totals.groups}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Toplam Çekilen İlan</div>
+          <div className="text-2xl font-black text-emerald-400 mt-1">{totals.totalImported}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Yayındaki İlan</div>
+          <div className="text-2xl font-black text-sky-400 mt-1">{totals.listingCount}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Son Taramada Eklenen</div>
+          <div className="text-2xl font-black text-amber-400 mt-1">{totals.lastAdded}</div>
+        </div>
+      </div>
+
+      {/* Kayıtlı grup istatistikleri */}
+      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
+        <h4 className="text-base font-bold text-white mb-1">Kayıtlı Gruplar — Tarama İstatistikleri</h4>
+        <p className="text-xs text-slate-400 mb-4">Hangi gruptan kaç ilan çekildi</p>
+        {savedSources.length === 0 ? (
+          <p className="text-xs text-slate-500 text-center py-6">Henüz kayıtlı WhatsApp grubu yok. Aşağıdan seçip kaydedin.</p>
+        ) : (
+          <div className="space-y-2 max-h-[480px] overflow-y-auto">
+            {savedSources.map((s) => (
+              <div key={s.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-white truncate">{s.name}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{s.url}</div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {s.isScanning && <span className="text-[10px] font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                      {s.initialScanDone ? "Günlük (5 dk)" : `İlk tarama %${s.initialScanProgress || 1}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Yayında </span><span className="font-bold text-white">{s.listingCount}</span></div>
+                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Toplam çekilen </span><span className="font-bold text-emerald-300">{s.totalImported}</span></div>
+                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Son + </span><span className="font-bold text-amber-300">{s.lastScanAdded}</span></div>
+                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Mesaj </span><span className="font-bold text-slate-200">{s.lastScanMessagesRead}</span></div>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-3 text-[10px] text-slate-500">
+                  <span>Bulunan: {s.lastScanFound}</span>
+                  <span>Çift: {s.lastScanDuplicates}</span>
+                  <span>Hata: {s.lastScanErrors}</span>
+                  <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
+                </div>
+                {s.lastError && <div className="mt-1 text-[10px] text-rose-400 truncate">{s.lastError}</div>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">

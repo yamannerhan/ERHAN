@@ -1097,15 +1097,19 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   const isInitialScan = !source.initialScanDone;
   const lastTs = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
 
-  await patchSourceProgress(source.id, { lastError: null, isScanning: true });
+  await patchSourceProgress(source.id, {
+    lastError: null,
+    isScanning: true,
+    initialScanPhase: isInitialScan ? "forward" : null,
+    initialScanProgress: isInitialScan ? Math.max(1, source.initialScanProgress ?? 1) : 100,
+  });
 
   let messages;
   try {
-    messages = await fetchWhatsAppMessages(groupJid, {
-      afterTimestampMs: isInitialScan ? undefined : lastTs,
-      maxAgeDays: isInitialScan ? INITIAL_SCAN_DAYS : undefined,
-      limit: isInitialScan ? 300 : 80,
-    });
+    // İlk tarama: son 30 gün derin çekim. Sonra: kaldığı timestamp'ten devam.
+    messages = await fetchWhatsAppMessages(groupJid, isInitialScan
+      ? { maxAgeDays: INITIAL_SCAN_DAYS, deep: true }
+      : { afterTimestampMs: lastTs, limit: 120 });
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
@@ -1120,10 +1124,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 
   stats.messagesRead = messages.length;
   let maxTs = lastTs;
+  let processed = 0;
 
   for (const m of messages) {
     if (m.timestamp > maxTs) maxTs = m.timestamp;
-    stats.found++;
     try {
       const result = await processMessage(
         source,
@@ -1133,11 +1137,28 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
         new Date(m.timestamp),
         isInitialScan,
       );
-      if (result === "added") stats.added++;
-      else if (result === "duplicate" || result === "updated") stats.duplicates++;
+      // Filtre: processMessage zaten güvenlik/şehir/çift kontrolü yapar
+      if (result === "added") {
+        stats.added++;
+        stats.found++;
+      } else if (result === "duplicate" || result === "updated") {
+        stats.duplicates++;
+        stats.found++;
+      }
     } catch (e) {
       stats.errors++;
       logger.warn({ err: e, sourceId: source.id }, "scraper: wa message process error");
+    }
+    processed++;
+    if (isInitialScan && processed % 25 === 0) {
+      const pct = Math.min(99, Math.round((processed / Math.max(messages.length, 1)) * 100));
+      await patchSourceProgress(source.id, {
+        initialScanProgress: Math.max(pct, 1),
+        lastScanMessagesRead: processed,
+        lastScanAdded: stats.added,
+        lastScanFound: stats.found,
+        lastScanDuplicates: stats.duplicates,
+      });
     }
     await sleep(MESSAGE_PROCESS_DELAY_MS);
   }
@@ -1162,7 +1183,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   });
 
   logger.info(
-    { sourceId: source.id, name: source.name, ...stats },
+    { sourceId: source.id, name: source.name, initial: isInitialScan, ...stats },
     "scraper: whatsapp kaynak tarandı",
   );
   return stats;
@@ -1185,11 +1206,19 @@ async function scanWhatsAppSources(
   }
 
   const now = Date.now();
-  for (const source of whatsappSources) {
-    const intervalMin = source.checkInterval ?? 5;
+  // Önce bitmemiş 30 günlük ilk taramalar
+  const ordered = [...whatsappSources].sort((a, b) => {
+    const ai = a.initialScanDone ? 1 : 0;
+    const bi = b.initialScanDone ? 1 : 0;
+    return ai - bi || a.id - b.id;
+  });
+
+  for (const source of ordered) {
+    const needsInitial = !source.initialScanDone;
+    const intervalMin = Math.max(5, source.checkInterval ?? 5);
     const intervalMs = intervalMin * 60 * 1000;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
-    if (!force && now - lastChecked < intervalMs) continue;
+    if (!force && !needsInitial && now - lastChecked < intervalMs) continue;
     if (source.isScanning) continue;
 
     const locked = await acquireSourceScanLock(source.id);
@@ -1213,6 +1242,20 @@ async function scanWhatsAppSources(
     }
 
     await sleep(SOURCE_SCAN_DELAY_MS);
+  }
+
+  const stillInitial = await db.select({ id: sourcesTable.id })
+    .from(sourcesTable)
+    .where(and(
+      eq(sourcesTable.active, true),
+      eq(sourcesTable.platform, "whatsapp"),
+      eq(sourcesTable.initialScanDone, false),
+    ))
+    .limit(1);
+  if (stillInitial.length > 0 && isWhatsAppReady()) {
+    setTimeout(() => {
+      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: wa chain error"));
+    }, 8_000);
   }
 }
 
@@ -1251,14 +1294,39 @@ async function runScraperCycleInner(force = false): Promise<void> {
 }
 
 /** Sadece WhatsApp kaynaklarını hemen tara. */
-export async function triggerWhatsAppScan(): Promise<{ scanned: number; ready: boolean }> {
+export async function triggerWhatsAppScan(): Promise<{
+  scanned: number;
+  ready: boolean;
+  results: Array<{ id: number; name: string; added: number; duplicates: number; messagesRead: number; found: number }>;
+}> {
   if (!isWhatsAppReady()) {
-    return { scanned: 0, ready: false };
+    return { scanned: 0, ready: false, results: [] };
   }
   const sources = await db.select().from(sourcesTable)
     .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
-  await scanWhatsAppSources(sources, true);
-  return { scanned: sources.length, ready: true };
+
+  const results: Array<{ id: number; name: string; added: number; duplicates: number; messagesRead: number; found: number }> = [];
+  for (const source of sources) {
+    if (source.isScanning) continue;
+    const locked = await acquireSourceScanLock(source.id);
+    if (!locked) continue;
+    try {
+      const stats = await checkWhatsAppSource(source);
+      results.push({
+        id: source.id,
+        name: source.name,
+        added: stats.added,
+        duplicates: stats.duplicates,
+        messagesRead: stats.messagesRead,
+        found: stats.found,
+      });
+    } catch (e) {
+      logger.warn({ err: e, sourceId: source.id }, "triggerWhatsAppScan source failed");
+    } finally {
+      await releaseSourceScanLock(source.id);
+    }
+  }
+  return { scanned: results.length, ready: true, results };
 }
 
 // ── Public API ─────────────────────────────────────────────────────
