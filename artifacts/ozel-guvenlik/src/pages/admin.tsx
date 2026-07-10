@@ -1971,10 +1971,14 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     try {
       const r = await apiCall("/admin/whatsapp/scan-now", "POST") as {
         message?: string;
-        results?: Array<{ name: string; added: number; messagesRead: number }>;
+        pendingGroups?: number;
+        currentGroup?: string | null;
       };
       setLastScanAt(new Date().toLocaleString("tr-TR"));
-      toast({ title: "Tarama tamamlandı", description: r.message });
+      toast({
+        title: "Sıralı 30 gün tarama başladı",
+        description: r.message || `${r.pendingGroups ?? 0} grup sıraya alındı. Tek tek taranacak.`,
+      });
       await refresh();
     } catch (error) {
       toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
@@ -1994,9 +1998,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• İlk tarama: son <strong className="text-slate-200">30 gün</strong> — filtreli ilanlar</div>
-              <div>• Sonra her <strong className="text-slate-200">5 dakikada</strong> kaldığı yerden devam</div>
-              <div>• Telegram ile aynı güvenlik / şehir / çift ilan filtresi</div>
+              <div>• Her grup <strong className="text-slate-200">tek tek</strong>: önce 30 gün geriye, sonra bugüne kadar</div>
+              <div>• Gruplar arası yavaş ilerler — hızlı tarama kesilmesin diye</div>
+              <div>• «Şimdi Tara» tüm grupları 30 günlük sıraya alır</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -3219,6 +3223,12 @@ export default function AdminDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [topbarSearch, setTopbarSearch] = useState("");
 
+  const listingTotalPages = Math.max(1, Math.ceil((listingsData?.total ?? 0) / 50));
+  // Hook'lar erken return'den ÖNCE olmalı — aksi halde F5'te React #310 (hooks sırası) patlar
+  useEffect(() => {
+    if (listingPage > listingTotalPages) setListingPage(listingTotalPages);
+  }, [listingPage, listingTotalPages]);
+
   if (isLoading) return null;
   if (!user || (!isAdmin && !isModerator)) return <Redirect to="/" />;
 
@@ -3546,11 +3556,6 @@ export default function AdminDashboard() {
   };
 
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "2-digit" });
-  const listingTotalPages = Math.max(1, Math.ceil((listingsData?.total ?? 0) / 50));
-
-  useEffect(() => {
-    if (listingPage > listingTotalPages) setListingPage(listingTotalPages);
-  }, [listingPage, listingTotalPages]);
 
   return (
     <div className="min-h-screen bg-[#0a0e1c] text-slate-100 flex">

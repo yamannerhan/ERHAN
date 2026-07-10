@@ -75,6 +75,13 @@ class ErrorBoundary extends React.Component<
           <div style={{ fontSize: "2.5rem" }}>⚠</div>
           <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>Sayfa yüklenemedi</div>
           <div style={{ fontSize: "0.8rem", color: "#94a3b8", maxWidth: 320 }}>{this.state.message || "Beklenmeyen bir hata oluştu."}</div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{ marginTop: "0.75rem", padding: "0.6rem 1.2rem", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+          >
+            Sayfayı Yenile
+          </button>
           <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#94a3b8" }}>Lütfen birkaç saniye sonra tekrar deneyin.</div>
         </div>
       );

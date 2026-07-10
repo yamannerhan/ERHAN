@@ -1,5 +1,5 @@
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
-import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
@@ -160,6 +160,8 @@ const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
+const WA_MESSAGE_PROCESS_DELAY_MS = 400;
+const WA_GROUP_GAP_MS = 20_000;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
 const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
@@ -1099,12 +1101,17 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     initialScanProgress: isInitialScan ? Math.max(1, source.initialScanProgress ?? 1) : 100,
   });
 
+  logger.info(
+    { sourceId: source.id, name: source.name, initial: isInitialScan, lastTs },
+    "scraper: whatsapp grup taraması başladı (tek grup)",
+  );
+
   let messages;
   try {
-    // İlk tarama: son 30 gün derin çekim. Sonra: kaldığı timestamp'ten devam.
+    // İlk tarama: 30 güne geri git, tüm mesajları eski→yeni al. Sonra: kaldığı yerden.
     messages = await fetchWhatsAppMessages(groupJid, isInitialScan
       ? { maxAgeDays: INITIAL_SCAN_DAYS, deep: true }
-      : { afterTimestampMs: lastTs, limit: 120 });
+      : { afterTimestampMs: lastTs, limit: 80 });
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
@@ -1112,8 +1119,25 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       isScanning: false,
       lastCheckedAt: new Date(),
       lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+      initialScanDone: isInitialScan ? false : source.initialScanDone,
     });
     stats.errors++;
+    return stats;
+  }
+
+  // İlk taramada 0 mesaj: done yapma (WA geçmişi henüz senkron olmamış olabilir)
+  if (isInitialScan && messages.length === 0) {
+    await patchSourceProgress(source.id, {
+      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek.",
+      isScanning: false,
+      lastCheckedAt: new Date(),
+      initialScanDone: false,
+      initialScanProgress: Math.max(1, source.initialScanProgress ?? 1),
+      lastScanMessagesRead: 0,
+      lastScanFound: 0,
+      lastScanAdded: 0,
+    });
+    logger.warn({ sourceId: source.id, name: source.name }, "scraper: wa 0 mesaj — initialScanDone=false bırakıldı");
     return stats;
   }
 
@@ -1132,7 +1156,6 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
         new Date(m.timestamp),
         isInitialScan,
       );
-      // Filtre: processMessage zaten güvenlik/şehir/çift kontrolü yapar
       if (result === "added") {
         stats.added++;
         stats.found++;
@@ -1145,7 +1168,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       logger.warn({ err: e, sourceId: source.id }, "scraper: wa message process error");
     }
     processed++;
-    if (isInitialScan && processed % 25 === 0) {
+    if (isInitialScan && processed % 10 === 0) {
       const pct = Math.min(99, Math.round((processed / Math.max(messages.length, 1)) * 100));
       await patchSourceProgress(source.id, {
         initialScanProgress: Math.max(pct, 1),
@@ -1153,9 +1176,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
         lastScanAdded: stats.added,
         lastScanFound: stats.found,
         lastScanDuplicates: stats.duplicates,
+        lastTelegramMessageId: maxTs > 0 ? String(maxTs) : source.lastTelegramMessageId,
       });
     }
-    await sleep(MESSAGE_PROCESS_DELAY_MS);
+    await sleep(isInitialScan ? WA_MESSAGE_PROCESS_DELAY_MS : MESSAGE_PROCESS_DELAY_MS);
   }
 
   stats.maxId = maxTs;
@@ -1184,6 +1208,89 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
+/** Arka planda grupları TEK TEK 30 gün tara — bir grup bitmeden diğerine geçme. */
+let waSequentialRunning = false;
+
+async function runWhatsAppSequentialDeepScan(): Promise<void> {
+  if (waSequentialRunning) return;
+  waSequentialRunning = true;
+  try {
+    let emptyRetries = 0;
+    for (;;) {
+      if (!isWhatsAppReady()) break;
+
+      const pending = await db.select().from(sourcesTable)
+        .where(and(
+          eq(sourcesTable.active, true),
+          eq(sourcesTable.platform, "whatsapp"),
+          eq(sourcesTable.initialScanDone, false),
+        ))
+        .orderBy(asc(sourcesTable.id))
+        .limit(1);
+
+      const source = pending[0];
+      if (!source) break;
+      if (source.isScanning) {
+        await sleep(5_000);
+        continue;
+      }
+
+      const locked = await acquireSourceScanLock(source.id);
+      if (!locked) {
+        await sleep(5_000);
+        continue;
+      }
+
+      let addedAny = false;
+      try {
+        logger.info({ sourceId: source.id, name: source.name }, "scraper: wa sıralı tarama — bu grup");
+        const beforeDone = source.initialScanDone;
+        const stats = await checkWhatsAppSource(source);
+        addedAny = stats.messagesRead > 0;
+        // Hâlâ bitmediyse (0 mesaj) aynı grubu birkaç kez dene, sonra sonrakine geç
+        const [fresh] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, source.id)).limit(1);
+        if (fresh && !fresh.initialScanDone) {
+          emptyRetries++;
+          if (emptyRetries >= 3) {
+            await patchSourceProgress(source.id, {
+              initialScanDone: true,
+              initialScanProgress: 100,
+              isScanning: false,
+              lastError: "3 denemede mesaj alınamadı — sonraki gruba geçildi.",
+            });
+            emptyRetries = 0;
+          } else {
+            await sleep(8_000);
+          }
+        } else {
+          emptyRetries = 0;
+          void beforeDone;
+        }
+        void addedAny;
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(`scraper: whatsapp source ${source.id} failed: ${errMsg}`);
+        await db.update(sourcesTable)
+          .set({
+            lastError: errMsg.slice(0, 500),
+            lastCheckedAt: new Date(),
+            isScanning: false,
+            initialScanDone: false,
+            lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+          })
+          .where(eq(sourcesTable.id, source.id));
+      } finally {
+        await releaseSourceScanLock(source.id);
+      }
+
+      await sleep(WA_GROUP_GAP_MS);
+    }
+  } finally {
+    waSequentialRunning = false;
+    logger.info("scraper: wa sıralı 30 gün tarama kuyruğu bitti");
+  }
+}
+
 async function scanWhatsAppSources(
   whatsappSources: Array<typeof sourcesTable.$inferSelect>,
   force: boolean,
@@ -1200,20 +1307,20 @@ async function scanWhatsAppSources(
     return;
   }
 
+  const hasPendingInitial = whatsappSources.some((s) => !s.initialScanDone);
+  if (hasPendingInitial || force) {
+    void runWhatsAppSequentialDeepScan();
+    return;
+  }
+
   const now = Date.now();
-  // Önce bitmemiş 30 günlük ilk taramalar
-  const ordered = [...whatsappSources].sort((a, b) => {
-    const ai = a.initialScanDone ? 1 : 0;
-    const bi = b.initialScanDone ? 1 : 0;
-    return ai - bi || a.id - b.id;
-  });
+  const ordered = [...whatsappSources].sort((a, b) => a.id - b.id);
 
   for (const source of ordered) {
-    const needsInitial = !source.initialScanDone;
     const intervalMin = Math.max(5, source.checkInterval ?? 5);
     const intervalMs = intervalMin * 60 * 1000;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
-    if (!force && !needsInitial && now - lastChecked < intervalMs) continue;
+    if (!force && now - lastChecked < intervalMs) continue;
     if (source.isScanning) continue;
 
     const locked = await acquireSourceScanLock(source.id);
@@ -1236,92 +1343,55 @@ async function scanWhatsAppSources(
       await releaseSourceScanLock(source.id);
     }
 
-    await sleep(SOURCE_SCAN_DELAY_MS);
+    await sleep(WA_GROUP_GAP_MS);
+  }
+}
+
+/** Sadece WhatsApp: 30 gün sıfırla + grupları sırayla arka planda tara. */
+export async function triggerWhatsAppScan(): Promise<{
+  scanned: number;
+  ready: boolean;
+  queued: boolean;
+  pendingGroups: number;
+  currentGroup: string | null;
+  results: Array<{ id: number; name: string; added: number; duplicates: number; messagesRead: number; found: number }>;
+}> {
+  if (!isWhatsAppReady()) {
+    return { scanned: 0, ready: false, queued: false, pendingGroups: 0, currentGroup: null, results: [] };
   }
 
-  const stillInitial = await db.select({ id: sourcesTable.id })
+  await db.update(sourcesTable)
+    .set({
+      initialScanDone: false,
+      initialScanProgress: 1,
+      initialScanPhase: "backward",
+      initialScanOffsetId: null,
+      initialScanAnchorId: null,
+      lastTelegramMessageId: null,
+      isScanning: false,
+      lastError: null,
+    })
+    .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
+
+  const pending = await db.select({ id: sourcesTable.id, name: sourcesTable.name })
     .from(sourcesTable)
     .where(and(
       eq(sourcesTable.active, true),
       eq(sourcesTable.platform, "whatsapp"),
       eq(sourcesTable.initialScanDone, false),
     ))
-    .limit(1);
-  if (stillInitial.length > 0 && isWhatsAppReady()) {
-    setTimeout(() => {
-      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: wa chain error"));
-    }, 8_000);
-  }
-}
+    .orderBy(asc(sourcesTable.id));
 
-async function runScraperCycleInner(force = false): Promise<void> {
-  await ensureTelegramConnected();
-  await processBotUpdates();
+  void runWhatsAppSequentialDeepScan();
 
-  const sources = await db.select().from(sourcesTable)
-    .where(eq(sourcesTable.active, true));
-
-  const now = new Date();
-  const whatsappSources = sources.filter(s => s.platform === "whatsapp");
-  if (whatsappSources.length > 0) {
-    await scanWhatsAppSources(whatsappSources, force);
-  }
-
-  const telegramSources = sources.filter(s => s.platform === "telegram");
-  if (telegramSources.length > 0) {
-    await scanTelegramSources(telegramSources, force);
-  }
-
-  for (const source of sources) {
-    if (source.platform === "telegram" || source.platform === "whatsapp") continue;
-
-    const intervalMin = source.checkInterval ?? 15;
-    const intervalMs = intervalMin * 60 * 1000;
-    const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
-    if (!force && now.getTime() - lastChecked < intervalMs) continue;
-
-    if (source.platform === "facebook") {
-      await db.update(sourcesTable)
-        .set({ lastError: "Facebook entegrasyonu henüz aktif değil." })
-        .where(eq(sourcesTable.id, source.id));
-    }
-  }
-}
-
-/** Sadece WhatsApp kaynaklarını hemen tara. */
-export async function triggerWhatsAppScan(): Promise<{
-  scanned: number;
-  ready: boolean;
-  results: Array<{ id: number; name: string; added: number; duplicates: number; messagesRead: number; found: number }>;
-}> {
-  if (!isWhatsAppReady()) {
-    return { scanned: 0, ready: false, results: [] };
-  }
-  const sources = await db.select().from(sourcesTable)
-    .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
-
-  const results: Array<{ id: number; name: string; added: number; duplicates: number; messagesRead: number; found: number }> = [];
-  for (const source of sources) {
-    if (source.isScanning) continue;
-    const locked = await acquireSourceScanLock(source.id);
-    if (!locked) continue;
-    try {
-      const stats = await checkWhatsAppSource(source);
-      results.push({
-        id: source.id,
-        name: source.name,
-        added: stats.added,
-        duplicates: stats.duplicates,
-        messagesRead: stats.messagesRead,
-        found: stats.found,
-      });
-    } catch (e) {
-      logger.warn({ err: e, sourceId: source.id }, "triggerWhatsAppScan source failed");
-    } finally {
-      await releaseSourceScanLock(source.id);
-    }
-  }
-  return { scanned: results.length, ready: true, results };
+  return {
+    scanned: 0,
+    ready: true,
+    queued: true,
+    pendingGroups: pending.length,
+    currentGroup: pending[0]?.name ?? null,
+    results: [],
+  };
 }
 
 // ── Public API ─────────────────────────────────────────────────────

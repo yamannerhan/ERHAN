@@ -272,8 +272,9 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
 
 /**
  * Grup mesajlarını çek.
- * - İlk tarama: son maxAgeDays içindeki mesajlar (limit yükselterek 30 güne yaklaşır)
+ * - İlk/deep tarama: son maxAgeDays'e kadar geriye sayfa sayfa iner, sonra eski→yeni döner
  * - Sonraki: afterTimestampMs sonrası yeni mesajlar
+ * Hızlı toplu çekim WhatsApp Web'i keser — derin taramada yavaş ve kademeli ilerler.
  */
 export async function fetchWhatsAppMessages(
   groupJid: string,
@@ -285,6 +286,13 @@ export async function fetchWhatsAppMessages(
   } = {},
 ): Promise<WhatsAppMessage[]> {
   if (!client || !isReady) return [];
+
+  // Sohbeti aç — geçmiş senkronu için gerekli
+  try {
+    await (client as any).interface?.openChatWindow?.(groupJid);
+    await new Promise((r) => setTimeout(r, 800));
+  } catch { /* ignore */ }
+
   const chat = await client.getChatById(groupJid);
   if (!chat) return [];
 
@@ -292,24 +300,29 @@ export async function fetchWhatsAppMessages(
     ? opts.afterTimestampMs
     : (Date.now() - (opts.maxAgeDays ?? 30) * 24 * 60 * 60 * 1000);
 
-  // WhatsApp Web tek seferde sınırlı döner — derin taramada limiti kademeli artır
   const limits = opts.deep
-    ? [200, 500, 1000, 1500, 2000]
-    : [Math.min(opts.limit ?? 100, 200)];
+    ? [100, 250, 500, 800, 1200, 1800, 2500, 3500]
+    : [Math.min(opts.limit ?? 80, 150)];
 
   let best: any[] = [];
   for (const limit of limits) {
-    const batch = await chat.fetchMessages({ limit });
-    best = batch;
+    try {
+      const batch = await chat.fetchMessages({ limit });
+      best = batch ?? [];
+    } catch {
+      break;
+    }
     if (!opts.deep) break;
-    // En eski mesaj cutoff'tan eskiyse yeterince geri gittik
+
     let oldest = Date.now();
-    for (const m of batch) {
+    for (const m of best) {
       const ts = (m.timestamp ?? 0) * 1000;
       if (ts > 0 && ts < oldest) oldest = ts;
     }
-    if (batch.length < limit || oldest <= cutoff) break;
-    await new Promise((r) => setTimeout(r, 400));
+    // 30 gün sınırına ulaşıldı veya daha fazla mesaj yok
+    if (best.length < limit || oldest <= cutoff) break;
+    // WhatsApp'ı boğmamak için yavaşla
+    await new Promise((r) => setTimeout(r, 1200));
   }
 
   const out: WhatsAppMessage[] = [];
@@ -320,7 +333,7 @@ export async function fetchWhatsAppMessages(
     seen.add(id);
     const ts = (m.timestamp ?? 0) * 1000;
     if (!ts || ts <= cutoff) continue;
-    const text = String(m.body ?? "").trim();
+    const text = String(m.body ?? (m as any).caption ?? "").trim();
     if (!text) continue;
     out.push({
       id,

@@ -359,15 +359,18 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
       res.status(503).json({ error: "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın." });
       return;
     }
-    const totalAdded = result.results.reduce((n, r) => n + r.added, 0);
-    const detail = result.results
-      .map((r) => `${r.name}: +${r.added} ilan (${r.messagesRead} mesaj)`)
-      .join(" · ");
     res.json({
       success: true,
       scanned: result.scanned,
+      queued: result.queued,
+      pendingGroups: result.pendingGroups,
+      currentGroup: result.currentGroup,
       results: result.results,
-      message: `${result.scanned} grup tarandı, ${totalAdded} yeni ilan. ${detail}`,
+      message: result.queued
+        ? `${result.pendingGroups} grup sıraya alındı. Her grup tek tek son 30 güne geriye taranacak` +
+          (result.currentGroup ? ` — şimdi: ${result.currentGroup}` : "") +
+          ". İlerlemeyi listeden takip edin."
+        : "Tarama başlatılamadı.",
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
