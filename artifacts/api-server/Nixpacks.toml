@@ -1,11 +1,13 @@
 [phases.setup]
 nixPkgs = ["chromium", "git"]
 
+[variables]
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+PUPPETEER_SKIP_DOWNLOAD = "true"
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+
 [phases.install]
 cmds = ["pnpm install --no-frozen-lockfile"]
-
-[phases.prebuild]
-cmds = ["export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium"]
 
 [phases.build]
 cmds = ["node build.mjs"]

@@ -1,6 +1,7 @@
 import pkg from "whatsapp-web.js";
 const { Client, LocalAuth } = pkg;
 import QRCode from "qrcode";
+import fs from "node:fs";
 import { logger } from "../lib/logger";
 
 let client: any = null;
@@ -12,6 +13,15 @@ let starting = false;
 let pendingPhone: string | null = null;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
+
+const CHROME_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/snap/bin/chromium",
+].filter(Boolean) as string[];
 
 export interface WhatsAppChannel {
   id: string;
@@ -27,6 +37,18 @@ export interface WhatsAppMessage {
   timestamp: number;
 }
 
+function resolveExecutablePath(): string {
+  for (const p of CHROME_CANDIDATES) {
+    try {
+      if (p && fs.existsSync(p)) return p;
+    } catch { /* ignore */ }
+  }
+  throw new Error(
+    "Chromium bulunamadı. Sunucu imajında chromium kurulu olmalı " +
+    "(PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium). Deploy sonrası yeniden deneyin.",
+  );
+}
+
 function normalizePhone(raw: string): string {
   return raw.replace(/\D/g, "").replace(/^0/, "90");
 }
@@ -38,9 +60,14 @@ function attachHandlers(c: any): void {
     pairingCode = null;
     try {
       qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2, errorCorrectionLevel: "M" });
+      logger.info("wa: QR data URL hazır");
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
+  });
+
+  c.on("loading_screen", (percent: string, message: string) => {
+    logger.info(`wa: loading ${percent}% ${message}`);
   });
 
   c.on("code", (code: string) => {
@@ -71,7 +98,6 @@ function attachHandlers(c: any): void {
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Bağlantı koptu: ${reason}`;
-    // Oturum diske kayıtlı — otomatik yeniden bağlan
     setTimeout(() => {
       void startWhatsAppClient().catch((e) => {
         logger.warn({ err: e }, "wa: auto-reconnect failed");
@@ -94,6 +120,8 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
   if (starting) return;
   starting = true;
   lastError = null;
+  qrDataUrl = null;
+  pairingCode = null;
 
   if (opts?.phoneNumber) {
     pendingPhone = normalizePhone(opts.phoneNumber);
@@ -106,12 +134,26 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
       isReady = false;
     }
 
+    const executablePath = resolveExecutablePath();
+    logger.info({ executablePath }, "wa: Chromium yolu");
+
     const clientOpts: Record<string, unknown> = {
       authStrategy: new LocalAuth({ dataPath: AUTH_PATH, clientId: "ozelguvenlik" }),
       puppeteer: {
         headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        executablePath,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-software-rasterizer",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-extensions",
+          "--disable-background-networking",
+          "--mute-audio",
+        ],
       },
     };
 
@@ -127,9 +169,13 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
     attachHandlers(client);
     await client.initialize();
   } catch (e) {
-    lastError = e instanceof Error ? e.message : String(e);
+    const msg = e instanceof Error ? e.message : String(e);
+    lastError = msg.includes("ENOENT") || msg.includes("Chromium")
+      ? `Chrome/Chromium bulunamadı. Deploy'da chromium kurulu olmalı. (${msg.slice(0, 200)})`
+      : msg.slice(0, 500);
     client = null;
     isReady = false;
+    logger.error({ err: e }, "wa: start failed");
     throw e;
   } finally {
     starting = false;
@@ -138,6 +184,14 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
 
 /** Sunucu açılışında kayıtlı oturumu geri yükle (QR gerekmez). */
 export async function initWhatsAppClient(): Promise<void> {
+  try {
+    // Chromium yoksa boot'ta sessizce atla — admin panelden bağlanınca net hata gösterilir
+    resolveExecutablePath();
+  } catch (e) {
+    lastError = e instanceof Error ? e.message : String(e);
+    logger.warn({ err: e }, "wa: init atlandı — chromium yok");
+    return;
+  }
   try {
     await startWhatsAppClient();
     logger.info(`wa: init ${isReady ? "hazır" : "oturum/QR bekleniyor"}`);
@@ -163,6 +217,8 @@ export function isWhatsAppReady(): boolean {
 }
 
 export function getWhatsAppStatus() {
+  let chromePath: string | null = null;
+  try { chromePath = resolveExecutablePath(); } catch { chromePath = null; }
   return {
     ready: isWhatsAppReady(),
     connected: isWhatsAppReady(),
@@ -171,6 +227,7 @@ export function getWhatsAppStatus() {
     pairingCode,
     phone: pendingPhone,
     error: lastError,
+    chromePath,
   };
 }
 
@@ -230,7 +287,6 @@ export async function fetchWhatsAppMessages(
     });
   }
 
-  // Eski → yeni sırayla işle
   out.sort((a, b) => a.timestamp - b.timestamp);
   return out;
 }
