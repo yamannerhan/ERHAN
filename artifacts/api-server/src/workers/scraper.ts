@@ -1324,8 +1324,9 @@ async function scanWhatsAppSources(
     return;
   }
 
+  // İlk 30 gün bitmemişse sıralı derin tarama; bittiyse 5 dk artımlı devam
   const hasPendingInitial = whatsappSources.some((s) => !s.initialScanDone);
-  if (hasPendingInitial || force) {
+  if (hasPendingInitial) {
     void runWhatsAppSequentialDeepScan();
     return;
   }
@@ -1344,6 +1345,7 @@ async function scanWhatsAppSources(
     if (!locked) continue;
 
     try {
+      // initialScanDone=true → sadece lastTs sonrası yeni mesajlar
       await checkWhatsAppSource(source);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -1360,7 +1362,7 @@ async function scanWhatsAppSources(
       await releaseSourceScanLock(source.id);
     }
 
-    await sleep(WA_GROUP_GAP_MS);
+    await sleep(Math.min(WA_GROUP_GAP_MS, 5_000));
   }
 }
 

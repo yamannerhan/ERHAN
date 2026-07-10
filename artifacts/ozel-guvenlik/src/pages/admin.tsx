@@ -1999,6 +1999,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
               <div>• Her grup <strong className="text-slate-200">tek tek</strong>: 30 gün geriye (binlerce mesaj) → bugüne</div>
+              <div>• İlk tarama bitince her <strong className="text-slate-200">5 dk</strong> kaldığı yerden yeni ilanlar</div>
               <div>• Çift ilan: yalnızca <strong className="text-slate-200">aynı metnin tamamı</strong> eşleşirse</div>
               <div>• Yayınlanan WA ilanı → bildirim <strong className="text-slate-200">sadece admin</strong></div>
             </div>
