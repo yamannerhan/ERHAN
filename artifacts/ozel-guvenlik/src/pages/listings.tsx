@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useGetListings, useGetMyFavorites, getGetMyFavoritesQueryKey, useToggleListingFavorite } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
 import { Link } from "wouter";
@@ -75,6 +75,8 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
   const [activeSubFilter, setActiveSubFilter] = useState<null | "anadolu" | "avrupa">(null);
   const [otherCity, setOtherCity] = useState("");
+  const listingsTopRef = useRef<HTMLElement | null>(null);
+  const pageScrollSkip = useRef(true);
 
   const effectiveCity = useMemo(() => {
     if (!city) return undefined;
@@ -172,10 +174,23 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages, totalCount, isLoading, isFetching]);
 
+  // Sayfa değişince ilk ilanın üstüne çık
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [page]);
+    if (pageScrollSkip.current) {
+      pageScrollSkip.current = false;
+      return;
+    }
+    if (isLoading || isFetching) return;
+    const el = listingsTopRef.current;
+    requestAnimationFrame(() => {
+      if (el) {
+        const top = el.getBoundingClientRect().top + window.scrollY - 72;
+        window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+      } else {
+        window.scrollTo({ top: 0, behavior: "auto" });
+      }
+    });
+  }, [page, isLoading, isFetching]);
 
   // Client-side sub-filter for Anadolu/Avrupa
   const displayListings = useMemo(() => {
@@ -327,32 +342,32 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
           )}
         </AnimatePresence>
 
-        {/* ── Stats Row ────────────────────────────────────── */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+        {/* ── Stats (mobil: tek sıra mini) ─────────────────── */}
+        <section className="og-stats-row">
           <div className="og-stat-card">
-            <div className="og-stat-icon"><Briefcase className="w-4 h-4" /></div>
+            <div className="og-stat-icon"><Briefcase className="w-3.5 h-3.5" /></div>
             <div className="og-stat-value">{totalCount}</div>
             <div className="og-stat-label">Açık İlan</div>
           </div>
           <div className="og-stat-card">
-            <div className="og-stat-icon"><Building2 className="w-4 h-4" /></div>
+            <div className="og-stat-icon"><Building2 className="w-3.5 h-3.5" /></div>
             <div className="og-stat-value">{companies}</div>
             <div className="og-stat-label">Firma</div>
           </div>
           <div className="og-stat-card">
-            <div className="og-stat-icon"><Clock className="w-4 h-4" /></div>
+            <div className="og-stat-icon"><Clock className="w-3.5 h-3.5" /></div>
             <div className="og-stat-value">{newToday}</div>
-            <div className="og-stat-label">Yeni İlan</div>
+            <div className="og-stat-label">Yeni</div>
           </div>
           <div className="og-stat-card">
-            <div className="og-stat-icon"><Bookmark className="w-4 h-4" /></div>
+            <div className="og-stat-icon"><Bookmark className="w-3.5 h-3.5" /></div>
             <div className="og-stat-value">{favCount}</div>
-            <div className="og-stat-label">Kaydedilen</div>
+            <div className="og-stat-label">Kayıt</div>
           </div>
         </section>
 
         {/* ── Listings list ────────────────────────────────── */}
-        <section>
+        <section ref={listingsTopRef}>
           <div className="space-y-2.5">
             {isLoading ? (
               [1, 2, 3, 4, 5].map(i => <div key={i} className="og-list-skeleton" />)

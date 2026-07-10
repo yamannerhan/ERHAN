@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   useGetListings, useGetAnnouncements,
   useGetMyFavorites, getGetMyFavoritesQueryKey,
@@ -8,7 +8,7 @@ import { Layout } from "@/components/layout";
 import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowRight, Building2, MapPin, Briefcase, ChevronRight, Clock,
+  Building2, MapPin, Briefcase, ChevronRight, Clock,
   Bookmark, Star, ShieldCheck, ChevronDown,
 } from "lucide-react";
 import { getListingImage } from "@/lib/listing-image";
@@ -223,6 +223,8 @@ export default function Home() {
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
   const [sortNewest, setSortNewest] = useState<"new" | "old">(savedHome.sortNewest);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
+  const listingsTopRef = useRef<HTMLElement | null>(null);
+  const pageScrollSkip = useRef(true);
 
   useEffect(() => {
     fetch("/api/listings/cities")
@@ -267,6 +269,25 @@ export default function Home() {
       sessionStorage.removeItem(HOME_SCROLL_KEY);
     });
   }, [isLoading, page]);
+
+  // Sayfa değişince listenin en üstüne çık (ilk yüklemede atla)
+  useEffect(() => {
+    if (pageScrollSkip.current) {
+      pageScrollSkip.current = false;
+      return;
+    }
+    if (isLoading) return;
+    sessionStorage.removeItem(HOME_SCROLL_KEY);
+    const el = listingsTopRef.current;
+    requestAnimationFrame(() => {
+      if (el) {
+        const top = el.getBoundingClientRect().top + window.scrollY - 72;
+        window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+      } else {
+        window.scrollTo({ top: 0, behavior: "auto" });
+      }
+    });
+  }, [page, isLoading]);
 
   const [banners, setBanners] = useState<Banner[]>([]);
 
@@ -386,7 +407,7 @@ export default function Home() {
     void refetch();
   };
 
-  const greetingName = user?.username || "Misafir";
+  const announcements = announcementsData || [];
 
   return (
     <Layout>
@@ -410,32 +431,14 @@ export default function Home() {
         </div>
       )}
 
-      <div className="p-4 space-y-5">
+      <div className="p-4 space-y-4">
 
-        {/* ── Hero Banner ──────────────────────────────────── */}
-        <section className="og-hero">
-          <div className="og-hero-inner">
-            <div className="flex-1 min-w-0">
-              <h1 className="og-hero-title">
-                Merhaba, {greetingName}! <span className="og-wave">👋</span>
-              </h1>
-              <p className="og-hero-sub">Sana uygun özel güvenlik ilanlarını keşfet</p>
-              <Link href="/ilanlar" className="og-hero-cta">
-                İlanları Keşfet <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-            <div className="og-hero-art">
-              <ShieldCheck className="og-hero-shield" />
-            </div>
-          </div>
-        </section>
-
-        {/* ── Stats Row ────────────────────────────────────── */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          <StatCard icon={<Briefcase className="w-4 h-4" />} value={totalCount}    label="Açık İlan" />
-          <StatCard icon={<Building2 className="w-4 h-4" />} value={companies}     label="Firma" />
-          <StatCard icon={<Clock className="w-4 h-4" />}     value={newToday}      label="Yeni İlan" />
-          <StatCard icon={<Bookmark className="w-4 h-4" />}  value={favCount}      label="Kaydedilen" />
+        {/* ── Stats (mobil: tek sıra mini) ─────────────────── */}
+        <section className="og-stats-row">
+          <StatCard icon={<Briefcase className="w-3.5 h-3.5" />} value={totalCount}    label="Açık İlan" />
+          <StatCard icon={<Building2 className="w-3.5 h-3.5" />} value={companies}     label="Firma" />
+          <StatCard icon={<Clock className="w-3.5 h-3.5" />}     value={newToday}      label="Yeni" />
+          <StatCard icon={<Bookmark className="w-3.5 h-3.5" />}  value={favCount}      label="Kayıt" />
         </section>
 
         {/* ── Filter Pills ─────────────────────────────────── */}
@@ -516,17 +519,17 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* ── Öne Çıkanlar (sağdan sola kayar) ─────────────── */}
+        {/* ── Öne Çıkanlar (sağdan sola, mobil mini) ───────── */}
         {featuredList.length > 0 && (
-          <section className="space-y-2">
-            <h2 className="og-section-title flex items-center gap-2">
-              <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+          <section className="space-y-1.5">
+            <h2 className="og-section-title flex items-center gap-1.5 text-sm">
+              <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
               Öne Çıkanlar
             </h2>
-            <div className="featured-strip overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/[0.04]">
+            <div className="featured-strip overflow-hidden rounded-xl border border-amber-500/15 bg-amber-500/[0.03]">
               <div
-                className={`flex gap-3 w-max py-3 px-2 ${featuredList.length > 1 ? "animate-featured-scroll" : ""}`}
-                style={featuredList.length > 1 ? { animationDuration: `${Math.max(18, featuredList.length * 6)}s` } : undefined}
+                className={`flex gap-2 w-max py-2 px-1.5 ${featuredList.length > 1 ? "animate-featured-scroll" : ""}`}
+                style={featuredList.length > 1 ? { animationDuration: `${Math.max(16, featuredList.length * 5)}s` } : undefined}
               >
                 {[...featuredList, ...(featuredList.length > 1 ? featuredList : [])].map((item, idx) => {
                   const company = displayCompany(item.company) || "Firma";
@@ -536,38 +539,33 @@ export default function Home() {
                       key={`${item.id}-${idx}`}
                       href={`/ilan/${item.id}`}
                       onClick={saveHomeScroll}
-                      className="og-featured-card featured-card-accent block relative shrink-0 w-[280px] sm:w-[320px]"
+                      className="og-featured-card og-featured-mini featured-card-accent block relative shrink-0"
                     >
                       <div className="og-featured-pill">
-                        <Star className="w-3 h-3 fill-current" /> ÖNE ÇIKAN
+                        <Star className="w-2.5 h-2.5 fill-current" /> ÖNE ÇIKAN
                       </div>
-                      <div className="flex gap-3 items-start">
+                      <div className="flex gap-2 items-start">
                         <div className="og-featured-logo shrink-0 overflow-hidden">
                           {item.companyLogoUrl || img ? (
-                            <img src={item.companyLogoUrl || img} alt="" className="w-full h-full object-cover rounded-lg" />
+                            <img src={item.companyLogoUrl || img} alt="" className="w-full h-full object-cover rounded-md" />
                           ) : (
-                            <ShieldCheck className="w-6 h-6 text-amber-400" />
+                            <ShieldCheck className="w-4 h-4 text-amber-400" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="og-featured-title text-sm leading-snug line-clamp-2">{item.title}</h3>
-                          <div className="flex items-center gap-1 text-xs mt-1 og-text-muted">
-                            <MapPin className="w-3 h-3 shrink-0" />
+                          <h3 className="og-featured-title line-clamp-2">{item.title}</h3>
+                          <div className="flex items-center gap-1 text-[10px] mt-0.5 og-text-muted">
+                            <MapPin className="w-2.5 h-2.5 shrink-0" />
                             <span className="truncate">{item.city}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            <span className="og-chip">{item.workType || "Tam Zamanlı"}</span>
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="og-featured-salary text-sm">{item.salary || "Görüşülecek"}</div>
+                          <div className="og-featured-salary">{item.salary || "—"}</div>
                         </div>
                       </div>
                       <div className="og-featured-foot">
-                        <span className="og-text-muted text-[11px] truncate">
-                          {company} · {formatDate(item.createdAt)}
-                        </span>
-                        <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="og-text-muted text-[10px] truncate">{company}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                       </div>
                     </Link>
                   );
@@ -578,7 +576,7 @@ export default function Home() {
         )}
 
         {/* ── Tüm İlanlar ──────────────────────────────────── */}
-        <section>
+        <section ref={listingsTopRef}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="og-section-title">
               Tüm İlanlar <span className="og-text-muted text-sm font-semibold">({totalCount})</span>
