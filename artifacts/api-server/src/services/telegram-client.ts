@@ -278,8 +278,9 @@ function mapGramMessage(username: string, m: { id: number; message?: string; dat
 
 const envPagesPerCycle = Number(process.env["SCRAPER_PAGES_PER_CYCLE"]);
 const MAX_INITIAL_PAGES_TOTAL = 200;
-export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 1;
-const BATCH_DELAY_MS = 4_000;
+/** Varsayılan 5 sayfa/döngü (×100) — 1 çok yavaş kalıyordu, 30 güne inemiyordu */
+export const PAGES_PER_CYCLE = Number.isFinite(envPagesPerCycle) && envPagesPerCycle > 0 ? envPagesPerCycle : 5;
+const BATCH_DELAY_MS = 2_500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -4,7 +4,7 @@ import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { fetchWhatsAppMessages, isWhatsAppReady } from "../services/whatsapp-client";
-import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
@@ -166,7 +166,8 @@ const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
 const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
-const BACKWARD_PAGES_PER_RUN = 5;
+/** Her döngüde geriye kaç sayfa (×100 mesaj) — 30 güne daha hızlı ulaşmak için */
+const BACKWARD_PAGES_PER_RUN = 12;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 0;
@@ -499,6 +500,7 @@ async function processMessage(
   const salary = extractSalary(text);
   const phone = extractPhone(text);
   const gender = extractGender(text);
+  const workType = extractWorkType(text);
   const listingMeta = {
     sourceId: source.id,
     messageId,
@@ -535,7 +537,7 @@ async function processMessage(
     company: "Belirtilmemiş",
     city,
     salary: salary ?? undefined,
-    workType: "Tam Zamanlı",
+    workType,
     description: text,
     requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
     status: "active",
@@ -788,7 +790,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
       const channelOlderThanCutoff = cumulativeOldest != null && cumulativeOldest <= new Date(Date.now() - INITIAL_SCAN_MS);
       const discoveryComplete = result.reachedCutoff
-        || (result.noMoreMessages && (channelOlderThanCutoff || result.messages.length === 0));
+        || (result.noMoreMessages && (channelOlderThanCutoff || result.messages.length === 0 || anchorId > 0));
 
       currentOffset = result.nextOffsetId;
 
@@ -805,7 +807,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
       stats.messagesRead = baseMessagesRead + totalRead;
 
-      if (discoveryComplete) {
+      const switchToForward = async (reason: string) => {
         const forwardStart = anchorId > 0 ? anchorId - 1 : 0;
         if (anchorId === 0 && topId === 0) {
           await patchSourceProgress(source.id, {
@@ -816,9 +818,8 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
             isScanning: false,
             lastError: "Kanalda son 30 gün içinde metin mesajı bulunamadı.",
           });
-          return stats;
+          return;
         }
-
         await patchSourceProgress(source.id, {
           initialScanPhase: "forward",
           initialScanAnchorId: String(anchorId),
@@ -829,12 +830,21 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
           isScanning: false,
           lastError: null,
         });
-        logger.info({ username, anchorId, topId }, "scraper: 30 gün sınırına ulaşıldı, eski→yeni tarama başlıyor");
+        logger.info({ username, anchorId, topId, reason }, "scraper: geriye tarama bitti, eski→yeni başlıyor");
+      };
+
+      if (discoveryComplete) {
+        await switchToForward(result.reachedCutoff ? "30g_cutoff" : "no_more_or_empty");
         return stats;
       }
 
-      if (result.noMoreMessages && !result.reachedCutoff) break;
-      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(500);
+      // Geçmiş bitti ama 30 güne inemedik (kanal kısa) — yine de forward'a geç, takılma
+      if (result.noMoreMessages && !result.reachedCutoff) {
+        await switchToForward("channel_history_end");
+        return stats;
+      }
+
+      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(400);
     }
 
     await patchSourceProgress(source.id, { isScanning: false, lastError: null });
