@@ -532,6 +532,19 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (updates.telegramScanIntervalMinutes !== undefined) {
     void import("../workers/scraper").then((m) => m.refreshScraperInterval()).catch(() => {});
   }
+  if (
+    updates.botGuvenlikEnabled !== undefined ||
+    updates.botBilgiEnabled !== undefined ||
+    updates.botFakeEnabled !== undefined
+  ) {
+    void import("../lib/chat-bot").then((m) => {
+      m.invalidateBotFlagsCache({
+        ...(updates.botGuvenlikEnabled !== undefined ? { guvenlik: Boolean(updates.botGuvenlikEnabled) } : {}),
+        ...(updates.botBilgiEnabled !== undefined ? { bilgi: Boolean(updates.botBilgiEnabled) } : {}),
+        ...(updates.botFakeEnabled !== undefined ? { fake: Boolean(updates.botFakeEnabled) } : {}),
+      });
+    }).catch(() => {});
+  }
   res.json(settingsJson(result!));
 });
 

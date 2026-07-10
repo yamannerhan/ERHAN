@@ -224,7 +224,7 @@ export default function Home() {
   const [sortNewest, setSortNewest] = useState<"new" | "old">(savedHome.sortNewest);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const listingsTopRef = useRef<HTMLElement | null>(null);
-  const pageScrollSkip = useRef(true);
+  const prevPageRef = useRef<number | null>(null);
 
   useEffect(() => {
     fetch("/api/listings/cities")
@@ -239,7 +239,7 @@ export default function Home() {
     return undefined;
   }, [activePill, otherCity]);
 
-  const { data: listingsData, isLoading, refetch } = useGetListings({
+  const { data: listingsData, isLoading, isFetching, refetch } = useGetListings({
     page,
     limit: pageSize,
     ...(cityFilter ? { city: cityFilter } : {}),
@@ -255,28 +255,25 @@ export default function Home() {
     sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify({ page, activePill, otherCity, sortNewest }));
   }, [page, activePill, otherCity, sortNewest]);
 
+  // İlk yüklemede detaydan dönüş scroll'unu geri yükle; her sayfa değişiminde ilk ilana git
   useEffect(() => {
-    if (isLoading) return;
-    const raw = sessionStorage.getItem(HOME_SCROLL_KEY);
-    if (!raw) return;
-    const y = parseInt(raw, 10);
-    if (!Number.isFinite(y) || y <= 0) {
-      sessionStorage.removeItem(HOME_SCROLL_KEY);
-      return;
-    }
-    requestAnimationFrame(() => {
-      window.scrollTo(0, y);
-      sessionStorage.removeItem(HOME_SCROLL_KEY);
-    });
-  }, [isLoading, page]);
+    if (isLoading || isFetching) return;
 
-  // Sayfa değişince listenin en üstüne çık (ilk yüklemede atla)
-  useEffect(() => {
-    if (pageScrollSkip.current) {
-      pageScrollSkip.current = false;
+    if (prevPageRef.current === null) {
+      prevPageRef.current = page;
+      const raw = sessionStorage.getItem(HOME_SCROLL_KEY);
+      if (raw) {
+        const y = parseInt(raw, 10);
+        sessionStorage.removeItem(HOME_SCROLL_KEY);
+        if (Number.isFinite(y) && y > 0) {
+          requestAnimationFrame(() => window.scrollTo(0, y));
+        }
+      }
       return;
     }
-    if (isLoading) return;
+
+    if (prevPageRef.current === page) return;
+    prevPageRef.current = page;
     sessionStorage.removeItem(HOME_SCROLL_KEY);
     const el = listingsTopRef.current;
     requestAnimationFrame(() => {
@@ -287,7 +284,7 @@ export default function Home() {
         window.scrollTo({ top: 0, behavior: "auto" });
       }
     });
-  }, [page, isLoading]);
+  }, [page, isLoading, isFetching]);
 
   const [banners, setBanners] = useState<Banner[]>([]);
 
@@ -406,8 +403,6 @@ export default function Home() {
     toast({ title: `İlan #${listingId} silindi` });
     void refetch();
   };
-
-  const announcements = announcementsData || [];
 
   return (
     <Layout>

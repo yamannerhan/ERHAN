@@ -3,7 +3,7 @@ import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { onlineSockets } from "./routes/chat";
-import { setBotIo } from "./lib/chat-bot";
+import { setBotIo, isGuvenlikBotEnabled, isBilgiBotEnabled, isFakeBotEnabled } from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
 import { startScraperWorker, purgeExpiredListings } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
@@ -129,10 +129,15 @@ function scheduleHourlyReminder() {
   const trNow = new Date(now.getTime() + trOffset);
   const msUntilNextHour = (60 - trNow.getUTCMinutes()) * 60 * 1000 - trNow.getUTCSeconds() * 1000 - trNow.getUTCMilliseconds();
   setTimeout(() => {
-    const hourlyMsg = getHourlyMsg(turkeyHour());
-    void saveChatMessage(0, hourlyMsg);
-    io.emit("chat:message", makeBotMsg(hourlyMsg));
-    setInterval(() => {
+    void (async () => {
+      if (await isGuvenlikBotEnabled()) {
+        const hourlyMsg = getHourlyMsg(turkeyHour());
+        void saveChatMessage(0, hourlyMsg);
+        io.emit("chat:message", makeBotMsg(hourlyMsg));
+      }
+    })();
+    setInterval(async () => {
+      if (!(await isGuvenlikBotEnabled())) return;
       const m = getHourlyMsg(turkeyHour());
       void saveChatMessage(0, m);
       io.emit("chat:message", makeBotMsg(m));
@@ -183,10 +188,12 @@ function scheduleBotMessage() {
   const delay = 30_000;
   setTimeout(async () => {
     try {
-      const msg = await getDynamicBotMsg();
-      void saveChatMessage(0, msg);
-      io.emit("chat:message", makeBotMsg(msg));
-      logger.info("[BOT] GuvenlikBot mesaj gönderdi");
+      if (await isGuvenlikBotEnabled()) {
+        const msg = await getDynamicBotMsg();
+        void saveChatMessage(0, msg);
+        io.emit("chat:message", makeBotMsg(msg));
+        logger.info("[BOT] GuvenlikBot mesaj gönderdi");
+      }
     } catch(e) { logger.error({ err: e }, "[BOT] GuvenlikBot hata"); }
     scheduleBotMessage();
   }, delay);
@@ -660,6 +667,7 @@ function getRandomUser(exclude?: typeof FAKE_USERS[0]): typeof FAKE_USERS[0] {
 
 // Bot kullanıcıya @ ile cevap versin
 async function maybeBotReply(question: string, askerUsername: string) {
+  if (!(await isGuvenlikBotEnabled())) return;
   // %40 ihtimalle bot da araya girip cevap versin
   if (Math.random() > 0.4) return;
   const stats = await getListingStats();
@@ -672,8 +680,11 @@ async function maybeBotReply(question: string, askerUsername: string) {
   const replyFn = botReplies[Math.floor(Math.random() * botReplies.length)]!;
   const content = `@${askerUsername} ${replyFn(stats)}`;
   setTimeout(() => {
-    void saveChatMessage(0, content);
-    io.emit("chat:message", { ...makeBotMsg(content, askerUsername), content });
+    void (async () => {
+      if (!(await isGuvenlikBotEnabled())) return;
+      void saveChatMessage(0, content);
+      io.emit("chat:message", { ...makeBotMsg(content, askerUsername), content });
+    })();
   }, 8000 + Math.random() * 12000);
 }
 
@@ -681,6 +692,10 @@ function scheduleFakeConversation() {
   const delay = 30_000;
   setTimeout(async () => {
     try {
+      if (!(await isFakeBotEnabled())) {
+        scheduleFakeConversation();
+        return;
+      }
       const roll = Math.random();
       if (roll < 0.35) {
         const user = getRandomUser();
@@ -699,10 +714,13 @@ function scheduleFakeConversation() {
         await maybeBotReply(pair.a, userA.username);
 
         setTimeout(() => {
-          const answer = pair.bTemplate(stats);
-          const fullAnswer = `@${userA.username} ${answer}`;
-          void saveChatMessage(userB.id, fullAnswer);
-          io.emit("chat:message", makeFakeMsg(userB, answer, userA.username));
+          void (async () => {
+            if (!(await isFakeBotEnabled())) return;
+            const answer = pair.bTemplate(stats);
+            const fullAnswer = `@${userA.username} ${answer}`;
+            void saveChatMessage(userB.id, fullAnswer);
+            io.emit("chat:message", makeFakeMsg(userB, answer, userA.username));
+          })();
         }, pair.delay);
       }
       logger.info("[BOT] Fake sohbet mesaj gönderdi");
@@ -905,10 +923,12 @@ function scheduleInfoBot() {
   const delay = 30_000;
   setTimeout(async () => {
     try {
-      const wrapped = wrapInfoContent(getNextInfoMsg());
-      void saveChatMessage(-999, wrapped);
-      io.emit("chat:message", makeInfoMsg(wrapped));
-      logger.info("[BOT] Bilgi botu mesaj gönderdi");
+      if (await isBilgiBotEnabled()) {
+        const wrapped = wrapInfoContent(getNextInfoMsg());
+        void saveChatMessage(-999, wrapped);
+        io.emit("chat:message", makeInfoMsg(wrapped));
+        logger.info("[BOT] Bilgi botu mesaj gönderdi");
+      }
     } catch (e) { logger.error({ err: e }, "[BOT] Bilgi botu hata"); }
     scheduleInfoBot();
   }, delay);
@@ -943,14 +963,18 @@ void trimChatHistory();
 setInterval(() => { void trimChatHistory(); }, 5 * 60 * 1000);
 setInterval(() => { void broadcastOnlineCount(); }, 45000);
 
-// Botlar her zaman çalışır; her schedule kendi DB ayarını kontrol eder.
+// Bot zamanlayıcıları her turda admin ayarını kontrol eder; kapalıysa mesaj atmaz.
 setTimeout(() => scheduleBotMessage(), 30 * 1000);
 setTimeout(() => scheduleFakeConversation(), 15000);
 setTimeout(() => {
-  const firstWrapped = wrapInfoContent(getNextInfoMsg());
-  void saveChatMessage(-999, firstWrapped);
-  io.emit("chat:message", makeInfoMsg(firstWrapped));
-  scheduleInfoBot();
+  void (async () => {
+    if (await isBilgiBotEnabled()) {
+      const firstWrapped = wrapInfoContent(getNextInfoMsg());
+      void saveChatMessage(-999, firstWrapped);
+      io.emit("chat:message", makeInfoMsg(firstWrapped));
+    }
+    scheduleInfoBot();
+  })();
 }, 5 * 1000);
 scheduleHourlyReminder();
 

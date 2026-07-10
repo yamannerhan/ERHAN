@@ -28,24 +28,57 @@ function makeBotMsg(content: string, replyToUsername?: string) {
 }
 
 // ── Bot enable/disable cache ───────────────────────────────────────
-let botEnabledCache = true;
-let botEnabledCacheAt = 0;
-const BOT_ENABLED_TTL = 30_000;
+type BotFlags = { guvenlik: boolean; bilgi: boolean; fake: boolean };
+let botFlagsCache: BotFlags = { guvenlik: true, bilgi: true, fake: true };
+let botFlagsCacheAt = 0;
+const BOT_ENABLED_TTL = 5_000;
+
+async function loadBotFlags(): Promise<BotFlags> {
+  const now = Date.now();
+  if (now - botFlagsCacheAt < BOT_ENABLED_TTL) return botFlagsCache;
+  try {
+    const rows = await db.select({
+      guvenlik: adminSettingsTable.botGuvenlikEnabled,
+      bilgi: adminSettingsTable.botBilgiEnabled,
+      fake: adminSettingsTable.botFakeEnabled,
+    }).from(adminSettingsTable).limit(1);
+    botFlagsCache = {
+      guvenlik: rows[0]?.guvenlik ?? true,
+      bilgi: rows[0]?.bilgi ?? true,
+      fake: rows[0]?.fake ?? true,
+    };
+  } catch { /* DB timeout'da cache kullan */ }
+  botFlagsCacheAt = now;
+  return botFlagsCache;
+}
 
 async function isBotEnabled(): Promise<boolean> {
-  const now = Date.now();
-  if (now - botEnabledCacheAt < BOT_ENABLED_TTL) return botEnabledCache;
-  try {
-    const rows = await db.select({ v: adminSettingsTable.botGuvenlikEnabled }).from(adminSettingsTable).limit(1);
-    botEnabledCache = rows[0]?.v ?? true;
-  } catch { /* DB timeout'da devam et */ }
-  botEnabledCacheAt = now;
-  return botEnabledCache;
+  return (await loadBotFlags()).guvenlik;
+}
+
+export async function isGuvenlikBotEnabled(): Promise<boolean> {
+  return (await loadBotFlags()).guvenlik;
+}
+
+export async function isBilgiBotEnabled(): Promise<boolean> {
+  return (await loadBotFlags()).bilgi;
+}
+
+export async function isFakeBotEnabled(): Promise<boolean> {
+  return (await loadBotFlags()).fake;
+}
+
+/** Admin ayar kaydında cache'i anında güncelle */
+export function invalidateBotFlagsCache(partial?: Partial<BotFlags>) {
+  if (partial) {
+    botFlagsCache = { ...botFlagsCache, ...partial };
+  }
+  botFlagsCacheAt = 0;
 }
 
 export async function setBotEnabled(v: boolean) {
-  botEnabledCache = v;
-  botEnabledCacheAt = Date.now();
+  botFlagsCache = { ...botFlagsCache, guvenlik: v };
+  botFlagsCacheAt = Date.now();
 }
 
 // ── DB'den istatistik (5 dakika önbellekli) ────────────────────────

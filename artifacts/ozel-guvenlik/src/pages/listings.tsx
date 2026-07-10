@@ -76,7 +76,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const [activeSubFilter, setActiveSubFilter] = useState<null | "anadolu" | "avrupa">(null);
   const [otherCity, setOtherCity] = useState("");
   const listingsTopRef = useRef<HTMLElement | null>(null);
-  const pageScrollSkip = useRef(true);
+  const prevPageRef = useRef<number | null>(null);
 
   const effectiveCity = useMemo(() => {
     if (!city) return undefined;
@@ -174,13 +174,15 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages, totalCount, isLoading, isFetching]);
 
-  // Sayfa değişince ilk ilanın üstüne çık
+  // Her sayfa değişiminde ilk ilanın üstüne çık
   useEffect(() => {
-    if (pageScrollSkip.current) {
-      pageScrollSkip.current = false;
+    if (isLoading || isFetching) return;
+    if (prevPageRef.current === null) {
+      prevPageRef.current = page;
       return;
     }
-    if (isLoading || isFetching) return;
+    if (prevPageRef.current === page) return;
+    prevPageRef.current = page;
     const el = listingsTopRef.current;
     requestAnimationFrame(() => {
       if (el) {
