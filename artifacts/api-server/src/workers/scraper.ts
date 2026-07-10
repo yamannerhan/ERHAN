@@ -1091,6 +1091,40 @@ async function runScraperCycle(force = false): Promise<void> {
   }
 }
 
+async function runScraperCycleInner(force = false): Promise<void> {
+  await ensureTelegramConnected(5);
+  await processBotUpdates();
+
+  const sources = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.active, true));
+
+  const now = new Date();
+  const whatsappSources = sources.filter(s => s.platform === "whatsapp");
+  if (whatsappSources.length > 0) {
+    await scanWhatsAppSources(whatsappSources, force);
+  }
+
+  const telegramSources = sources.filter(s => s.platform === "telegram");
+  if (telegramSources.length > 0) {
+    await scanTelegramSources(telegramSources, force);
+  }
+
+  for (const source of sources) {
+    if (source.platform === "telegram" || source.platform === "whatsapp") continue;
+
+    const intervalMin = source.checkInterval ?? 15;
+    const intervalMs = intervalMin * 60 * 1000;
+    const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
+    if (!force && now.getTime() - lastChecked < intervalMs) continue;
+
+    if (source.platform === "facebook") {
+      await db.update(sourcesTable)
+        .set({ lastError: "Facebook entegrasyonu henüz aktif değil." })
+        .where(eq(sourcesTable.id, source.id));
+    }
+  }
+}
+
 async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
   const stats: ScanStats = {
     messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0,
