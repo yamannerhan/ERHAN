@@ -298,10 +298,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
     });
     socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
     socket.on("notification:new", () => {
-      if (user) refetchNotifs();
+      if (user) {
+        refetchNotifs();
+        refetchUnread();
+      }
     });
     return () => { socket.disconnect(); };
-  }, [refetchNotifs, user]);
+  }, [refetchNotifs, refetchUnread, user]);
 
   /* Click outside notification panel */
   useEffect(() => {
@@ -496,6 +499,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                                 {getNotifIcon(n.type)}
                               </div>
                               <div className="flex-1 min-w-0">
+                                {n.title && <p className="text-[11px] font-bold text-foreground mb-0.5 line-clamp-1">{n.title}</p>}
                                 <p className="text-xs text-foreground/90 leading-relaxed line-clamp-2">{n.message}</p>
                                 <p className="text-[10px] text-muted-foreground mt-0.5">
                                   {new Date(n.createdAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}

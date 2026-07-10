@@ -14,9 +14,11 @@ router.get("/notifications", authMiddleware, async (req, res): Promise<void> => 
   res.json(notifications.map(n => ({
     id: n.id,
     type: n.type,
+    title: n.title,
     message: n.message,
     isRead: n.isRead,
     linkUrl: n.linkUrl,
+    relatedId: n.relatedId,
     createdAt: n.createdAt.toISOString(),
   })));
 });

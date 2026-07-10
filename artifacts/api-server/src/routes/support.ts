@@ -2,8 +2,43 @@ import { Router } from "express";
 import { db, supportTicketsTable, supportMessagesTable, notificationsTable, usersTable } from "@workspace/db";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
+import { emitRealtime } from "../lib/realtime";
 
 const router = Router();
+
+async function notifyStaff(opts: {
+  title: string;
+  message: string;
+  relatedId: number;
+}): Promise<void> {
+  const staff = await db.select({ id: usersTable.id })
+    .from(usersTable)
+    .where(sql`${usersTable.role} IN ('admin','moderator')`);
+
+  if (staff.length === 0) return;
+
+  await db.insert(notificationsTable).values(
+    staff.map(s => ({
+      userId: s.id,
+      type: "support",
+      title: opts.title,
+      message: opts.message,
+      relatedId: opts.relatedId,
+      linkUrl: "/admin",
+      isRead: false,
+    })),
+  );
+
+  emitRealtime("notification:new", {
+    type: "support",
+    title: opts.title,
+    message: opts.message,
+    relatedId: opts.relatedId,
+    linkUrl: "/admin",
+    adminOnly: true,
+    createdAt: new Date().toISOString(),
+  });
+}
 
 // ── User: create ticket ────────────────────────────────────────────────────────
 router.post("/support", authMiddleware, async (req, res): Promise<void> => {
@@ -26,24 +61,12 @@ router.post("/support", authMiddleware, async (req, res): Promise<void> => {
     isStaff: false,
   });
 
-  // Notify all admins & moderators
-  const staff = await db.select({ id: usersTable.id })
-    .from(usersTable)
-    .where(sql`${usersTable.role} IN ('admin','moderator')`);
-
-  if (staff.length > 0) {
-    await db.insert(notificationsTable).values(
-      staff.map(s => ({
-        userId: s.id,
-        type: "support",
-        title: "Yeni Destek Talebi",
-        message: `#${ticket!.id} — ${subject.trim()}`,
-        relatedId: ticket!.id,
-        linkUrl: "/admin",
-        isRead: false,
-      }))
-    );
-  }
+  const [user] = await db.select({ username: usersTable.username }).from(usersTable).where(eq(usersTable.id, userId));
+  await notifyStaff({
+    title: "Yeni Destek Talebi",
+    message: `${user?.username ?? "Kullanıcı"}: #${ticket!.id} — ${subject.trim()}`,
+    relatedId: ticket!.id,
+  });
 
   res.status(201).json({ id: ticket!.id, subject: ticket!.subject, status: ticket!.status });
 });
@@ -144,29 +167,26 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
       linkUrl: "/destek",
       isRead: false,
     });
+    emitRealtime("notification:new", {
+      type: "support",
+      title: "Destek Talebiniz Yanıtlandı",
+      message: `#${id} numaralı talebinize yanıt geldi.`,
+      relatedId: id,
+      linkUrl: "/destek",
+      userId: ticket.userId,
+      createdAt: new Date().toISOString(),
+    });
   } else {
     // User replied back → mark as waiting again
     await db.update(supportTicketsTable)
       .set({ status: "waiting" })
       .where(and(eq(supportTicketsTable.id, id), eq(supportTicketsTable.status, "answered")));
 
-    const staff = await db.select({ id: usersTable.id })
-      .from(usersTable)
-      .where(sql`${usersTable.role} IN ('admin','moderator')`);
-
-    if (staff.length > 0) {
-      await db.insert(notificationsTable).values(
-        staff.map(s => ({
-          userId: s.id,
-          type: "support",
-          title: "Destek Talebi Güncellendi",
-          message: `#${id} nolu talebe kullanıcı yanıt verdi.`,
-          relatedId: id,
-          linkUrl: "/admin",
-          isRead: false,
-        }))
-      );
-    }
+    await notifyStaff({
+      title: "Destek Talebi Güncellendi",
+      message: `#${id} nolu talebe kullanıcı yanıt verdi.`,
+      relatedId: id,
+    });
   }
 
   const [user] = await db.select({ username: usersTable.username }).from(usersTable).where(eq(usersTable.id, userId));
@@ -211,6 +231,15 @@ router.patch("/support/:id/status", authMiddleware, requireAdminOrModerator, asy
     relatedId: id,
     linkUrl: "/destek",
     isRead: false,
+  });
+  emitRealtime("notification:new", {
+    type: "support",
+    title: "Destek Talebi Güncellendi",
+    message: `#${id} talebinizin durumu "${statusLabels[status]}" olarak güncellendi.`,
+    relatedId: id,
+    linkUrl: "/destek",
+    userId: ticket.userId,
+    createdAt: new Date().toISOString(),
   });
 
   res.json({ success: true, status });

@@ -153,6 +153,7 @@ export default function Notifications() {
                   {getIcon(notif.type)}
                 </div>
                 <div className="flex-1 min-w-0">
+                  {notif.title && <p className="text-xs font-bold text-foreground mb-0.5">{notif.title}</p>}
                   <p className="text-sm text-foreground/90 leading-snug">{notif.message}</p>
                   <div className="mt-1.5 flex justify-between items-center">
                     <span className="text-xs text-muted-foreground">

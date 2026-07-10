@@ -404,6 +404,8 @@ function SupportAdminSection({ apiCall, toast }: {
     } catch {} finally { setLoading(false); }
   };
 
+  useEffect(() => { void loadTickets(); }, [filter]);
+
   const loadTicketDetail = async (id: number) => {
     try {
       const data = await apiCall(`/support/${id}`, "GET") as AdminSupportDetail;
@@ -418,7 +420,7 @@ function SupportAdminSection({ apiCall, toast }: {
       const msg = await apiCall(`/support/${activeTicket.id}/reply`, "POST", { message: reply.trim() }) as AdminSupportMessage;
       setReply("");
       setActiveTicket(prev => prev ? { ...prev, status: "answered", messages: [...prev.messages, msg] } : prev);
-      loadTickets();
+      void loadTickets();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
 
@@ -427,7 +429,7 @@ function SupportAdminSection({ apiCall, toast }: {
       await apiCall(`/support/${id}/status`, "PATCH", { status });
       toast({ title: "Durum güncellendi" });
       if (activeTicket?.id === id) setActiveTicket(prev => prev ? { ...prev, status } : prev);
-      loadTickets();
+      void loadTickets();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
 
@@ -439,46 +441,49 @@ function SupportAdminSection({ apiCall, toast }: {
     return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${cfg}`}>{labels[status] ?? status}</span>;
   };
 
-  return (
-    <div className="border-white/[0.06] bg-[#0d1321]/60 backdrop-blur-xl">
-      <button onClick={() => { loadTickets(); }}
-        className="w-full flex items-center justify-between p-4 text-left hover:bg-white/5 transition-colors">
-        <div className="flex items-center gap-2 font-semibold text-sm">
-          <Headphones className="w-4 h-4 text-primary" />
-          Destek Talepleri
-        </div>
-        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-      </button>
+  const waitingCount = tickets.filter(t => t.status === "waiting").length;
 
-      <div className="px-4 pb-4 border-t border-white/5 pt-4 space-y-3">
+  return (
+    <Section title="Destek Talepleri" icon={Headphones}>
+      <div className="space-y-3">
+        <div className="flex items-start gap-2 bg-primary/10 border border-primary/20 rounded-xl p-3">
+          <Headphones className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+          <div className="text-xs text-primary/80 space-y-1">
+            <p>Kullanıcıların açtığı destek taleplerini buradan yanıtlayın.</p>
+            {waitingCount > 0 && (
+              <p className="text-amber-300 font-semibold">{waitingCount} bekleyen talep var</p>
+            )}
+          </div>
+        </div>
+
         {activeTicket ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <button onClick={() => setActiveTicket(null)} className="text-muted-foreground hover:text-foreground">
+              <button type="button" onClick={() => setActiveTicket(null)} className="text-muted-foreground hover:text-foreground">
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold line-clamp-1">{activeTicket.subject}</p>
-                <p className="text-[10px] text-muted-foreground">{activeTicket.username} · #{ activeTicket.id}</p>
+                <p className="text-[10px] text-muted-foreground">{activeTicket.username} · #{activeTicket.id}</p>
               </div>
               <StatusBadge status={activeTicket.status} />
             </div>
 
             <div className="space-y-1.5 flex gap-1 flex-wrap">
               {["waiting", "answered", "resolved"].map(s => (
-                <button key={s} onClick={() => changeStatus(activeTicket.id, s)}
+                <button key={s} type="button" onClick={() => void changeStatus(activeTicket.id, s)}
                   disabled={activeTicket.status === s}
                   className={`text-[10px] px-2 py-1 rounded-lg font-medium disabled:opacity-40 transition-colors ${
                     s === "waiting" ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" :
                     s === "answered" ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" :
                     "bg-green-500/20 text-green-400 hover:bg-green-500/30"
                   }`}>
-                  { { waiting: "Bekliyor", answered: "Yanıtlandı", resolved: "Çözüldü" }[s] }
+                  {{ waiting: "Bekliyor", answered: "Yanıtlandı", resolved: "Çözüldü" }[s]}
                 </button>
               ))}
             </div>
 
-            <div className="max-h-60 overflow-y-auto space-y-2 bg-white/5 rounded-xl p-3">
+            <div className="max-h-[50vh] overflow-y-auto space-y-2 bg-white/5 rounded-xl p-3">
               {activeTicket.messages.map(m => (
                 <div key={m.id} className={`flex ${m.isStaff ? "justify-start" : "justify-end"}`}>
                   <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
@@ -497,9 +502,9 @@ function SupportAdminSection({ apiCall, toast }: {
               <div className="flex gap-2">
                 <textarea value={reply} onChange={e => setReply(e.target.value)}
                   placeholder="Yanıt yaz..."
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); }}}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendReply(); }}}
                   rows={2} className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-primary/50 resize-none text-foreground placeholder:text-muted-foreground" />
-                <button onClick={sendReply} disabled={!reply.trim()}
+                <button type="button" onClick={() => void sendReply()} disabled={!reply.trim()}
                   className="w-9 h-9 self-end rounded-xl bg-primary flex items-center justify-center disabled:opacity-40">
                   <Send className="w-3.5 h-3.5 text-white" />
                 </button>
@@ -510,12 +515,12 @@ function SupportAdminSection({ apiCall, toast }: {
           <>
             <div className="flex gap-1.5 flex-wrap">
               {[["all","Tümü"],["waiting","Bekliyor"],["answered","Yanıtlandı"],["resolved","Çözüldü"]].map(([v,l]) => (
-                <button key={v} onClick={() => { setFilter(v!); }}
+                <button key={v} type="button" onClick={() => setFilter(v!)}
                   className={`text-[10px] px-2.5 py-1 rounded-full font-medium transition-colors ${filter === v ? "bg-primary text-white" : "bg-white/10 text-muted-foreground hover:bg-white/15"}`}>
                   {l}
                 </button>
               ))}
-              <button onClick={loadTickets} className="text-[10px] px-2.5 py-1 rounded-full bg-white/10 text-muted-foreground hover:bg-white/15 ml-auto">
+              <button type="button" onClick={() => void loadTickets()} className="text-[10px] px-2.5 py-1 rounded-full bg-white/10 text-muted-foreground hover:bg-white/15 ml-auto">
                 Yenile
               </button>
             </div>
@@ -527,8 +532,10 @@ function SupportAdminSection({ apiCall, toast }: {
             ) : (
               <div className="space-y-2">
                 {tickets.map(t => (
-                  <button key={t.id} onClick={() => loadTicketDetail(t.id)}
-                    className="w-full text-left bg-white/5 hover:bg-white/10 rounded-xl p-3 transition-colors">
+                  <button key={t.id} type="button" onClick={() => void loadTicketDetail(t.id)}
+                    className={`w-full text-left rounded-xl p-3 transition-colors ${
+                      t.status === "waiting" ? "bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20" : "bg-white/5 hover:bg-white/10"
+                    }`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold line-clamp-1">{t.subject}</p>
@@ -543,7 +550,122 @@ function SupportAdminSection({ apiCall, toast }: {
           </>
         )}
       </div>
-    </div>
+    </Section>
+  );
+}
+
+function AdminNotificationsInbox() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [, navigate] = useLocation();
+
+  const { data: notificationsData, isLoading, refetch } = useGetNotifications({
+    query: {
+      queryKey: getGetNotificationsQueryKey(),
+      enabled: !!user,
+      refetchInterval: 15000,
+    },
+  });
+  const notifications = notificationsData ?? [];
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  useEffect(() => {
+    if (!user) return;
+    const socket = socketIo(window.location.origin, {
+      path: "/ws",
+      transports: ["websocket", "polling"],
+      secure: window.location.protocol === "https:",
+      withCredentials: true,
+    });
+    socket.on("notification:new", () => { void refetch(); });
+    return () => { socket.disconnect(); };
+  }, [user, refetch]);
+
+  const markRead = async (id: number) => {
+    const token = getToken();
+    await fetch(`/api/notifications/${id}/read`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).catch(() => undefined);
+    queryClient.invalidateQueries({ queryKey: getGetNotificationsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetUnreadNotificationCountQueryKey() });
+  };
+
+  const markAllRead = async () => {
+    try {
+      const token = getToken();
+      await fetch("/api/notifications/read-all", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      queryClient.invalidateQueries({ queryKey: getGetNotificationsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetUnreadNotificationCountQueryKey() });
+      toast({ title: "Tüm bildirimler okundu" });
+    } catch {
+      toast({ title: "Hata", variant: "destructive" });
+    }
+  };
+
+  const openNotif = (n: { id: number; type: string; linkUrl?: string | null; isRead: boolean }) => {
+    if (!n.isRead) void markRead(n.id);
+    if (n.type === "support") {
+      try { sessionStorage.setItem("admin_open_tab", "destek"); } catch { /* ignore */ }
+      window.dispatchEvent(new CustomEvent("admin:open-tab", { detail: "destek" }));
+      return;
+    }
+    if (n.linkUrl) navigate(n.linkUrl);
+  };
+
+  return (
+    <Section title="Bildirimler" icon={Bell}>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {unreadCount > 0 ? <span className="text-amber-300 font-semibold">{unreadCount} okunmamış</span> : "Tüm bildirimler okundu"}
+          </p>
+          <div className="flex gap-2">
+            {unreadCount > 0 && (
+              <button type="button" onClick={() => void markAllRead()} className="text-[10px] px-2.5 py-1 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 font-semibold">
+                Tümünü okundu say
+              </button>
+            )}
+            <button type="button" onClick={() => void refetch()} className="text-[10px] px-2.5 py-1 rounded-lg bg-white/10 text-muted-foreground hover:bg-white/15">
+              Yenile
+            </button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <p className="text-xs text-center text-muted-foreground py-6">Yükleniyor…</p>
+        ) : notifications.length === 0 ? (
+          <p className="text-xs text-center text-muted-foreground py-6">Henüz bildirim yok</p>
+        ) : (
+          <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+            {notifications.map(n => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => openNotif(n)}
+                className={`w-full text-left rounded-xl p-3 transition-colors ${adminNotifClass(n.type, n.isRead)} !px-3 !py-3 rounded-xl`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 shrink-0 bg-white/5 p-1.5 rounded-full">{adminNotifIcon(n.type)}</div>
+                  <div className="flex-1 min-w-0">
+                    {n.title && <p className="text-[11px] font-bold text-slate-100 mb-0.5">{n.title}</p>}
+                    <p className="text-xs text-slate-200 leading-relaxed">{n.message}</p>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      {new Date(n.createdAt).toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                  {!n.isRead && <div className="w-2 h-2 rounded-full bg-violet-400 shrink-0 mt-1.5" />}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -2612,7 +2734,7 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
 type AdminTab =
   | "dashboard" | "ilanlar" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "yetkiler" | "ilan-haklari"
-  | "telegram" | "whatsapp" | "eleman" | "mesajlar"
+  | "telegram" | "whatsapp" | "eleman" | "mesajlar" | "destek"
   | "bakiye" | "kaynaklar" | "bildirimler" | "ayarlar" | "loglar";
 
 interface SidebarItem {
@@ -2653,6 +2775,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
       { id: "mesajlar", label: "Mesajlar", icon: MessageSquare },
       { id: "whatsapp", label: "WhatsApp Kaynakları", icon: MessageCircle },
       { id: "eleman", label: "Eleman.net", icon: Briefcase },
+      { id: "destek", label: "Destek Talepleri", icon: Headphones },
     ],
   },
   {
@@ -2787,11 +2910,12 @@ function AdminSidebar({
 }
 
 function AdminTopBar({
-  onMenuToggle, search, onSearchChange,
+  onMenuToggle, search, onSearchChange, onOpenTab,
 }: {
   onMenuToggle: () => void;
   search: string;
   onSearchChange: (v: string) => void;
+  onOpenTab?: (tab: AdminTab) => void;
 }) {
   const { user } = useAuth();
   const [, navigate] = useLocation();
@@ -2996,7 +3120,20 @@ function AdminTopBar({
                         </>
                       );
                       const cls = adminNotifClass(n.type, n.isRead);
-                      return n.linkUrl ? (
+                      return n.type === "support" ? (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => {
+                            void markRead(n.id);
+                            setShowNotifs(false);
+                            onOpenTab?.("destek");
+                          }}
+                          className={cls + " w-full text-left"}
+                        >
+                          {body}
+                        </button>
+                      ) : n.linkUrl ? (
                         <WouterLink
                           key={n.id}
                           href={n.linkUrl}
@@ -3023,7 +3160,7 @@ function AdminTopBar({
 
                 <button
                   type="button"
-                  onClick={() => { setShowNotifs(false); navigate("/bildirimler"); }}
+                  onClick={() => { setShowNotifs(false); onOpenTab?.("bildirimler"); }}
                   className="w-full flex items-center justify-center gap-1.5 py-3 border-t border-white/[0.06] text-xs font-semibold text-violet-400 hover:text-violet-300 transition-colors"
                 >
                   Tümünü Gör <ChevronRight className="w-3.5 h-3.5" />
@@ -3503,6 +3640,22 @@ export default function AdminDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [topbarSearch, setTopbarSearch] = useState("");
 
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("admin_open_tab") as AdminTab | null;
+      if (saved) {
+        setActiveTab(saved);
+        sessionStorage.removeItem("admin_open_tab");
+      }
+    } catch { /* ignore */ }
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<AdminTab>).detail;
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener("admin:open-tab", handler);
+    return () => window.removeEventListener("admin:open-tab", handler);
+  }, []);
+
   const listingTotalPages = Math.max(1, Math.ceil((listingsData?.total ?? 0) / 50));
   // Hook'lar erken return'den ÖNCE olmalı — aksi halde F5'te React #310 (hooks sırası) patlar
   useEffect(() => {
@@ -3851,6 +4004,7 @@ export default function AdminDashboard() {
           onMenuToggle={() => setSidebarOpen(o => !o)}
           search={topbarSearch}
           onSearchChange={setTopbarSearch}
+          onOpenTab={setActiveTab}
         />
 
         <main className="flex-1 p-4 lg:p-6 space-y-5 pb-8">
@@ -4049,6 +4203,8 @@ export default function AdminDashboard() {
         {activeTab === "ilan-olustur" && <SmartListingSection apiCall={apiCall} toast={toast} refetchListings={refetchListings} refetchStats={refetchStats} />}
 
         {activeTab === "mesajlar" && <ChatManagementSection apiCall={apiCall} toast={toast} />}
+
+        {activeTab === "bildirimler" && <AdminNotificationsInbox />}
 
         {activeTab === "bildirimler" && (
         <Section title="Kayan Yazı Yönetimi" icon={MessageSquare}>
@@ -4280,7 +4436,13 @@ export default function AdminDashboard() {
         </Section>
         )}
 
-        {activeTab === "bakiye" && <SupportAdminSection apiCall={apiCall} toast={toast} />}
+        {activeTab === "destek" && <SupportAdminSection apiCall={apiCall} toast={toast} />}
+
+        {activeTab === "bakiye" && (
+          <Section title="Bakiye İşlemleri" icon={CreditCard}>
+            <p className="text-xs text-muted-foreground">Destek talepleri artık <strong className="text-slate-200">İletişim → Destek Talepleri</strong> sekmesinde.</p>
+          </Section>
+        )}
 
         {activeTab === "kullanicilar" && <UserManagementSection apiCall={apiCall} toast={toast} viewerIsAdmin={isAdmin} />}
 
