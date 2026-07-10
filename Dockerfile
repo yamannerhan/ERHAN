@@ -2,24 +2,6 @@ FROM node:22-alpine
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-# WhatsApp Web (puppeteer) için Chromium + bağımlılıklar
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    font-noto-emoji \
-    dbus \
-    udev \
-    mesa-gl \
-    mesa-dri-gallium
-
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
@@ -42,6 +24,8 @@ RUN pnpm --filter @workspace/api-server build
 
 ENV NODE_ENV=production
 ENV BASE_PATH=/
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 EXPOSE 8080
 

@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 /**
- * Portable production bootstrap:
- * - env defaults for any server
- * - auto DB schema sync
- * - start API server
+ * Production bootstrap — API'yi hemen baslat (Railway healthcheck),
+ * DB schema'yi paralel uygula.
  */
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,28 +39,45 @@ if (!fs.existsSync(path.join(staticDir, "index.html"))) {
   log("Frontend build bulundu.");
 }
 
-log("Veritabani semasi uygulaniyor...");
-const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
-  cwd: rootDir,
-  env: process.env,
-  stdio: "inherit",
-  shell: process.platform === "win32",
-  timeout: 120_000,
-});
+log(`API sunucusu baslatiliyor (PORT=${process.env.PORT || 8080})...`);
 
-if (push.status !== 0) {
-  // Schema push basarisiz olsa bile API'yi baslat — healthcheck gecsin, hata logda kalsin
-  log("UYARI: Veritabani semasi uygulanamadi, sunucu yine de baslatiliyor.");
-} else {
-  log("Veritabani hazir.");
-}
-
-log(`Sunucu baslatiliyor (PORT=${process.env.PORT})...`);
-
-const server = spawnSync(
+const child = spawn(
   "node",
   ["--enable-source-maps", path.join(rootDir, "artifacts/api-server/dist/index.mjs")],
-  { cwd: rootDir, env: process.env, stdio: "inherit" },
+  {
+    cwd: rootDir,
+    env: process.env,
+    stdio: "inherit",
+  },
 );
 
-process.exit(server.status ?? 1);
+// Schema push API'yi bloklamasin — arka planda
+log("Veritabani semasi arka planda uygulanıyor...");
+const push = spawn(
+  "pnpm",
+  ["--filter", "@workspace/db", "run", "push-force"],
+  {
+    cwd: rootDir,
+    env: process.env,
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  },
+);
+push.on("exit", (code) => {
+  if (code === 0) log("Veritabani semasi tamam.");
+  else log(`UYARI: Veritabani semasi exit=${code}`);
+});
+
+child.on("exit", (code, signal) => {
+  log(`API cikis: code=${code} signal=${signal}`);
+  process.exit(code ?? 1);
+});
+
+process.on("SIGTERM", () => {
+  push.kill("SIGTERM");
+  child.kill("SIGTERM");
+});
+process.on("SIGINT", () => {
+  push.kill("SIGINT");
+  child.kill("SIGINT");
+});
