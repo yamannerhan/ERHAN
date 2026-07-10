@@ -2,9 +2,11 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
-import { startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppQR, fetchWhatsAppGroups } from "../services/whatsapp-client";
+import {
+  startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
+} from "../services/whatsapp-client";
 
 const router = Router();
 
@@ -234,17 +236,22 @@ router.post("/admin/scrape/run", runScrapeEndpoint);
 // ── WhatsApp endpoints ─────────────────────────────────────────────
 
 router.get("/admin/whatsapp/status", authMiddleware, requireAdmin, async (_req, res) => {
-  res.json({
-    ready: isWhatsAppReady(),
-    connected: isWhatsAppReady(),
-    qr: getWhatsAppQR(),
-  });
+  res.json(getWhatsAppStatus());
 });
 
-router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (_req, res) => {
+router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, res) => {
   try {
-    await startWhatsAppClient();
-    res.json({ success: true, message: "WhatsApp client başlatıldı. QR kod bekleniyor..." });
+    const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber.trim() : undefined;
+    // Arka planda başlat — QR/kod üretimi initialize sırasında gelir
+    void startWhatsAppClient(phoneNumber ? { phoneNumber } : undefined).catch((e) => {
+      console.error("wa start error", e);
+    });
+    res.json({
+      success: true,
+      message: phoneNumber
+        ? "WhatsApp başlatıldı. Telefona gelen onay kodunu bekleyin..."
+        : "WhatsApp başlatıldı. QR kod bekleniyor...",
+    });
   } catch (e) {
     res.status(500).json({ success: false, error: String(e) });
   }
@@ -265,24 +272,52 @@ router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, 
 });
 
 router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (req, res) => {
-  const { groupId, groupName } = req.body;
+  const { groupId, groupName, sourceName } = req.body as {
+    groupId?: string; groupName?: string; sourceName?: string;
+  };
   if (!groupId || !groupName) {
     res.status(400).json({ error: "groupId ve groupName gerekli." });
     return;
   }
 
+  const existing = await db.select({ id: sourcesTable.id })
+    .from(sourcesTable)
+    .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.url, groupId)))
+    .limit(1);
+  if (existing[0]) {
+    res.json({ success: true, source: existing[0], message: "Bu grup zaten kayıtlı." });
+    return;
+  }
+
   const [source] = await db.insert(sourcesTable).values({
-    name: groupName,
+    name: (sourceName || groupName).slice(0, 120),
     platform: "whatsapp",
     url: groupId,
     active: true,
     status: "active",
-    checkInterval: 1,
+    checkInterval: 5,
     autoPublish: true,
     requireApproval: false,
   }).returning();
 
   res.json({ success: true, source });
+});
+
+router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const result = await triggerWhatsAppScan();
+    if (!result.ready) {
+      res.status(503).json({ error: "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın." });
+      return;
+    }
+    res.json({
+      success: true,
+      scanned: result.scanned,
+      message: `${result.scanned} WhatsApp grubu tarandı.`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 export default router;

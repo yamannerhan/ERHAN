@@ -3,6 +3,7 @@ import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc } from "dr
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
+import { fetchWhatsAppMessages, isWhatsAppReady } from "../services/whatsapp-client";
 import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -153,7 +154,7 @@ async function findListingBySourceMessage(sourceId: number, messageId: string): 
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
-  if (source.platform === "telegram") return true;
+  if (source.platform === "telegram" || source.platform === "whatsapp") return true;
   return source.autoPublish || !source.requireApproval;
 }
 
@@ -1069,6 +1070,152 @@ async function runScraperCycle(force = false): Promise<void> {
   }
 }
 
+async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
+  const stats: ScanStats = {
+    messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0,
+    maxId: parseInt(source.lastTelegramMessageId ?? "0", 10) || 0,
+  };
+
+  if (!isWhatsAppReady()) {
+    await patchSourceProgress(source.id, {
+      lastError: "WhatsApp bağlı değil. Admin → WhatsApp Kaynakları'ndan QR/onay kodu ile bağlanın.",
+      isScanning: false,
+      lastCheckedAt: new Date(),
+    });
+    return stats;
+  }
+
+  const groupJid = source.url?.trim();
+  if (!groupJid || !groupJid.includes("@")) {
+    await patchSourceProgress(source.id, {
+      lastError: "Geçersiz WhatsApp grup ID. Önce grupları kaydedin.",
+      isScanning: false,
+    });
+    return stats;
+  }
+
+  const isInitialScan = !source.initialScanDone;
+  const lastTs = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
+
+  await patchSourceProgress(source.id, { lastError: null, isScanning: true });
+
+  let messages;
+  try {
+    messages = await fetchWhatsAppMessages(groupJid, {
+      afterTimestampMs: isInitialScan ? undefined : lastTs,
+      maxAgeDays: isInitialScan ? INITIAL_SCAN_DAYS : undefined,
+      limit: isInitialScan ? 300 : 80,
+    });
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    await patchSourceProgress(source.id, {
+      lastError: errMsg.slice(0, 500),
+      isScanning: false,
+      lastCheckedAt: new Date(),
+      lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+    });
+    stats.errors++;
+    return stats;
+  }
+
+  stats.messagesRead = messages.length;
+  let maxTs = lastTs;
+
+  for (const m of messages) {
+    if (m.timestamp > maxTs) maxTs = m.timestamp;
+    stats.found++;
+    try {
+      const result = await processMessage(
+        source,
+        `wa_${m.id}`,
+        m.text,
+        `whatsapp://${groupJid}`,
+        new Date(m.timestamp),
+        isInitialScan,
+      );
+      if (result === "added") stats.added++;
+      else if (result === "duplicate" || result === "updated") stats.duplicates++;
+    } catch (e) {
+      stats.errors++;
+      logger.warn({ err: e, sourceId: source.id }, "scraper: wa message process error");
+    }
+    await sleep(MESSAGE_PROCESS_DELAY_MS);
+  }
+
+  stats.maxId = maxTs;
+
+  await patchSourceProgress(source.id, {
+    lastCheckedAt: new Date(),
+    lastTelegramMessageId: maxTs > 0 ? String(maxTs) : source.lastTelegramMessageId,
+    initialScanDone: true,
+    initialScanProgress: 100,
+    initialScanPhase: null,
+    isScanning: false,
+    lastError: null,
+    lastScanMessagesRead: messages.length,
+    lastScanFound: stats.found,
+    lastScanAdded: stats.added,
+    lastScanDuplicates: stats.duplicates,
+    lastScanErrors: stats.errors,
+    lastScanPublished: stats.added,
+    totalImported: (source.totalImported ?? 0) + stats.added,
+  });
+
+  logger.info(
+    { sourceId: source.id, name: source.name, ...stats },
+    "scraper: whatsapp kaynak tarandı",
+  );
+  return stats;
+}
+
+async function scanWhatsAppSources(
+  whatsappSources: Array<typeof sourcesTable.$inferSelect>,
+  force: boolean,
+): Promise<void> {
+  if (whatsappSources.length === 0) return;
+
+  if (!isWhatsAppReady()) {
+    for (const s of whatsappSources) {
+      await patchSourceProgress(s.id, {
+        lastError: "WhatsApp bağlı değil. Admin panelinden bağlanın.",
+        lastCheckedAt: new Date(),
+      });
+    }
+    return;
+  }
+
+  const now = Date.now();
+  for (const source of whatsappSources) {
+    const intervalMin = source.checkInterval ?? 5;
+    const intervalMs = intervalMin * 60 * 1000;
+    const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
+    if (!force && now - lastChecked < intervalMs) continue;
+    if (source.isScanning) continue;
+
+    const locked = await acquireSourceScanLock(source.id);
+    if (!locked) continue;
+
+    try {
+      await checkWhatsAppSource(source);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(`scraper: whatsapp source ${source.id} failed: ${errMsg}`);
+      await db.update(sourcesTable)
+        .set({
+          lastError: errMsg.slice(0, 500),
+          lastCheckedAt: new Date(),
+          isScanning: false,
+          lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+        })
+        .where(eq(sourcesTable.id, source.id));
+    } finally {
+      await releaseSourceScanLock(source.id);
+    }
+
+    await sleep(SOURCE_SCAN_DELAY_MS);
+  }
+}
+
 async function runScraperCycleInner(force = false): Promise<void> {
   await ensureTelegramConnected();
   await processBotUpdates();
@@ -1077,13 +1224,18 @@ async function runScraperCycleInner(force = false): Promise<void> {
     .where(eq(sourcesTable.active, true));
 
   const now = new Date();
+  const whatsappSources = sources.filter(s => s.platform === "whatsapp");
+  if (whatsappSources.length > 0) {
+    await scanWhatsAppSources(whatsappSources, force);
+  }
+
   const telegramSources = sources.filter(s => s.platform === "telegram");
   if (telegramSources.length > 0) {
     await scanTelegramSources(telegramSources, force);
   }
 
   for (const source of sources) {
-    if (source.platform === "telegram") continue;
+    if (source.platform === "telegram" || source.platform === "whatsapp") continue;
 
     const intervalMin = source.checkInterval ?? 15;
     const intervalMs = intervalMin * 60 * 1000;
@@ -1096,6 +1248,17 @@ async function runScraperCycleInner(force = false): Promise<void> {
         .where(eq(sourcesTable.id, source.id));
     }
   }
+}
+
+/** Sadece WhatsApp kaynaklarını hemen tara. */
+export async function triggerWhatsAppScan(): Promise<{ scanned: number; ready: boolean }> {
+  if (!isWhatsAppReady()) {
+    return { scanned: 0, ready: false };
+  }
+  const sources = await db.select().from(sourcesTable)
+    .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
+  await scanWhatsAppSources(sources, true);
+  return { scanned: sources.length, ready: true };
 }
 
 // ── Public API ─────────────────────────────────────────────────────

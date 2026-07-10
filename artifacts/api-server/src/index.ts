@@ -1,4 +1,4 @@
-﻿import { createServer } from "http";
+import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -7,8 +7,9 @@ import { setBotIo } from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
 import { startScraperWorker, purgeExpiredListings } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
+import { initWhatsAppClient } from "./services/whatsapp-client";
 import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
-import { eq, count, sql, desc, lt, asc, and, isNotNull } from "drizzle-orm";
+import { eq, count, sql, desc, lt, asc, and, or, isNotNull } from "drizzle-orm";
 
 const rawPort = process.env["PORT"] || "3000";
 const port = Number(rawPort);
@@ -956,11 +957,16 @@ scheduleHourlyReminder();
 async function bootstrapWorkers(): Promise<void> {
   await db.update(sourcesTable)
     .set({ autoPublish: true, requireApproval: false })
-    .where(and(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.active, true)));
+    .where(and(
+      eq(sourcesTable.active, true),
+      or(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.platform, "whatsapp")),
+    ));
 
   await initTelegramClient();
+  // WhatsApp oturumu diske kayıtlıysa QR olmadan geri yüklenir
+  void initWhatsAppClient();
   startScraperWorker();
-  logger.info("Workers started (telegram + scraper)");
+  logger.info("Workers started (telegram + whatsapp + scraper)");
 }
 
 void bootstrapWorkers();

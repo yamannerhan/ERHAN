@@ -47,3 +47,7 @@ Thumbs.db
 
 # uploads
 uploads/
+
+# WhatsApp Web session (LocalAuth)
+.wwebjs_auth/
+**/.wwebjs_auth/

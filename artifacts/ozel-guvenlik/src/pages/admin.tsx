@@ -1834,49 +1834,71 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
-  const [groups, setGroups] = useState<Array<{ id: string; name: string; selected?: boolean }>>([]);
+  const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; selected?: boolean }>>([]);
   const [errorLog, setErrorLog] = useState<string>("");
   const [lastScanAt, setLastScanAt] = useState<string>("Henüz taranmadı");
   const [form, setForm] = useState({
     sourceName: "",
-    groupLink: "",
+    phoneNumber: "",
   });
 
   const refresh = async () => {
     try {
       const status = await apiCall("/admin/whatsapp/status", "GET");
-      const nextStatus = status as { connected?: boolean; ready?: boolean; qr?: string | null; error?: string | null };
-      setConnected(!!(nextStatus.connected ?? nextStatus.ready));
+      const nextStatus = status as {
+        connected?: boolean; ready?: boolean; qr?: string | null;
+        pairingCode?: string | null; error?: string | null; starting?: boolean;
+      };
+      const isConn = !!(nextStatus.connected ?? nextStatus.ready);
+      setConnected(isConn);
       setQr(nextStatus.qr ?? null);
-      setQrStatus(nextStatus.qr ? "ready" : (nextStatus.connected ?? nextStatus.ready) ? "ready" : "connecting");
+      setPairingCode(nextStatus.pairingCode ?? null);
       setErrorLog(nextStatus.error ?? "");
+      if (isConn) setQrStatus("ready");
+      else if (nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
+      else if (nextStatus.error) setQrStatus("failed");
 
-      if (nextStatus.connected ?? nextStatus.ready) {
+      if (isConn) {
         const groupList = await apiCall("/admin/whatsapp/groups", "GET");
-        const parsed = groupList as { groups?: Array<{ id: string; name: string; selected?: boolean }> };
-        setGroups(parsed.groups ?? []);
+        const parsed = groupList as { groups?: Array<{ id: string; name: string; participants?: number }> };
+        setGroups(prev => {
+          const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
+          return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
+        });
       }
     } catch (error) {
       setErrorLog(error instanceof Error ? error.message : "Bilinmeyen hata");
       setQrStatus("failed");
-    } finally {
     }
   };
 
   useEffect(() => {
-    refresh();
-    const timer = window.setInterval(refresh, 4000);
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 4000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const connect = async () => {
+  const connect = async (usePairing: boolean) => {
     setLoading(true);
     try {
       setQrStatus("connecting");
-      await apiCall("/admin/whatsapp/start", "POST", form);
+      const body = usePairing && form.phoneNumber.trim()
+        ? { phoneNumber: form.phoneNumber.trim() }
+        : {};
+      if (usePairing && !form.phoneNumber.trim()) {
+        toast({ title: "Telefon numarası gerekli", description: "Örn: 905xxxxxxxxx", variant: "destructive" });
+        return;
+      }
+      await apiCall("/admin/whatsapp/start", "POST", body);
       await refresh();
-      toast({ title: "WhatsApp bağlantısı başlatıldı" });
+      toast({
+        title: usePairing ? "Onay kodu bekleniyor" : "QR bağlantısı başlatıldı",
+        description: usePairing
+          ? "Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan"
+          : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut",
+      });
     } catch (error) {
       toast({ title: "Bağlantı başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
@@ -1884,16 +1906,39 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     }
   };
 
-  const saveGroup = async (group: { id: string; name: string; selected?: boolean }) => {
+  const disconnect = async () => {
     setLoading(true);
     try {
-      await apiCall("/admin/whatsapp/add-source", "POST", {
-        groupId: group.id,
-        groupName: group.name,
-        sourceName: form.sourceName || group.name,
-        groupLink: form.groupLink || group.id,
-      });
-      toast({ title: "WhatsApp kaynağı kaydedildi" });
+      await apiCall("/admin/whatsapp/stop", "POST");
+      setConnected(false);
+      setQr(null);
+      setPairingCode(null);
+      toast({ title: "WhatsApp bağlantısı kesildi" });
+    } catch (error) {
+      toast({ title: "Durdurulamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveSelectedGroups = async () => {
+    const selected = groups.filter(g => g.selected);
+    if (selected.length === 0) {
+      toast({ title: "Grup seçin", description: "Kaydetmek için en az bir grup seçin.", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    let ok = 0;
+    try {
+      for (const group of selected) {
+        await apiCall("/admin/whatsapp/add-source", "POST", {
+          groupId: group.id,
+          groupName: group.name,
+          sourceName: form.sourceName || group.name,
+        });
+        ok++;
+      }
+      toast({ title: `${ok} grup kaydedildi`, description: "Scraper otomatik tarayacak." });
       setLastScanAt(new Date().toLocaleString("tr-TR"));
     } catch (error) {
       toast({ title: "Kaynak kaydedilemedi", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
@@ -1905,9 +1950,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const scanNow = async () => {
     setLoading(true);
     try {
-      await apiCall("/admin/whatsapp/scan-now", "POST", { groups: groups.filter(g => g.selected).map(g => g.id) });
+      const r = await apiCall("/admin/whatsapp/scan-now", "POST") as { message?: string };
       setLastScanAt(new Date().toLocaleString("tr-TR"));
-      toast({ title: "Şimdi tara tetiklendi" });
+      toast({ title: "Tarama tamamlandı", description: r.message });
     } catch (error) {
       toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
@@ -1926,32 +1971,40 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• QR ile giriş</div>
-              <div>• Oturum kaydı</div>
-              <div>• Seçili grupları her 5–10 dakikada tarama</div>
+              <div>• Bir kez QR veya onay kodu ile bağlan — oturum sunucuda kalır</div>
+              <div>• Seçili gruplardan ilan çekilir (Telegram gibi)</div>
+              <div>• Her 5 dakikada otomatik tarama</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={connect} disabled={loading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50">
-              Bağlan / Tekrar Bağlan
+            <button onClick={() => void connect(false)} disabled={loading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50">
+              QR ile Bağlan
             </button>
-            <button onClick={refresh} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
+            <button onClick={() => void connect(true)} disabled={loading} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50">
+              Onay Kodu ile Bağlan
+            </button>
+            <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
             </button>
-            <button onClick={scanNow} disabled={loading} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
+            <button onClick={() => void scanNow()} disabled={loading || !connected} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
               Şimdi Tara
             </button>
+            {connected && (
+              <button onClick={() => void disconnect()} disabled={loading} className="rounded-xl bg-rose-500/20 px-4 py-2 text-sm font-bold text-rose-300 hover:bg-rose-500/30 disabled:opacity-50">
+                Bağlantıyı Kes
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="space-y-1">
-            <span className="text-xs font-medium text-slate-300">Kaynak Adı</span>
+            <span className="text-xs font-medium text-slate-300">Kaynak Adı (opsiyonel)</span>
             <input value={form.sourceName} onChange={e => setForm(prev => ({ ...prev, sourceName: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none" placeholder="Ör. Güvenlik Grupları" />
           </label>
           <label className="space-y-1">
-            <span className="text-xs font-medium text-slate-300">WhatsApp Grup Linki</span>
-            <input value={form.groupLink} onChange={e => setForm(prev => ({ ...prev, groupLink: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none" placeholder="https://chat.whatsapp.com/..." />
+            <span className="text-xs font-medium text-slate-300">Telefon (onay kodu için)</span>
+            <input value={form.phoneNumber} onChange={e => setForm(prev => ({ ...prev, phoneNumber: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none" placeholder="905xxxxxxxxx" />
           </label>
         </div>
 
@@ -1959,35 +2012,66 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
-              <span className={`text-xs font-bold ${connected ? "text-emerald-400" : "text-amber-400"}`}>{connected ? "Bağlı" : qrStatus === "connecting" ? "QR bekleniyor" : "Bağlı değil"}</span>
+              <span className={`text-xs font-bold ${connected ? "text-emerald-400" : "text-amber-400"}`}>
+                {connected ? "Bağlı" : qrStatus === "connecting" ? "Bekleniyor…" : "Bağlı değil"}
+              </span>
             </div>
-            {qr ? <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" /> : <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">{qrStatus === "connecting" ? "WhatsApp oturumu hazırlanıyor, QR üretimi bekleniyor..." : "QR kod bekleniyor"}</div>}
+            {connected ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">
+                WhatsApp Web oturumu aktif. Grupları seçip kaydedin, sonra «Şimdi Tara» ile ilan çekin.
+              </div>
+            ) : pairingCode ? (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400">Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan → bu kodu gir:</p>
+                <div className="text-3xl font-black tracking-[0.35em] text-white text-center py-4 bg-black/40 rounded-xl border border-white/10">
+                  {pairingCode}
+                </div>
+              </div>
+            ) : qr ? (
+              <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" />
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">
+                {qrStatus === "connecting"
+                  ? "WhatsApp oturumu hazırlanıyor (QR veya onay kodu)…"
+                  : "Bağlanmak için «QR ile Bağlan» veya «Onay Kodu ile Bağlan» kullanın."}
+              </div>
+            )}
             <div className="mt-3 text-xs text-slate-400">Son tarama: {lastScanAt}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <h4 className="text-sm font-bold text-white mb-3">Hata Logları</h4>
-            <textarea value={errorLog} readOnly className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-300 outline-none" />
+            <textarea value={errorLog || "Hata yok"} readOnly className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-300 outline-none" />
           </div>
         </div>
       </div>
 
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <h4 className="text-base font-bold text-white">Grup Listesi</h4>
-            <p className="text-xs text-slate-400">İlan çekilecek grupları seç</p>
+            <p className="text-xs text-slate-400">İlan çekilecek grupları seç → Kaydet</p>
           </div>
-          <button onClick={() => toast({ title: "Seçilenler kaydedildi" })} className="rounded-xl bg-emerald-500/20 px-3 py-2 text-xs font-bold text-emerald-300">Kaydet</button>
+          <button
+            onClick={() => void saveSelectedGroups()}
+            disabled={loading || !connected}
+            className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-50"
+          >
+            Seçilenleri Kaydet
+          </button>
         </div>
-        <div className="space-y-2">
-          {groups.map(group => (
+        <div className="space-y-2 max-h-[420px] overflow-y-auto">
+          {groups.length === 0 ? (
+            <p className="text-xs text-slate-500 text-center py-8">
+              {connected ? "Grup bulunamadı." : "Önce WhatsApp'a bağlanın."}
+            </p>
+          ) : groups.map(group => (
             <button key={group.id} onClick={() => toggleGroup(group.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition ${group.selected ? "border-emerald-400 bg-emerald-400/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-bold text-white">{group.name}</div>
-                  <div className="text-xs text-slate-400">{group.id}</div>
+                  <div className="text-xs text-slate-400 truncate">{group.id}{group.participants != null ? ` · ${group.participants} üye` : ""}</div>
                 </div>
-                <span className="text-xs font-bold text-slate-300">{group.selected ? "Seçildi" : "Seçilmedi"}</span>
+                <span className="text-xs font-bold text-slate-300 shrink-0">{group.selected ? "Seçildi" : "Seçilmedi"}</span>
               </div>
             </button>
           ))}
