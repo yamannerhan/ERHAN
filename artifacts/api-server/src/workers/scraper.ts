@@ -1251,6 +1251,13 @@ async function scanElemanSources(
 
     try {
       await checkElemanSource(source);
+      const [fresh] = await db.select({ initialScanDone: sourcesTable.initialScanDone })
+        .from(sourcesTable).where(eq(sourcesTable.id, source.id)).limit(1);
+      if (fresh && !fresh.initialScanDone) {
+        setTimeout(() => {
+          void runScraperCycle(true).catch((e) => logger.error(e, "scraper: eleman chain error"));
+        }, 8_000);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ err, sourceId: source.id }, "scraper: Eleman.net kaynak taraması başarısız");
