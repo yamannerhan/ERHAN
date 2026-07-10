@@ -219,30 +219,113 @@ export function extractBenefits(text: string): string[] {
   return benefits;
 }
 
+/** Kelime sınırı: "des" → "adres" içinde eşleşmesin; "gebze'de" eşleşsin. */
+function hasTerm(haystackAscii: string, term: string): boolean {
+  const needle = normalize(term);
+  if (!needle || needle.length < 3) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystackAscii);
+}
+
+function detectMentionedCities(ascii: string): Set<string> {
+  const mentioned = new Set<string>();
+  const cityKeys = Object.entries(CITY_DISPLAY).sort((a, b) => b[0].length - a[0].length);
+  for (const [key, city] of cityKeys) {
+    if (hasTerm(ascii, key)) mentioned.add(city);
+  }
+  return mentioned;
+}
+
 export function extractLocation(text: string): ParsedLocation {
-  const plain = normalizeTr(text);
   const ascii = normalize(text);
+  const mentioned = detectMentionedCities(ascii);
+
+  type Candidate = ParsedLocation & { score: number };
+  const candidates: Candidate[] = [];
+
+  const preferCity = (city: string): number => {
+    if (mentioned.size === 0) return 0;
+    if (mentioned.has(city)) return 50;
+    // Metinde açıkça başka il varken bu adayı cezalandır
+    return -40;
+  };
 
   for (const [key, loc] of Object.entries(NEIGHBORHOODS)) {
-    if (ascii.includes(normalize(key)) || plain.includes(loc.neighborhood.toLocaleLowerCase("tr-TR"))) {
-      const display = [loc.city, loc.district, loc.neighborhood].filter(Boolean).join(" / ");
-      return { city: loc.city, district: loc.district ?? null, neighborhood: loc.neighborhood, display };
-    }
+    const nKey = normalize(key);
+    if (!hasTerm(ascii, key) && !hasTerm(ascii, loc.neighborhood)) continue;
+    const display = [loc.city, loc.district, loc.neighborhood].filter(Boolean).join(" / ");
+    candidates.push({
+      city: loc.city,
+      district: loc.district ?? null,
+      neighborhood: loc.neighborhood,
+      display,
+      score: 300 + nKey.length + preferCity(loc.city),
+    });
   }
 
   for (const [key, loc] of Object.entries(DISTRICT_TO_CITY)) {
-    if (ascii.includes(normalize(key)) || plain.includes(loc.district.toLocaleLowerCase("tr-TR"))) {
-      return { city: loc.city, district: loc.district, neighborhood: null, display: `${loc.city} / ${loc.district}` };
-    }
+    const nKey = normalize(key);
+    if (!hasTerm(ascii, key) && !hasTerm(ascii, loc.district)) continue;
+    candidates.push({
+      city: loc.city,
+      district: loc.district,
+      neighborhood: null,
+      display: `${loc.city} / ${loc.district}`,
+      score: 200 + nKey.length + preferCity(loc.city),
+    });
   }
 
   for (const [key, city] of Object.entries(CITY_DISPLAY)) {
-    if (ascii.includes(normalize(key)) || plain.includes(city.toLocaleLowerCase("tr-TR"))) {
-      return { city, district: null, neighborhood: null, display: city };
-    }
+    if (!hasTerm(ascii, key)) continue;
+    candidates.push({
+      city,
+      district: null,
+      neighborhood: null,
+      display: city,
+      score: 100 + normalize(key).length + preferCity(city),
+    });
   }
 
-  return { city: null, district: null, neighborhood: null, display: null };
+  if (candidates.length === 0) {
+    return { city: null, district: null, neighborhood: null, display: null };
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0]!;
+  return {
+    city: best.city,
+    district: best.district,
+    neighborhood: best.neighborhood,
+    display: best.display,
+  };
+}
+
+/** Açıklama içindeki TR cep numaralarını yakala (boşluk/tire/nokta ile yazılmış dahil). */
+export function extractPhoneNumber(text: string): string | null {
+  const patterns = [
+    /(?:\+90|0)?[\s\-./()]*(?:5(?:[\s\-./()]*\d){9})/g,
+    /(?<!\d)5(?:[\s\-./()]*\d){9}(?!\d)/g,
+  ];
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const digits = m[0].replace(/\D/g, "");
+      let normalized = digits;
+      if (normalized.startsWith("90") && normalized.length >= 12) {
+        normalized = "0" + normalized.slice(2);
+      }
+      if (normalized.length === 10 && normalized.startsWith("5")) {
+        normalized = "0" + normalized;
+      }
+      // 05XXXXXXXXX — baştaki fazla 0'ları düzelt
+      if (/^0+5\d{9}$/.test(normalized)) {
+        normalized = "0" + normalized.slice(-10);
+      }
+      if (/^05\d{9}$/.test(normalized)) return normalized;
+    }
+  }
+  return null;
 }
 
 const HIRING_SIGNAL = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacakt[ıi]r|al[ıi]n[ıi]cakt[ıi]r|al[ıi]m[ıi]\s+yap[ıi]lacak|al[ıi]m[ıi]\s+olacak|personel\s+al[ıi]m[ıi]|personeli\s+al[ıi]m[ıi]|eleman\s+al[ıi]m[ıi]|görevlisi\s+aran[ıi]yor|ihtiyac[ıi]m[ıi]z|ihtiya[çc][ıi]m[ıi]z|istihdam|kontenjan|görevlendirilmek|çalışma\s+arkadaşları\s+aran|ekip\s+arkadaş)/;

@@ -3,7 +3,7 @@ import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable
 import { eq, desc, ilike, and, sql, asc, or, isNull, gt, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { onlineSockets } from "./chat";
-import { extractGender } from "../lib/job-parsing";
+import { extractGender, extractLocation, extractPhoneNumber } from "../lib/job-parsing";
 import { getBuiltinRegionalFilterTerms } from "../lib/location-terms";
 import bcrypt from "bcryptjs";
 
@@ -75,7 +75,6 @@ const BUILTIN_LOCATION_FILTER_TERMS: { province: string; term: string; display: 
   { province: "Kocaeli", term: "gebze osb", display: "Kocaeli / Gebze OSB" },
   { province: "Kocaeli", term: "gebze organize sanayi bölgesi", display: "Kocaeli / Gebze OSB" },
   { province: "Kocaeli", term: "tosb", display: "Kocaeli / TOSB" },
-  { province: "Kocaeli", term: "imes", display: "Kocaeli / Gebze / İMES" },
   { province: "Kocaeli", term: "imes osb", display: "Kocaeli / Gebze / İMES OSB" },
   { province: "Kocaeli", term: "gebkim", display: "Kocaeli / Gebkim" },
   { province: "Kocaeli", term: "gebkim osb", display: "Kocaeli / Gebkim OSB" },
@@ -957,9 +956,8 @@ function parseListingText(raw: string): Record<string, string> {
   const lines = text.split(/\n/);
 
   // ── Phone numbers ──────────────────────────────────────────────────────────
-  const phoneMatch = text.match(/(?:0|\+90)[\s\-]?(?:\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}|\d{3}[\s\-]?\d{7})/);
-  const rawPhone = phoneMatch?.[0]?.replace(/[\s\-\(\)]/g, "") ?? "";
-  const contactPhone = rawPhone ? rawPhone.replace(/^0/, "+90").replace(/^\+90(\d{10})$/, "+90$1") : "";
+  const rawPhone = extractPhoneNumber(text) ?? "";
+  const contactPhone = rawPhone ? rawPhone.replace(/^0/, "+90") : "";
   const applyUrl = contactPhone ? `tel:${contactPhone}` : "";
 
   // ── Contact name ───────────────────────────────────────────────────────────
@@ -1017,77 +1015,12 @@ function parseListingText(raw: string): Record<string, string> {
     }
   }
 
-  // ── City & District ────────────────────────────────────────────────────────
-  let city = "";
-  let district = "";
-
-  // Tokenize: split on spaces, slashes, commas, dashes, dots, parens, apostrophes
-  // Strip common Turkish case suffixes before lookup ('de, 'da, 'nde, 'nda, 'te, 'ta, 'e, 'a, 'in, 'ın etc.)
-  const TR_SUFFIX = /(?:['’`])?(?:de|da|te|ta|nde|nda|nte|nta|inda|ında|unda|ünde|ye|ya|ne|na|in|ın|un|ün|e|a|i|ı|u|ü|deki|daki|nin|nın|nun|nün|ler|lar|den|dan|ten|tan)$/i;
-  const tokens = text.split(/[\s\/,\-\.\(\)'’`]+/)
-    .filter(t => t.length >= 2)
-    .map(t => t.replace(TR_SUFFIX, "").trim())
-    .filter(t => t.length >= 3);
-
-  // 0) Explicit labeled district: "İlçe: Kadıköy", "Semt: Beşiktaş", "Bölge: ..."
-  const labeledDistrict = text.match(/(?:ilçe|semt|mahalle)\s*[:\-]?\s*([A-ZÇĞİÖŞÜa-zçğışöüİ]{3,30})/i);
-  if (labeledDistrict?.[1]) {
-    const n = normalizeForLookup(labeledDistrict[1].split(/[\s,]/)[0]!);
-    if (DISTRICT_TO_CITY[n]) { district = DISTRICT_TO_CITY[n]!.district; city = DISTRICT_TO_CITY[n]!.city; }
-  }
-
-  // 1) Check "district/city" or "district-city" slash patterns
-  const slashPattern = /([A-ZÇĞİÖŞÜa-zçğışöüİ]{3,})[\/\-]([A-ZÇĞİÖŞÜa-zçğışöüİ]{3,})/g;
-  let sm: RegExpExecArray | null;
-  while ((sm = slashPattern.exec(text)) !== null && !city) {
-    const a = normalizeForLookup(sm[1]!);
-    const b = normalizeForLookup(sm[2]!);
-    const da = DISTRICT_TO_CITY[a];
-    const db_entry = DISTRICT_TO_CITY[b];
-    const ca = TR_CITIES[a];
-    const cb = TR_CITIES[b];
-    if (da && cb && da.city === TR_CITIES[b] || da && !cb) {
-      district = da.district; city = da.city;
-    } else if (db_entry && ca && db_entry.city === TR_CITIES[a] || db_entry && !ca) {
-      district = db_entry.district; city = db_entry.city;
-    } else if (ca) {
-      city = ca;
-    } else if (cb) {
-      city = cb;
-    }
-  }
-
-  // 2) Labeled city patterns: "İl: İstanbul", "Şehir: Ankara", "Konum: ..." etc.
-  if (!city) {
-    const labeled = text.match(/(?:il|şehir|konum|lokasyon|bölge)\s*[:\-]?\s*([A-ZÇĞİÖŞÜa-zçğışöüİ]{3,30})/i);
-    if (labeled?.[1]) {
-      const n = normalizeForLookup(labeled[1].split(/[\s,]/)[0]!);
-      if (TR_CITIES[n]) city = TR_CITIES[n]!;
-      else if (DISTRICT_TO_CITY[n]) { city = DISTRICT_TO_CITY[n]!.city; if (!district) district = DISTRICT_TO_CITY[n]!.district; }
-    }
-  }
-
-  // 3) Scan every token: district first (more specific), then city
-  const DIRECT_SUFFIX = /(?:de|da|te|ta|ye|ya|ne|na|nde|nda|den|dan|ten|tan|deki|daki|ler|lar|in|ın|un|ün)$/i;
-  for (const tok of tokens) {
-    const n = normalizeForLookup(tok);
-    const n2 = n.replace(DIRECT_SUFFIX, "");
-    for (const candidate of n === n2 ? [n] : [n, n2]) {
-      if (!district && DISTRICT_TO_CITY[candidate]) {
-        district = DISTRICT_TO_CITY[candidate]!.district;
-        if (!city) city = DISTRICT_TO_CITY[candidate]!.city;
-      }
-      if (!city && TR_CITIES[candidate]) city = TR_CITIES[candidate]!;
-      if (city && district) break;
-    }
-    if (city && district) break;
-  }
-
-  // 4) If district found but city still missing, derive from district map
-  if (district && !city) {
-    const n = normalizeForLookup(district);
-    if (DISTRICT_TO_CITY[n]) city = DISTRICT_TO_CITY[n]!.city;
-  }
+  // ── City & District (ortak akıllı konum çıkarımı) ───────────────────────────
+  const location = extractLocation(text);
+  let city = location.city ?? "";
+  let district = location.district ?? location.neighborhood ?? "";
+  // display varsa city alanına tam lokasyon yaz (ilan kartında görünsün)
+  if (location.display) city = location.display;
 
   // ── Salary ─────────────────────────────────────────────────────────────────
   let salary = "";

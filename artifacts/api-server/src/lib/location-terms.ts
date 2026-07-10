@@ -128,8 +128,10 @@ export const REGIONAL_LOCATION_KEYWORDS: Record<string, ProvinceKeywords> = {
       kw("masko", "İstanbul / Başakşehir / MASKO", "Başakşehir", "MASKO"),
       kw("modoko", "İstanbul / Ümraniye / Modoko", "Ümraniye", "Modoko"),
       kw("perpa", "İstanbul / Şişli / Perpa", "Şişli", "Perpa"),
-      kw("imes", "İstanbul / Sancaktepe / İMES", "Sancaktepe", "İMES"),
-      kw("des", "İstanbul / Ümraniye / DES", "Ümraniye", "DES"),
+      kw("imes sancaktepe", "İstanbul / Sancaktepe / İMES", "Sancaktepe", "İMES"),
+      kw("sancaktepe imes", "İstanbul / Sancaktepe / İMES", "Sancaktepe", "İMES"),
+      kw("des osb", "İstanbul / Ümraniye / DES", "Ümraniye", "DES"),
+      kw("ümraniye des", "İstanbul / Ümraniye / DES", "Ümraniye", "DES"),
       kw("kadosan", "İstanbul / Ümraniye / Kadosan", "Ümraniye", "Kadosan"),
       kw("beysan", "İstanbul / Ümraniye / Beysan", "Ümraniye", "Beysan"),
       kw("mermerciler", "İstanbul / Beylikdüzü / Mermerciler", "Beylikdüzü", "Mermerciler"),
@@ -413,10 +415,15 @@ export function getSupplementalDistricts(): Record<string, { city: string; distr
 }
 
 export function textMatchesProvince(text: string, province: string): boolean {
-  const plain = text.toLocaleLowerCase("tr-TR");
   const asciiPlain = asciiKey(text);
   return getProvinceMatchTerms(province).some(term => {
-    const t = term.toLocaleLowerCase("tr-TR");
-    return plain.includes(t) || asciiPlain.includes(asciiKey(t));
+    const needle = asciiKey(term);
+    if (!needle || needle.length < 3) return false;
+    // Kısa terimler alt string olmasın (des ⊂ adres)
+    if (needle.length < 5) {
+      const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(asciiPlain);
+    }
+    return asciiPlain.includes(needle);
   });
 }

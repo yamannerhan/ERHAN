@@ -6,7 +6,7 @@ import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
-import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractSalary, extractTitle, extractWorkType } from "../lib/job-parsing";
+import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumber, extractSalary, extractTitle, extractWorkType } from "../lib/job-parsing";
 import { getRegionalDistrictProvinces } from "../lib/location-terms";
 
 // ── Listing image upload setup ──────────────────────────────────────────────
@@ -77,9 +77,9 @@ const DISTRICT_PROVINCES: Record<string, string> = {
 [
   "körfez", "korfez", "derince", "gölcük", "golcuk", "başiskele", "basiskele", "kandıra", "kandira", "kartepe", "değirmendere", "degirmendere",
   "hereke", "yarımca", "yarimca", "tütünçiftlik", "tutunciftlik", "kirazlıyalı", "kirazliyali", "yenikent", "maşukiye", "masukiye", "uzuntarla",
-  "köseköy", "kosekoy", "bahçecik", "bahcecik", "yahyakaptan", "alikahya", "kuruçeşme", "kurucesme", "bekirdere", "karabaş", "karabas", "veliahmet",
-  "plajyolu", "esentepe", "tatlıkuyu", "tatlikuyu", "mustafapaşa", "mustafapasa", "osmangazi", "mimar sinan", "şekerpınar", "sekerpinar", "gosb",
-  "gebze osb", "gebze organize sanayi bölgesi", "tosb", "imes", "imes osb", "gebkim", "gebkim osb", "taysad", "güzeller", "guzeller", "dilovası osb",
+  "köseköy", "kosekoy", "bahçecik", "bahcecik", "yahyakaptan", "alikahya", "bekirdere", "karabaş", "karabas", "veliahmet",
+  "plajyolu", "tatlıkuyu", "tatlikuyu", "mustafapaşa", "mustafapasa", "mimar sinan", "şekerpınar", "sekerpinar", "gosb",
+  "gebze osb", "gebze organize sanayi bölgesi", "tosb", "imes osb", "gebkim", "gebkim osb", "taysad", "güzeller", "guzeller", "dilovası osb",
   "dilovasi osb", "kimya osb", "plastikçiler osb", "plastikciler osb", "makine ihtisas osb", "asım kibar osb", "asim kibar osb", "kobi osb",
   "demirciler osb", "kömürcüler osb", "komurculer osb", "kartepe karma osb", "başiskele osb", "basiskele osb", "pelitli", "balçık", "balcik",
   "tepecik", "muallimköy", "muallimkoy", "köseler", "koseler", "cumhuriyet mahallesi", "derince liman", "evyapport", "safiport", "ford otosan",
@@ -123,17 +123,28 @@ function normalizedColumn(column: unknown) {
 
 function locationTermCondition(pattern: string) {
   const variants = locationSearchVariants(pattern);
-  return or(...variants.flatMap(variant => [
-    ilike(listingsTable.city, `%${variant}%`),
-    ilike(listingsTable.title, `%${variant}%`),
-    ilike(listingsTable.description, `%${variant}%`),
-    sql`${normalizedColumn(listingsTable.city)} like ${`%${normalizeCityText(variant)}%`}`,
-    sql`${normalizedColumn(listingsTable.title)} like ${`%${normalizeCityText(variant)}%`}`,
-    sql`${normalizedColumn(listingsTable.description)} like ${`%${normalizeCityText(variant)}%`}`,
-    sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${normalizeCityText(variant).replace(/\s+/g, "")}%`}`,
-    sql`replace(${normalizedColumn(listingsTable.title)}, ' ', '') like ${`%${normalizeCityText(variant).replace(/\s+/g, "")}%`}`,
-    sql`replace(${normalizedColumn(listingsTable.description)}, ' ', '') like ${`%${normalizeCityText(variant).replace(/\s+/g, "")}%`}`,
-  ]));
+  // Kısa terimler (des, imes…) açıklamada "adres" gibi kelimelere yanlış denk gelmesin — sadece city alanında ara
+  const compactLen = normalizeCityText(pattern).replace(/\s+/g, "").length;
+  const cityOnly = compactLen < 5;
+  return or(...variants.flatMap(variant => {
+    const norm = normalizeCityText(variant);
+    const compact = norm.replace(/\s+/g, "");
+    const cityConds = [
+      ilike(listingsTable.city, `%${variant}%`),
+      sql`${normalizedColumn(listingsTable.city)} like ${`%${norm}%`}`,
+      sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${compact}%`}`,
+    ];
+    if (cityOnly) return cityConds;
+    return [
+      ...cityConds,
+      ilike(listingsTable.title, `%${variant}%`),
+      ilike(listingsTable.description, `%${variant}%`),
+      sql`${normalizedColumn(listingsTable.title)} like ${`%${norm}%`}`,
+      sql`${normalizedColumn(listingsTable.description)} like ${`%${norm}%`}`,
+      sql`replace(${normalizedColumn(listingsTable.title)}, ' ', '') like ${`%${compact}%`}`,
+      sql`replace(${normalizedColumn(listingsTable.description)}, ' ', '') like ${`%${compact}%`}`,
+    ];
+  }));
 }
 
 function extractProvinceName(value: string | null): string | null {
@@ -369,11 +380,11 @@ router.post("/listings/parse", authMiddleware, async (req, res): Promise<void> =
   const benefits = extractBenefits(text);
   const title = extractTitle(text);
   const salary = extractSalary(text);
-  const phone = text.match(/(?:0|\+90)?5[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2}/)?.[0]?.replace(/[\s\-]/g, "") ?? "";
+  const phone = extractPhoneNumber(text) ?? "";
   res.json({
     title,
     company: extractCompany(text, "Belirtilmedi"),
-    city: location.city ?? "Türkiye",
+    city: location.display ?? location.city ?? "Türkiye",
     district: location.district ?? location.neighborhood ?? "",
     workType: extractWorkType(text),
     salary: salary ?? "",
@@ -382,7 +393,7 @@ router.post("/listings/parse", authMiddleware, async (req, res): Promise<void> =
     description: text.trim(),
     contactPhone: phone,
     contactName: "",
-    applyUrl: phone ? `tel:${phone.startsWith("0") ? phone : `0${phone.replace(/^\+90/, "")}`}` : "",
+    applyUrl: phone ? `tel:${phone}` : "",
     requirements: buildListingRequirements({ gender, location, benefits, source: "Kullanıcı ilanı" }),
     companyLogoUrl: createSmartListingImage(text, title),
   });
@@ -401,21 +412,6 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
 
   if (!title || !company || !city) {
     res.status(400).json({ error: "Başlık, firma ve şehir zorunludur" });
-    return;
-  }
-
-  // Aynı başlıklı ilan son 7 gün içinde yayınlanmış mı?
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [dup] = await db.select({ id: listingsTable.id, company: listingsTable.company })
-    .from(listingsTable)
-    .where(and(
-      ilike(listingsTable.title, title.trim()),
-      eq(listingsTable.status, "active"),
-      sql`${listingsTable.createdAt} > ${sevenDaysAgo}`,
-    ))
-    .limit(1);
-  if (dup) {
-    res.status(409).json({ error: `"${title.trim()}" başlıklı bir ilan son 7 gün içinde zaten yayınlandı. Aynı başlıklı ilan 7 gün geçmeden tekrar eklenemez.` });
     return;
   }
 

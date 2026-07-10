@@ -4,7 +4,7 @@ import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { fetchWhatsAppMessages, isWhatsAppReady } from "../services/whatsapp-client";
-import { extractSalary, extractGender, extractLocation, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
@@ -30,12 +30,7 @@ function normalizeText(text: string): string {
 }
 
 function extractPhone(text: string): string | null {
-  // Match Turkish mobile numbers with or without separators, with or without leading 0/+90
-  const m = text.match(/(?:\+90|0)[\s\-.]?5\d{2}[\s\-.]?\d{3}[\s\-.]?\d{2}[\s\-.]?\d{2}|(?<!\d)5\d{9}(?!\d)/);
-  if (!m) return null;
-  const digits = m[0].replace(/[\s\-.\(\)]/g, "");
-  // Normalize to 05XXXXXXXXX format
-  return digits.startsWith("+90") ? "0" + digits.slice(3) : digits.startsWith("0") ? digits : "0" + digits;
+  return extractPhoneNumber(text);
 }
 
 function extractContactName(text: string): string | null {
