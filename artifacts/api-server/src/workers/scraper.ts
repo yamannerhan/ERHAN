@@ -166,7 +166,7 @@ const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
 const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
-const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
+const STALE_SCAN_LOCK_MS = 3 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
 const WA_MESSAGE_PROCESS_DELAY_MS = 200;
 const WA_GROUP_GAP_MS = 12_000;
@@ -1008,12 +1008,27 @@ function pickNextTelegramSource(
   return active[0] ?? null;
 }
 
+function scheduleNextTelegramCycle(hasActiveTelegram: boolean, delayMs = INITIAL_BACKFILL_INTERVAL_MS): void {
+  void hasIncompleteInitialScan().then((incomplete) => {
+    if (incomplete) {
+      setTimeout(() => {
+        void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
+      }, delayMs);
+    } else if (hasActiveTelegram) {
+      setTimeout(() => {
+        void runScraperCycle(true).catch((e) => logger.error(e, "scraper: incremental chain error"));
+      }, INCREMENTAL_SOURCE_GAP_MS);
+    }
+  }).catch(() => {});
+}
+
 async function scanTelegramSources(
   telegramSources: Array<typeof sourcesTable.$inferSelect>,
   _force: boolean,
 ): Promise<void> {
   await releaseStaleScanLocks();
   const now = new Date();
+  const hasActive = telegramSources.some(s => s.active);
 
   const target = pickNextTelegramSource(telegramSources);
   if (!target) return;
@@ -1028,7 +1043,9 @@ async function scanTelegramSources(
   if (!fresh?.active) return;
 
   if (fresh.isScanning) {
-    logger.info(`scraper: kaynak #${fresh.id} "${fresh.name}" kilitli, atlanıyor`);
+    logger.info(`scraper: kaynak #${fresh.id} "${fresh.name}" kilitli — zincir devam (başka döngü bitince)`);
+    // Önceki döngü hâlâ çalışıyor olabilir; kilidi bırakıp zinciri KESME (takılma sebebi buydu)
+    scheduleNextTelegramCycle(hasActive, 8_000);
     return;
   }
 
@@ -1041,7 +1058,10 @@ async function scanTelegramSources(
   );
 
   const locked = await acquireSourceScanLock(fresh.id);
-  if (!locked) return;
+  if (!locked) {
+    scheduleNextTelegramCycle(hasActive, 8_000);
+    return;
+  }
 
   let cycleAdded = 0;
   let cycleErrors = 0;
@@ -1074,15 +1094,7 @@ async function scanTelegramSources(
     effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
   });
 
-  if (await hasIncompleteInitialScan()) {
-    setTimeout(() => {
-      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
-    }, INITIAL_BACKFILL_INTERVAL_MS);
-  } else if (telegramSources.some(s => s.active)) {
-    setTimeout(() => {
-      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: incremental chain error"));
-    }, INCREMENTAL_SOURCE_GAP_MS);
-  }
+  scheduleNextTelegramCycle(hasActive);
 }
 
 async function publishElemanJob(
@@ -1613,7 +1625,7 @@ async function resetWhatsAppSourceState(sourceId: number): Promise<void> {
 }
 
 /** WhatsApp ilanlarını sil + 30 gün temiz tarama (Telegram Botları Sıfırla gibi). */
-export async function resetAllWhatsAppSources(): Promise<{ deletedListings: number; pendingGroups: number }> {
+export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; pendingGroups: number }> {
   waScanGeneration++;
   waSequentialRunning = false;
 
@@ -1637,7 +1649,7 @@ export async function resetAllWhatsAppSources(): Promise<{ deletedListings: numb
 
   logger.info({ deletedListings, groups: waSources.length }, "scraper: WhatsApp sıfırlandı, 30 gün tarama başlıyor");
 
-  if (isWhatsAppReady() && waSources.some((s) => s.active)) {
+  if (!opts?.deferRescan && isWhatsAppReady() && waSources.some((s) => s.active)) {
     void runWhatsAppSequentialDeepScan();
   }
 
@@ -1804,7 +1816,7 @@ export async function triggerElemanScan(): Promise<{ sourceId: number; created: 
   return { sourceId: source.id, created };
 }
 
-export async function resetAllElemanSources(): Promise<{ deletedListings: number; sources: number }> {
+export async function resetAllElemanSources(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; sources: number }> {
   let elemanSources = await db.select().from(sourcesTable)
     .where(eq(sourcesTable.platform, "eleman"));
 
@@ -1867,7 +1879,9 @@ export async function resetAllElemanSources(): Promise<{ deletedListings: number
   }
 
   logger.info({ deletedListings, sources: elemanSources.length }, "scraper: Eleman.net sıfırlandı, ilk tarama başlıyor");
-  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net sıfırlama tarama hatası"));
+  if (!opts?.deferRescan) {
+    void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net sıfırlama tarama hatası"));
+  }
   return { deletedListings, sources: elemanSources.length };
 }
 
@@ -2019,7 +2033,7 @@ export async function expireImportedListings(): Promise<number> {
 }
 
 /** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */
-export async function resetAllTelegramBots(): Promise<{ deletedListings: number }> {
+export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
   const telegramSources = await db.select().from(sourcesTable).where(eq(sourcesTable.platform, "telegram"));
@@ -2063,8 +2077,62 @@ export async function resetAllTelegramBots(): Promise<{ deletedListings: number 
 
   logger.info({ sources: telegramSources.length, deletedListings: totalDeleted }, "scraper: tüm botlar sıfırlandı");
   await refreshScraperInterval();
-  await triggerRescan();
+  if (!opts?.deferRescan) await triggerRescan();
   return { deletedListings: totalDeleted };
+}
+
+/**
+ * Telegram + WhatsApp + Eleman.net: sırayla ilanları sil, imleçleri sıfırla, yeniden tara.
+ * WA bağlı değilse atlanır (oturumu bozmaz).
+ */
+export async function resetAllBotsAndRescan(): Promise<{
+  telegramDeleted: number;
+  whatsappDeleted: number;
+  elemanDeleted: number;
+  whatsappSkipped: boolean;
+  message: string;
+}> {
+  await releaseStaleScanLocks(true);
+
+  logger.info("scraper: TÜM BOTLAR sıfırlama başlıyor (TG → WA → Eleman)");
+
+  // Önce hepsini sil/sıfırla (tarama tetiklemeden), sonra sırayla başlat
+  const tg = await resetAllTelegramBots({ deferRescan: true });
+
+  let whatsappDeleted = 0;
+  let whatsappSkipped = true;
+  if (isWhatsAppReady()) {
+    whatsappSkipped = false;
+    const wa = await resetAllWhatsAppSources({ deferRescan: true });
+    whatsappDeleted = wa.deletedListings;
+  } else {
+    logger.warn("scraper: WhatsApp bağlı değil — WA sıfırlama atlandı (oturum korunur)");
+  }
+
+  const el = await resetAllElemanSources({ deferRescan: true });
+
+  // Sıra: Telegram → WhatsApp → Eleman.net
+  await triggerRescan();
+  if (!whatsappSkipped) {
+    void runWhatsAppSequentialDeepScan();
+  }
+  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net global reset tarama hatası"));
+
+  const parts = [
+    `Telegram: ${tg.deletedListings} ilan silindi, yeniden taranıyor`,
+    whatsappSkipped
+      ? "WhatsApp: bağlı değil (önce QR ile bağlanın)"
+      : `WhatsApp: ${whatsappDeleted} ilan silindi, 30 gün taranıyor`,
+    `Eleman.net: ${el.deletedListings} ilan silindi, iller taranıyor (telefon zorunlu)`,
+  ];
+
+  return {
+    telegramDeleted: tg.deletedListings,
+    whatsappDeleted,
+    elemanDeleted: el.deletedListings,
+    whatsappSkipped,
+    message: parts.join(". ") + ".",
+  };
 }
 
 /** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */

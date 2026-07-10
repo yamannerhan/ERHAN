@@ -11,6 +11,11 @@ let starting = false;
 let pendingPhone: string | null = null;
 let ClientCtor: any = null;
 let LocalAuthCtor: any = null;
+/** Admin «Bağlantıyı Kes» — otomatik yeniden bağlanma yapma */
+let manualStop = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 
@@ -100,31 +105,103 @@ function attachHandlers(c: any): void {
     pairingCode = null;
     pendingPhone = null;
     lastError = null;
+    reconnectAttempts = 0;
+    manualStop = false;
+    startWhatsAppWatchdog();
   });
 
   c.on("disconnected", (reason: string) => {
     logger.warn(`wa: disconnected - ${reason}`);
     isReady = false;
+    stopWhatsAppWatchdog();
+    const old = client;
     client = null;
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Bağlantı koptu: ${reason}`;
+    try { void old?.destroy?.(); } catch { /* ignore */ }
+    scheduleWhatsAppReconnect(reason);
   });
 
   c.on("auth_failure", (msg: string) => {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
+    stopWhatsAppWatchdog();
     client = null;
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Kimlik doğrulama hatası: ${msg}`;
+    // Auth failure: oturum bozulmuş olabilir — otomatik deneme sınırlı
+    if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
   });
+}
+
+function scheduleWhatsAppReconnect(reason: string): void {
+  if (manualStop) return;
+  if (reconnectTimer) return;
+  reconnectAttempts++;
+  if (reconnectAttempts > 8) {
+    lastError = `WhatsApp tekrar bağlanamadı (${reason}). Admin panelinden QR/onay ile bağlanın.`;
+    logger.error({ reason, reconnectAttempts }, "wa: reconnect vazgeçildi");
+    return;
+  }
+  const delay = Math.min(60_000, 5_000 * reconnectAttempts);
+  logger.info({ reason, delay, reconnectAttempts }, "wa: otomatik yeniden bağlanma planlandı");
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (manualStop || isReady) return;
+    void startWhatsAppClient().catch((e) => {
+      logger.warn({ err: e }, "wa: auto-reconnect failed");
+      scheduleWhatsAppReconnect("retry");
+    });
+  }, delay);
+}
+
+function startWhatsAppWatchdog(): void {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    if (manualStop || !client) return;
+    try {
+      const browser = (client as { pupBrowser?: { isConnected?: () => boolean } }).pupBrowser;
+      if (browser && typeof browser.isConnected === "function" && !browser.isConnected()) {
+        logger.warn("wa: Chromium bağlantısı koptu — yeniden bağlanılıyor");
+        isReady = false;
+        stopWhatsAppWatchdog();
+        const old = client;
+        client = null;
+        try { void old?.destroy?.(); } catch { /* ignore */ }
+        scheduleWhatsAppReconnect("browser_disconnected");
+        return;
+      }
+      // Hafif canlı tutma: Store erişimi (oturumu uyutmaz)
+      const page = (client as { pupPage?: { evaluate?: (fn: () => unknown) => Promise<unknown> } }).pupPage;
+      if (page?.evaluate) {
+        void page.evaluate(() => {
+          try {
+            return typeof (window as unknown as { Store?: unknown }).Store !== "undefined";
+          } catch {
+            return false;
+          }
+        }).catch(() => { /* ignore transient */ });
+      }
+    } catch (e) {
+      logger.warn({ err: e }, "wa: watchdog kontrolü başarısız");
+    }
+  }, 45_000);
+}
+
+function stopWhatsAppWatchdog(): void {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
 }
 
 export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Promise<void> {
   if (isReady && client) return;
   if (starting) return;
   starting = true;
+  manualStop = false;
   lastError = null;
   qrDataUrl = null;
   pairingCode = null;
@@ -155,15 +232,15 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
-          "--disable-software-rasterizer",
           "--no-first-run",
           "--no-default-browser-check",
           "--disable-extensions",
-          "--disable-background-networking",
           "--mute-audio",
-          "--single-process",
+          // --single-process kaldırıldı: Chromium sık düşüyordu
         ],
       },
+      // Bağlantı kopmalarında wwebjs'in kendi yeniden denemesi
+      restartOnAuthFail: false,
     };
 
     if (pendingPhone) {
@@ -247,7 +324,17 @@ export function getWhatsAppStatus() {
 }
 
 export async function stopWhatsAppClient(): Promise<void> {
-  if (!client) return;
+  manualStop = true;
+  stopWhatsAppWatchdog();
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempts = 0;
+  if (!client) {
+    isReady = false;
+    return;
+  }
   try {
     await client.destroy();
   } catch { /* ignore */ }

@@ -145,7 +145,10 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
   const phone = extractPhoneNumber(`${description}\n${title}`);
   // Detayda numara yoksa HTML'in ilgili kısmından dene (footer/script hariç kısaltılmış)
   const phoneFallback = phone || extractPhoneNumber(html.slice(0, 60_000));
-  if (!phoneFallback) return null;
+  if (!phoneFallback) {
+    logger.info({ id: item.id, title }, "eleman: telefon yok — ilan çekilmedi");
+    return null;
+  }
 
   const rawText = [title, companyName, description, `Telefon: ${phoneFallback}`]
     .filter(Boolean)

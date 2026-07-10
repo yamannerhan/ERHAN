@@ -1491,6 +1491,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   };
 
   const [resetting, setResetting] = useState(false);
+  const [resettingAll, setResettingAll] = useState(false);
   const [deepRescanning, setDeepRescanning] = useState(false);
   const [reparsing, setReparsing] = useState(false);
   const [deduping, setDeduping] = useState(false);
@@ -1508,14 +1509,30 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   };
 
   const resetBots = async () => {
-    if (!confirm("Tüm bot ilanları silinecek ve gruplar sırayla %1→%100 30 gün taranacak. Devam?")) return;
+    if (!confirm("Tüm Telegram bot ilanları silinecek ve gruplar sırayla %1→%100 30 gün taranacak. Devam?")) return;
     setResetting(true);
     try {
       const r = await apiCall("/admin/sources/reset", "POST") as { message?: string };
-      toast({ title: "Botlar sıfırlandı", description: r.message ?? "Yeniden tarama başlatıldı." });
+      toast({ title: "Telegram botları sıfırlandı", description: r.message ?? "Yeniden tarama başlatıldı." });
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
     finally { setResetting(false); }
+  };
+
+  const resetAllPlatformBots = async () => {
+    if (!confirm(
+      "TÜM BOTLAR sıfırlanacak (Telegram + WhatsApp + Eleman.net):\n" +
+      "• Geçmiş ilanlar silinir\n" +
+      "• Sırayla yeniden taranır\n" +
+      "• Eleman.net: sadece telefonlu özel güvenlik\n\nDevam?",
+    )) return;
+    setResettingAll(true);
+    try {
+      const r = await apiCall("/admin/bots/reset-all", "POST") as { message?: string };
+      toast({ title: "Tüm botlar sıfırlandı", description: r.message ?? "Yeniden tarama başladı." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setResettingAll(false); }
   };
 
   const deepRescan30Days = async () => {
@@ -1591,12 +1608,26 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </p>
       </div>
 
+      <div className="mb-3">
+        <button
+          onClick={() => void resetAllPlatformBots()}
+          disabled={resettingAll || resetting}
+          className="w-full flex items-center justify-center gap-2 text-sm px-4 py-3 bg-rose-600/90 text-white rounded-xl hover:bg-rose-500 transition-colors disabled:opacity-50 font-bold shadow-lg shadow-rose-900/30"
+        >
+          <RefreshCw className={`w-4 h-4 ${resettingAll ? "animate-spin" : ""}`} />
+          {resettingAll ? "Tüm botlar sıfırlanıyor…" : "Tüm Botları Sıfırla ve Yeniden Tara"}
+        </button>
+        <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+          Telegram → WhatsApp → Eleman.net sırasıyla ilanları siler ve yeniden tarar
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
         <button onClick={deepRescan30Days} disabled={deepRescanning} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${deepRescanning ? "animate-spin" : ""}`} /> {deepRescanning ? "Taranıyor…" : "30 Gün Yeniden Tara"}
         </button>
-        <button onClick={resetBots} disabled={resetting} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50">
-          <RefreshCw className={`w-3.5 h-3.5 ${resetting ? "animate-spin" : ""}`} /> {resetting ? "Sıfırlanıyor…" : "Botları Sıfırla"}
+        <button onClick={resetBots} disabled={resetting || resettingAll} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50">
+          <RefreshCw className={`w-3.5 h-3.5 ${resetting ? "animate-spin" : ""}`} /> {resetting ? "Sıfırlanıyor…" : "Telegram Sıfırla"}
         </button>
         <button onClick={dedupeListings} disabled={deduping} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-rose-500/15 text-rose-300 rounded-lg hover:bg-rose-500/25 transition-colors disabled:opacity-50">
           <Trash2 className={`w-3.5 h-3.5 ${deduping ? "animate-pulse" : ""}`} /> {deduping ? "Temizleniyor…" : "Çift İlanları Temizle"}
@@ -1606,7 +1637,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>30 Gün Yeniden Tara:</strong> kaynakları 30 gün geriye tarar (ilanlar silinmez). <strong>Botları Sıfırla:</strong> bot ilanlarını siler, sırayla yeniden tarar. <strong>Çift İlanları Temizle:</strong> aynı içerikli kopyaları siler. <strong>Yeniden Kontrol Et:</strong> maaş/cinsiyet bilgisini doldurur.
+        <strong>Tüm Botları Sıfırla:</strong> TG + WA + Eleman geçmiş ilanları siler, sırayla yeniden tarar. <strong>Telegram Sıfırla:</strong> sadece Telegram. <strong>30 Gün Yeniden Tara:</strong> ilan silmeden geriye tarar.
       </p>
 
       <div className="flex justify-between items-center mb-3">
