@@ -756,14 +756,14 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
         if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
-        if (!(await ensureTelegramConnected(2))) {
+        if (!(await ensureTelegramConnected(5))) {
           await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
           return stats;
         }
         throw e;
       }
 
-      if (result.messages.length === 0 && !(await ensureTelegramConnected(1))) {
+      if (result.notConnected || (result.messages.length === 0 && !(await ensureTelegramConnected(5)))) {
         await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
         return stats;
       }
@@ -862,6 +862,10 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     const result = await fetchWithReconnect(username, fetchOpts);
     messages = result.messages;
     noMoreMessages = result.noMoreMessages;
+    if (result.notConnected) {
+      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+      return stats;
+    }
     if (isInitialScan && phase === "forward") {
       anchorId = parseInt(source.initialScanAnchorId ?? "0", 10) || anchorId;
       topId = parseInt(source.initialScanTopId ?? "0", 10) || topId;
@@ -869,14 +873,14 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
-    if (!(await ensureTelegramConnected(2))) {
+    if (!(await ensureTelegramConnected(5))) {
       await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
       return stats;
     }
     throw e;
   }
 
-  if (messages.length === 0 && !(await ensureTelegramConnected(1)) && isInitialScan) {
+  if (messages.length === 0 && isInitialScan && !(await ensureTelegramConnected(5))) {
     await patchSourceProgress(source.id, {
       lastCheckedAt: new Date(),
       lastError: CONNECTION_ERR,
@@ -1542,7 +1546,7 @@ async function scheduleScraperInterval(): Promise<void> {
 
 export function startScraperWorker(): void {
   void releaseStaleScanLocks(true);
-  void ensureTelegramConnected().then((ok) => {
+  void ensureTelegramConnected(5).then((ok) => {
     logger.info(`scraper: GramJS ${ok ? "bağlı" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
   });
   const mode = isClientConnected()
@@ -1555,7 +1559,7 @@ export function startScraperWorker(): void {
   void refreshScraperInterval();
 
   setInterval(() => {
-    if (!isClientConnected()) void ensureTelegramConnected(2).catch(() => {});
+    if (!isClientConnected()) void ensureTelegramConnected(5).catch(() => {});
   }, 5 * 60 * 1000);
 
   if (isBotTokenSet()) {

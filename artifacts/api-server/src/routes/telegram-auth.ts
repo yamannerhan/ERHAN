@@ -17,7 +17,7 @@ router.get("/admin/telegram/status", authMiddleware, requireAdmin, async (_req, 
 });
 
 router.post("/admin/telegram/reconnect", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
-  const connected = await ensureTelegramConnected();
+  const connected = await ensureTelegramConnected(5);
   if (connected) {
     res.json({ ok: true, connected: true, message: "Telegram oturumu yeniden bağlandı." });
     return;

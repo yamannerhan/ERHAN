@@ -1,6 +1,7 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { Api } from "telegram/tl";
+import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { telegramSessionsTable } from "@workspace/db/schema";
 import { logger } from "../lib/logger";
@@ -28,6 +29,8 @@ let client: TelegramClient | null = null;
 let currentState: AuthState = "disconnected";
 let currentPhone: string | null = null;
 let phoneCodeHash: string | null = null;
+/** startAuth sırasında eski oturum string'i — yarım kalan girişte geri dönmek için */
+let previousSessionString: string | null = null;
 
 async function getSessionRow() {
   const rows = await db.select().from(telegramSessionsTable).limit(1);
@@ -37,7 +40,9 @@ async function getSessionRow() {
 async function saveSession(patch: Partial<typeof telegramSessionsTable.$inferInsert>) {
   const row = await getSessionRow();
   if (row) {
-    await db.update(telegramSessionsTable).set({ ...patch, updatedAt: new Date() });
+    await db.update(telegramSessionsTable)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(telegramSessionsTable.id, row.id));
   } else {
     await db.insert(telegramSessionsTable).values({
       authState: "disconnected",
@@ -46,14 +51,22 @@ async function saveSession(patch: Partial<typeof telegramSessionsTable.$inferIns
   }
 }
 
-function buildClient(sessionStr = "") {
+function isSessionDeadError(err: unknown): boolean {
+  const msg = String(
+    (err as { errorMessage?: string })?.errorMessage
+      ?? (err instanceof Error ? err.message : err),
+  );
+  return /AUTH_KEY_UNREGISTERED|SESSION_REVOKED|USER_DEACTIVATED|AUTH_KEY_INVALID|SESSION_EXPIRED|AUTH_KEY_DUPLICATED/i.test(msg);
+}
+
+function buildClient(sessionStr = "", useWSS = true) {
   return new TelegramClient(
     new StringSession(sessionStr),
     API_ID,
     API_HASH,
     {
-      connectionRetries: 3,
-      useWSS: false,
+      connectionRetries: 5,
+      useWSS,
       deviceModel: "Chrome",
       systemVersion: "Win32",
       appVersion: "1.0.0",
@@ -62,10 +75,42 @@ function buildClient(sessionStr = "") {
   );
 }
 
+/** WSS (varsayılan) → TCP yedek; Railway/proxy ortamlarında TCP bazen düşer. */
+async function connectClient(sessionStr: string): Promise<TelegramClient> {
+  const preferWss = process.env["TELEGRAM_USE_WSS"] !== "0";
+  const order = preferWss ? [true, false] : [false, true];
+  let lastErr: unknown;
+  for (const useWSS of order) {
+    const c = buildClient(sessionStr, useWSS);
+    try {
+      await c.connect();
+      return c;
+    } catch (e) {
+      lastErr = e;
+      logger.warn({ err: e, useWSS }, "telegram-client: connect failed, trying fallback");
+      try { await c.disconnect(); } catch { /* ignore */ }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 async function restoreSessionFromDb(forceReconnect = false): Promise<boolean> {
   const row = await getSessionRow();
-  if (row?.authState !== "connected" || !row.sessionString) {
-    currentState = "disconnected";
+  // Yarım kalan giriş (awaiting_*) olsa bile session_string varsa geri yükle — ayarları silme
+  const sessionStr = row?.sessionString || previousSessionString;
+  if (!sessionStr) {
+    if (currentState !== "awaiting_code" && currentState !== "awaiting_password") {
+      currentState = "disconnected";
+    }
+    return false;
+  }
+
+  // Canlı kod/şifre bekleniyorsa eski oturumu üstüne yazma
+  if (
+    !forceReconnect
+    && client
+    && (currentState === "awaiting_code" || currentState === "awaiting_password")
+  ) {
     return false;
   }
 
@@ -82,18 +127,37 @@ async function restoreSessionFromDb(forceReconnect = false): Promise<boolean> {
     client = null;
   }
 
-  client = buildClient(row.sessionString);
-  await client.connect();
-  if (await client.isUserAuthorized()) {
-    currentState = "connected";
-    currentPhone = row.phone ?? null;
-    void onTelegramConnected();
-    return true;
+  try {
+    client = await connectClient(sessionStr);
+    if (await client.isUserAuthorized()) {
+      currentState = "connected";
+      currentPhone = row?.phone ?? currentPhone;
+      previousSessionString = null;
+      // authState awaiting_* kaldıysa connected'a çek (oturum string bozulmasın)
+      if (row && row.authState !== "connected") {
+        await saveSession({ authState: "connected", sessionString: sessionStr });
+      }
+      void onTelegramConnected();
+      return true;
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "telegram-client: restore connect/auth failed");
+    if (isSessionDeadError(e)) {
+      await saveSession({ authState: "disconnected", sessionString: null });
+      previousSessionString = null;
+    }
+    // Geçici hatalarda session_string'i SİLME — bir sonraki denemede tekrar dene
+    currentState = "disconnected";
+    client = null;
+    return false;
   }
 
+  // Yetkisiz ama oturum "ölü" değilse string'i koru
   currentState = "disconnected";
+  try { await client?.disconnect(); } catch { /* ignore */ }
   client = null;
-  await saveSession({ authState: "disconnected", sessionString: null });
+  await saveSession({ authState: "disconnected" });
+  logger.warn("telegram-client: oturum yetkisiz — session string korundu, yeniden giriş gerekebilir");
   return false;
 }
 
@@ -104,13 +168,19 @@ function startTelegramKeepalive(): void {
   if (keepaliveTimer) return;
   keepaliveTimer = setInterval(() => {
     void (async () => {
+      if (currentState !== "connected" && currentState !== "disconnected") return;
+      if (!client && currentState === "disconnected") {
+        await ensureTelegramConnected(3);
+        return;
+      }
       if (!client || currentState !== "connected") return;
       try {
         await client.invoke(new Api.updates.GetState());
       } catch (e) {
         logger.warn({ err: e }, "telegram-client: keepalive failed, reconnecting");
+        // Mutex üzerinden yeniden bağlan — Inner'ı bypass etme
         currentState = "disconnected";
-        await ensureTelegramConnectedInner(3);
+        await ensureTelegramConnected(5);
       }
     })();
   }, 45_000);
@@ -121,7 +191,10 @@ async function onTelegramConnected(): Promise<void> {
 }
 
 async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
-  if (!API_ID || !API_HASH) return false;
+  if (!API_ID || !API_HASH) {
+    logger.warn("telegram-client: API_ID or API_HASH not configured");
+    return false;
+  }
 
   for (let attempt = 0; attempt < retries; attempt++) {
     if (client && currentState === "connected") {
@@ -136,7 +209,7 @@ async function ensureTelegramConnectedInner(retries = 3): Promise<boolean> {
     }
 
     try {
-      if (await restoreSessionFromDb(attempt > 0)) {
+      if (await restoreSessionFromDb(attempt > 0 || currentState === "disconnected")) {
         void onTelegramConnected();
         if (attempt > 0) logger.info("telegram-client: oturum yeniden bağlandı");
         return true;
@@ -173,7 +246,9 @@ export async function initTelegramClient(): Promise<void> {
       logger.info("telegram-client: session restored, connected");
       return;
     }
-    currentState = "disconnected";
+    if (currentState !== "awaiting_code" && currentState !== "awaiting_password") {
+      currentState = "disconnected";
+    }
   } catch (e) {
     logger.warn({ err: e }, "telegram-client: failed to restore session");
     currentState = "disconnected";
@@ -187,8 +262,19 @@ export async function startAuth(phone: string): Promise<void> {
       "Telegram API bilgileri eksik. Railway Variables'a TELEGRAM_API_ID (sayı) ve TELEGRAM_API_HASH ekleyin. Alın: https://my.telegram.org/apps",
     );
   }
-  client = buildClient();
-  await client.connect();
+  // Eski oturumu silme — yarım girişte geri yüklenebilsin
+  const row = await getSessionRow();
+  if (row?.sessionString) previousSessionString = row.sessionString;
+  else if (client) {
+    try { previousSessionString = (client.session as StringSession).save(); } catch { /* ignore */ }
+  }
+
+  if (client) {
+    try { await client.disconnect(); } catch { /* ignore */ }
+    client = null;
+  }
+
+  client = await connectClient("");
   const result = await client.invoke(new Api.auth.SendCode({
     phoneNumber: phone,
     apiId: API_ID,
@@ -198,6 +284,7 @@ export async function startAuth(phone: string): Promise<void> {
   phoneCodeHash = (result as { phoneCodeHash: string }).phoneCodeHash;
   currentPhone = phone;
   currentState = "awaiting_code";
+  // sessionString'e dokunma — eski oturum DB'de kalsın
   await saveSession({ authState: "awaiting_code", phone, phoneCodeHash });
 }
 
@@ -211,7 +298,8 @@ export async function verifyCode(code: string): Promise<{ needs2FA: boolean }> {
     }));
     currentState = "connected";
     const sessionStr = (client.session as StringSession).save();
-    await saveSession({ authState: "connected", sessionString: sessionStr });
+    previousSessionString = null;
+    await saveSession({ authState: "connected", sessionString: sessionStr, phoneCodeHash: null });
     void onTelegramConnected();
     return { needs2FA: false };
   } catch (e: unknown) {
@@ -231,7 +319,8 @@ export async function verifyPassword(password: string): Promise<void> {
   await client.invoke(await (await import("telegram/Password")).computeCheck(pwdInfo, password));
   currentState = "connected";
   const sessionStr = (client.session as StringSession).save();
-  await saveSession({ authState: "connected", sessionString: sessionStr });
+  previousSessionString = null;
+  await saveSession({ authState: "connected", sessionString: sessionStr, phoneCodeHash: null });
   void onTelegramConnected();
 }
 
@@ -242,6 +331,7 @@ export async function logout(): Promise<void> {
   currentState = "disconnected";
   currentPhone = null;
   phoneCodeHash = null;
+  previousSessionString = null;
   await saveSession({ authState: "disconnected", sessionString: null, phone: null, phoneCodeHash: null });
 }
 
@@ -263,6 +353,8 @@ export interface FetchChannelResult {
   nextOffsetId: number;
   minIdInBatch: number;
   maxIdInBatch: number;
+  /** true = GramJS oturumu yok / bağlanılamadı (boş kanal ile karıştırma) */
+  notConnected?: boolean;
 }
 
 function mapGramMessage(username: string, m: { id: number; message?: string; date?: number }): ChannelMessage | null {
@@ -320,8 +412,10 @@ export async function fetchChannelMessages(
     messages: [], reachedCutoff: false, noMoreMessages: false,
     nextOffsetId: fallbackOffset, minIdInBatch: 0, maxIdInBatch: 0,
   };
-  const connected = await ensureTelegramConnected(2);
-  if (!connected || !client) return empty;
+  const connected = await ensureTelegramConnected(5);
+  if (!connected || !client) {
+    return { ...empty, notConnected: true };
+  }
 
   const minId = options.minMessageId ?? 0;
   const maxAgeDays = options.maxAgeDays ?? 30;
