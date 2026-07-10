@@ -12,13 +12,15 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ];
 
-function resolveChromePath(): string | undefined {
+function resolveChromePath() {
   const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
   if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
   for (const p of CHROME_CANDIDATES) {
     try {
       if (fs.existsSync(p)) return p;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return undefined;
 }
