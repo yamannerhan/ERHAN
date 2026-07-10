@@ -2,11 +2,12 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
 } from "../services/whatsapp-client";
+import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
 
 const router = Router();
 
@@ -72,7 +73,7 @@ router.post("/admin/sources", authMiddleware, requireAdmin, async (req, res): Pr
   };
 
   if (!name?.trim()) { res.status(400).json({ error: "Kaynak adı zorunlu" }); return; }
-  if (!platform || !["telegram", "facebook", "sahibinden", "secretcv", "kariyer", "iskur", "manual_admin"].includes(platform)) { res.status(400).json({ error: "Geçersiz platform" }); return; }
+  if (!platform || !["telegram", "facebook", "sahibinden", "secretcv", "kariyer", "iskur", "manual_admin", "whatsapp", "eleman"].includes(platform)) { res.status(400).json({ error: "Geçersiz platform" }); return; }
   if (!url?.trim()) { res.status(400).json({ error: "URL zorunlu" }); return; }
 
   const isTelegram = platform === "telegram";
@@ -407,6 +408,84 @@ router.post("/admin/whatsapp/sources/:id/reset", authMiddleware, requireAdmin, a
       success: true,
       deletedListings: result.deletedListings,
       message: `${result.deletedListings} ilan silindi. Bu grup 30 günden yeniden taranıyor.`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// ── Eleman.net ────────────────────────────────────────────────────
+router.get("/admin/eleman/status", authMiddleware, requireAdmin, async (_req, res) => {
+  const [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "eleman"))
+    .orderBy(desc(sourcesTable.createdAt))
+    .limit(1);
+
+  let listingCount = 0;
+  if (source) {
+    const [row] = await db.select({ c: count() })
+      .from(listingsTable)
+      .where(and(eq(listingsTable.sourceId, source.id), eq(listingsTable.status, "active")));
+    listingCount = row?.c ?? 0;
+  }
+
+  const cursor = parseElemanCursor(source?.initialScanOffsetId);
+  const currentCity = source && !source.initialScanDone
+    ? getElemanCityByIndex(cursor.cityIndex)
+    : null;
+
+  res.json({
+    configured: !!source,
+    cityCount: elemanCityCount(),
+    cities: ELEMAN_CITY_LIST.map((c) => c.name),
+    source: source ? {
+      id: source.id,
+      name: source.name,
+      active: source.active,
+      checkInterval: source.checkInterval,
+      initialScanDone: source.initialScanDone ?? false,
+      initialScanProgress: source.initialScanProgress ?? 0,
+      isScanning: source.isScanning ?? false,
+      totalImported: source.totalImported ?? 0,
+      listingCount,
+      lastScanMessagesRead: source.lastScanMessagesRead ?? 0,
+      lastScanFound: source.lastScanFound ?? 0,
+      lastScanAdded: source.lastScanAdded ?? 0,
+      lastScanDuplicates: source.lastScanDuplicates ?? 0,
+      lastScanErrors: source.lastScanErrors ?? 0,
+      lastCheckedAt: source.lastCheckedAt?.toISOString() ?? null,
+      lastError: source.lastError ?? null,
+      cursor: source.initialScanOffsetId,
+      currentCity: currentCity?.name ?? null,
+      currentCityIndex: cursor.cityIndex,
+    } : null,
+  });
+});
+
+router.post("/admin/eleman/scan-now", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const result = await triggerElemanScan();
+    res.json({
+      success: true,
+      sourceId: result.sourceId,
+      created: result.created,
+      message: result.created
+        ? "Eleman.net kaynağı oluşturuldu. İl il tarama başladı (sadece telefonlu ilanlar)."
+        : "Eleman.net tarama tetiklendi. Bitmemiş iller devam / bittiyse 30 dk yeni ilan dinler.",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/admin/eleman/reset", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const result = await resetAllElemanSources();
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      sources: result.sources,
+      message: `${result.deletedListings} Eleman.net ilanı silindi. İller baştan taranacak (telefon zorunlu).`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

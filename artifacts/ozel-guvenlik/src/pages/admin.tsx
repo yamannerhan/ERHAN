@@ -2220,6 +2220,148 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   );
 }
 
+function ElemanSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
+  const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [cityCount, setCityCount] = useState(0);
+  const [source, setSource] = useState<{
+    id: number; name: string; active: boolean; checkInterval: number;
+    initialScanDone: boolean; initialScanProgress: number; isScanning: boolean;
+    totalImported: number; listingCount: number;
+    lastScanMessagesRead: number; lastScanFound: number; lastScanAdded: number;
+    lastScanDuplicates: number; lastScanErrors: number;
+    lastCheckedAt: string | null; lastError: string | null;
+    currentCity: string | null; currentCityIndex: number;
+  } | null>(null);
+
+  const refresh = async () => {
+    try {
+      const r = await apiCall("/admin/eleman/status", "GET") as {
+        cityCount?: number;
+        source?: typeof source;
+      };
+      setCityCount(r.cityCount ?? 0);
+      setSource(r.source ?? null);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    void refresh();
+    const t = window.setInterval(() => { void refresh(); }, 4000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const scanNow = async () => {
+    setLoading(true);
+    try {
+      const r = await apiCall("/admin/eleman/scan-now", "POST") as { message?: string };
+      toast({ title: "Eleman.net tarama", description: r.message || "Tarama başladı." });
+      await refresh();
+    } catch (error) {
+      toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetAll = async () => {
+    if (!window.confirm("Tüm Eleman.net ilanları silinecek ve iller baştan taranacak (sadece telefonlu). Emin misiniz?")) return;
+    setResetting(true);
+    try {
+      const r = await apiCall("/admin/eleman/reset", "POST") as { message?: string; deletedListings?: number };
+      toast({ title: "Eleman.net sıfırlandı", description: r.message || `${r.deletedListings ?? 0} ilan silindi.` });
+      await refresh();
+    } catch (error) {
+      toast({ title: "Sıfırlama başarısız", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <h3 className="text-lg font-extrabold text-white">Eleman.net</h3>
+            <div className="grid gap-2 text-xs text-slate-400">
+              <div>• Girişsiz tarama — <strong className="text-slate-200">telefonu olmayan ilan çekilmez</strong></div>
+              <div>• Türkiye illeri sırayla (İstanbul Avrupa/Anadolu ayrı) — {cityCount || "…"} il</div>
+              <div>• İlk tarama bitince her <strong className="text-slate-200">30 dk</strong> yeni ilan dinler</div>
+              <div>• Yayında kaynak: <strong className="text-emerald-300">Kaynak: Eleman.net</strong></div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => void refresh()} disabled={loading || resetting} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
+              Durumu Yenile
+            </button>
+            <button onClick={() => void scanNow()} disabled={loading || resetting} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
+              Şimdi Tara
+            </button>
+            <button onClick={() => void resetAll()} disabled={loading || resetting} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
+              {resetting ? "Sıfırlanıyor…" : "Sıfırla / Tekrar Tara"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Yayındaki İlan</div>
+          <div className="text-2xl font-black text-sky-400 mt-1">{source?.listingCount ?? 0}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Toplam Çekilen</div>
+          <div className="text-2xl font-black text-emerald-400 mt-1">{source?.totalImported ?? 0}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Son +</div>
+          <div className="text-2xl font-black text-amber-400 mt-1">{source?.lastScanAdded ?? 0}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">İlerleme</div>
+          <div className="text-2xl font-black text-white mt-1">
+            {source?.initialScanDone ? "Dinleme" : `%${source?.initialScanProgress ?? 0}`}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6 space-y-3">
+        <h4 className="text-base font-bold text-white">Tarama Durumu</h4>
+        {!source ? (
+          <p className="text-xs text-slate-500">Henüz kaynak yok. «Şimdi Tara» veya «Sıfırla» ile oluşturun.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {source.isScanning && <span className="font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
+              <span className={`font-bold px-2 py-0.5 rounded-full ${source.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                {source.initialScanDone
+                  ? "Günlük dinleme (30 dk)"
+                  : `İlk tarama %${source.initialScanProgress || 1}${source.currentCity ? ` — ${source.currentCity}` : ""}`}
+              </span>
+              <span className="text-slate-500">İl {Math.min((source.currentCityIndex ?? 0) + 1, cityCount || 1)}/{cityCount || "…"}</span>
+            </div>
+            <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 transition-all"
+                style={{ width: `${source.initialScanDone ? 100 : Math.max(1, source.initialScanProgress || 1)}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-3 text-[10px] text-slate-500">
+              <span>Okunan: {source.lastScanMessagesRead}</span>
+              <span>Bulunan: {source.lastScanFound}</span>
+              <span>Çift: {source.lastScanDuplicates}</span>
+              <span>Hata: {source.lastScanErrors}</span>
+              <span>Son: {source.lastCheckedAt ? new Date(source.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
+            </div>
+            {source.lastError && <div className="text-[11px] text-rose-300">{source.lastError}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Bekleyen İlanlar ──────────────────────────────────────────────
 interface PendingJob {
   id: number; sourceId: number; sourceName: string; platform: string;
@@ -2384,7 +2526,7 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
 type AdminTab =
   | "dashboard" | "ilanlar" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "yetkiler" | "ilan-haklari"
-  | "telegram" | "whatsapp" | "mesajlar"
+  | "telegram" | "whatsapp" | "eleman" | "mesajlar"
   | "bakiye" | "kaynaklar" | "bildirimler" | "ayarlar" | "loglar";
 
 interface SidebarItem {
@@ -2424,6 +2566,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
       { id: "telegram", label: "Telegram Hesabı", icon: Radio },
       { id: "mesajlar", label: "Mesajlar", icon: MessageSquare },
       { id: "whatsapp", label: "WhatsApp Kaynakları", icon: MessageCircle },
+      { id: "eleman", label: "Eleman.net", icon: Briefcase },
     ],
   },
   {
@@ -4341,6 +4484,9 @@ export default function AdminDashboard() {
                         l.status === "pending" ? "bg-amber-500/20 text-amber-400" :
                         "bg-destructive/20 text-destructive"
                       }`}>{l.status === "active" ? "Aktif" : l.status === "inactive" ? "Pasif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
+                      {l.sourceTag === "eleman" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Eleman.net</span>}
+                      {l.sourceTag === "whatsapp" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 font-medium">WhatsApp</span>}
+                      {l.sourceTag === "telegram" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Telegram</span>}
                       {l.isFeatured && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">Öne Çıkan</span>}
                       {l.expiresAt && <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5" />{formatDate(l.expiresAt)}</span>}
                       <span className="text-[10px] text-muted-foreground">{formatDate(l.createdAt)}</span>
@@ -4455,6 +4601,7 @@ export default function AdminDashboard() {
 
         {activeTab === "telegram" && <TelegramAuthSection apiCall={apiCall} toast={toast} />}
         {activeTab === "whatsapp" && <WhatsAppSourcesSection apiCall={apiCall} toast={toast} />}
+        {activeTab === "eleman" && <ElemanSourcesSection apiCall={apiCall} toast={toast} />}
         {activeTab === "kaynaklar" && <SourcesSection apiCall={apiCall} toast={toast} />}
 
         {/* === LOGLAR TAB (placeholder) === */}

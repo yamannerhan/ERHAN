@@ -4,6 +4,14 @@ import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { fetchWhatsAppMessages, isWhatsAppReady } from "../services/whatsapp-client";
+import {
+  elemanCityCount,
+  formatElemanCursor,
+  getElemanCityByIndex,
+  parseElemanCursor,
+  scrapeElemanCityPages,
+} from "../services/eleman-client";
+import type { ElemanJobDetail } from "../services/eleman-client";
 import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -149,7 +157,7 @@ async function findListingBySourceMessage(sourceId: number, messageId: string): 
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
-  if (source.platform === "telegram" || source.platform === "whatsapp") return true;
+  if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman") return true;
   return source.autoPublish || !source.requireApproval;
 }
 
@@ -1077,6 +1085,187 @@ async function scanTelegramSources(
   }
 }
 
+async function publishElemanJob(
+  source: typeof sourcesTable.$inferSelect,
+  job: ElemanJobDetail,
+): Promise<ProcessResult> {
+  if (!job.phone?.trim()) return "skipped";
+
+  const externalId = `eleman_${job.id}`;
+  const hash = createDuplicateHash(job.rawText);
+  const now = new Date();
+  const messageId = job.id;
+
+  if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
+
+  const duplicateListingId = await findDuplicateActiveListing(job.rawText, hash);
+  if (duplicateListingId) {
+    await db.update(listingsTable)
+      .set({ lastSeenAt: now })
+      .where(eq(listingsTable.id, duplicateListingId));
+    return "duplicate";
+  }
+
+  if (await findListingBySourceMessage(source.id, messageId)) return "duplicate";
+
+  const [seenExt] = await db.select({ id: importedPostsTable.id })
+    .from(importedPostsTable)
+    .where(and(
+      eq(importedPostsTable.sourceId, source.id),
+      eq(importedPostsTable.externalId, externalId),
+    ))
+    .limit(1);
+  if (seenExt) return "duplicate";
+
+  const [imported] = await db.insert(importedPostsTable).values({
+    sourceId: source.id,
+    platform: "eleman",
+    externalId,
+    rawText: job.rawText,
+    sourceUrl: job.url,
+    duplicateHash: hash,
+    isJob: true,
+    status: "pending",
+  }).returning();
+  if (!imported) return "skipped";
+
+  const jobCity = (job as ElemanJobDetail & { city?: string | null }).city;
+  const parsedCity = resolveListingCity(extractLocation(job.rawText));
+  const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
+  const gender = extractGender(job.rawText);
+  const [newListing] = await db.insert(listingsTable).values({
+    title: job.title || "Güvenlik Personeli Aranıyor",
+    company: job.companyName ?? "Belirtilmemiş",
+    city,
+    salary: extractSalary(job.rawText) ?? undefined,
+    workType: extractWorkType(job.rawText),
+    description: job.description || job.rawText,
+    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}\nKaynak: Eleman.net`,
+    status: "active",
+    isActive: true,
+    autoDeleteOnExpiry: true,
+    sourceId: source.id,
+    messageId,
+    sourceUrl: job.url,
+    sourceTag: "eleman",
+    applyUrl: `tel:${job.phone}`,
+    publishedAt: now,
+    firstSeenAt: now,
+    lastSeenAt: now,
+    rawText: job.rawText,
+    expiresAt: listingExpiryFrom(),
+  }).returning();
+  if (!newListing) return "skipped";
+
+  await db.update(importedPostsTable)
+    .set({ status: "approved" })
+    .where(eq(importedPostsTable.id, imported.id));
+
+  void announceNewListing({
+    id: newListing.id,
+    title: newListing.title,
+    city: newListing.city,
+    company: newListing.company,
+  }, { adminOnly: true, skipChat: true })
+    .catch((err) => logger.error({ err }, "scraper: Eleman.net admin notify failed"));
+
+  return "added";
+}
+
+async function checkElemanSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
+  const stats: ScanStats = { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: 0 };
+  const isInitialScan = !source.initialScanDone;
+  const { cityIndex, page } = parseElemanCursor(source.initialScanOffsetId);
+  const city = isInitialScan ? getElemanCityByIndex(cityIndex) : null;
+
+  if (isInitialScan && !city) {
+    await patchSourceProgress(source.id, {
+      initialScanDone: true,
+      initialScanProgress: 100,
+      initialScanOffsetId: null,
+      isScanning: false,
+      lastCheckedAt: new Date(),
+      lastError: null,
+    });
+    return stats;
+  }
+
+  await patchSourceProgress(source.id, {
+    isScanning: true,
+    lastError: isInitialScan
+      ? `Eleman.net: ${city?.name ?? "?"} taranıyor…`
+      : "Eleman.net: yeni ilanlar kontrol ediliyor…",
+  });
+  const jobs = await scrapeElemanCityPages(city?.slug ?? null, isInitialScan ? page : 1, 2);
+  stats.messagesRead = jobs.length;
+
+  for (const job of jobs) {
+    try {
+      const result = await publishElemanJob(source, job);
+      if (result === "added") {
+        stats.added++;
+        stats.found++;
+      } else if (result === "duplicate") {
+        stats.duplicates++;
+        stats.found++;
+      }
+    } catch (err) {
+      stats.errors++;
+      logger.warn({ err, sourceId: source.id, jobId: job.id }, "scraper: Eleman.net ilanı işlenemedi");
+    }
+  }
+
+  const nextCityIndex = isInitialScan ? cityIndex + 1 : 0;
+  const initialComplete = isInitialScan && nextCityIndex >= elemanCityCount();
+  const progress = isInitialScan
+    ? Math.min(100, Math.floor((nextCityIndex / elemanCityCount()) * 100))
+    : 100;
+  await patchSourceProgress(source.id, {
+    lastCheckedAt: new Date(),
+    initialScanDone: initialComplete || source.initialScanDone,
+    initialScanProgress: initialComplete ? 100 : progress,
+    initialScanOffsetId: isInitialScan && !initialComplete ? formatElemanCursor(nextCityIndex, 1) : null,
+    lastScanMessagesRead: stats.messagesRead,
+    lastScanFound: stats.found,
+    lastScanAdded: stats.added,
+    lastScanDuplicates: stats.duplicates,
+    lastScanErrors: stats.errors,
+    lastScanPublished: stats.added,
+    totalImported: (source.totalImported ?? 0) + stats.added,
+    isScanning: false,
+    lastError: null,
+  });
+  return stats;
+}
+
+async function scanElemanSources(
+  elemanSources: Array<typeof sourcesTable.$inferSelect>,
+  force: boolean,
+): Promise<void> {
+  const now = Date.now();
+  for (const source of elemanSources) {
+    const intervalMs = (source.checkInterval ?? 30) * 60_000;
+    const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
+    if (!force && source.initialScanDone && now - lastChecked < intervalMs) continue;
+    if (source.isScanning || !(await acquireSourceScanLock(source.id))) continue;
+
+    try {
+      await checkElemanSource(source);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ err, sourceId: source.id }, "scraper: Eleman.net kaynak taraması başarısız");
+      await patchSourceProgress(source.id, {
+        lastCheckedAt: new Date(),
+        lastError: message.slice(0, 500),
+        lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+        isScanning: false,
+      });
+    } finally {
+      await releaseSourceScanLock(source.id);
+    }
+  }
+}
+
 // ── Main scraper loop ──────────────────────────────────────────────
 // Aynı anda iki tarama döngüsü çalışmasın (interval + manuel tetikleme yarışını önler).
 let cycleRunning = false;
@@ -1109,8 +1298,13 @@ async function runScraperCycleInner(force = false): Promise<void> {
     await scanTelegramSources(telegramSources, force);
   }
 
+  const elemanSources = sources.filter(s => s.platform === "eleman");
+  if (elemanSources.length > 0) {
+    await scanElemanSources(elemanSources, force);
+  }
+
   for (const source of sources) {
-    if (source.platform === "telegram" || source.platform === "whatsapp") continue;
+    if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman") continue;
 
     const intervalMin = source.checkInterval ?? 15;
     const intervalMs = intervalMin * 60 * 1000;
@@ -1564,6 +1758,101 @@ async function scanWhatsAppSources(
 
     await sleep(Math.min(WA_GROUP_GAP_MS, 5_000));
   }
+}
+
+export async function triggerElemanScan(): Promise<{ sourceId: number; created: boolean }> {
+  let [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "eleman"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+  let created = false;
+
+  if (!source) {
+    [source] = await db.insert(sourcesTable).values({
+      name: "Eleman.net",
+      platform: "eleman",
+      url: "https://www.eleman.net",
+      active: true,
+      status: "active",
+      autoPublish: true,
+      requireApproval: false,
+      checkInterval: 30,
+      initialScanDone: false,
+      initialScanProgress: 0,
+    }).returning();
+    created = true;
+  }
+
+  if (!source) throw new Error("Eleman.net kaynağı oluşturulamadı");
+  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net manuel tarama hatası"));
+  return { sourceId: source.id, created };
+}
+
+export async function resetAllElemanSources(): Promise<{ deletedListings: number; sources: number }> {
+  let elemanSources = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "eleman"));
+
+  if (elemanSources.length === 0) {
+    const [created] = await db.insert(sourcesTable).values({
+      name: "Eleman.net",
+      platform: "eleman",
+      url: "https://www.eleman.net",
+      active: true,
+      status: "active",
+      autoPublish: true,
+      requireApproval: false,
+      checkInterval: 30,
+      initialScanDone: false,
+      initialScanProgress: 1,
+      initialScanOffsetId: formatElemanCursor(0, 1),
+    }).returning();
+    if (created) elemanSources = [created];
+  }
+
+  let deletedListings = 0;
+
+  for (const source of elemanSources) {
+    deletedListings += await deleteListingsForSource(source);
+    await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, source.id));
+    await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, source.id));
+  }
+
+  const orphanListings = await db.select({ id: listingsTable.id })
+    .from(listingsTable)
+    .where(eq(listingsTable.sourceTag, "eleman"));
+  deletedListings += await deleteListingsByIds(orphanListings.map((listing) => listing.id));
+
+  if (elemanSources.length > 0) {
+    await db.update(sourcesTable).set({
+      lastCheckedAt: null,
+      lastTelegramMessageId: null,
+      initialScanOffsetId: formatElemanCursor(0, 1),
+      initialScanDone: false,
+      initialScanProgress: 1,
+      initialScanPhase: "forward",
+      initialScanAnchorId: null,
+      initialScanTopId: null,
+      initialScanOldestAt: null,
+      totalImported: 0,
+      lastScanPublished: 0,
+      lastScanMessagesRead: 0,
+      lastScanFound: 0,
+      lastScanAdded: 0,
+      lastScanDuplicates: 0,
+      lastScanErrors: 0,
+      isScanning: false,
+      lastError: null,
+      active: true,
+      status: "active",
+      checkInterval: 30,
+      autoPublish: true,
+      requireApproval: false,
+    }).where(eq(sourcesTable.platform, "eleman"));
+  }
+
+  logger.info({ deletedListings, sources: elemanSources.length }, "scraper: Eleman.net sıfırlandı, ilk tarama başlıyor");
+  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net sıfırlama tarama hatası"));
+  return { deletedListings, sources: elemanSources.length };
 }
 
 // ── Public API ─────────────────────────────────────────────────────
