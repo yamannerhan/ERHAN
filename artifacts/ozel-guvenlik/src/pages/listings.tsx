@@ -82,7 +82,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     return city;
   }, [city]);
 
-  const { data, isLoading, refetch } = useGetListings({
+  const { data, isLoading, isFetching, refetch } = useGetListings({
     page,
     limit: 20,
     search: search || undefined,
@@ -165,9 +165,17 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const totalCount = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / 20));
 
+  // Yükleme sırasında total=0 gelince sayfayı 1'e geri çekmesin (Sonraki bozukluğu)
   useEffect(() => {
+    if (isLoading || isFetching) return;
+    if (totalCount === 0) return;
     if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  }, [page, totalPages, totalCount, isLoading, isFetching]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [page]);
 
   // Client-side sub-filter for Anadolu/Avrupa
   const displayListings = useMemo(() => {
@@ -475,10 +483,11 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
           {/* Pagination */}
           {!isLoading && totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-5">
+            <div className="flex items-center justify-center gap-2 mt-5 mb-8 relative z-10">
               <button
+                type="button"
                 onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page <= 1}
+                disabled={page <= 1 || isFetching}
                 className="og-page-btn"
               >
                 Önceki
@@ -487,11 +496,12 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                 Sayfa {page} / {totalPages}
               </div>
               <button
+                type="button"
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
+                disabled={page >= totalPages || isFetching}
                 className="og-page-btn"
               >
-                Sonraki
+                {isFetching ? "Yükleniyor…" : "Sonraki"}
               </button>
             </div>
           )}

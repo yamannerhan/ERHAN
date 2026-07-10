@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
@@ -160,6 +160,22 @@ router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, r
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).json({ error: msg });
   }
+});
+
+/** Telegram taramayı durdur (WA/Eleman devam eder) */
+router.post("/admin/sources/pause", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  const result = pauseTelegramScraper();
+  res.json({ success: true, paused: result.paused, message: "Telegram botları durduruldu. WhatsApp ve Eleman.net etkilenmedi." });
+});
+
+/** Telegram taramayı tekrar başlat */
+router.post("/admin/sources/resume", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  const result = resumeTelegramScraper();
+  res.json({ success: true, paused: result.paused, message: "Telegram tarama yeniden başlatıldı." });
+});
+
+router.get("/admin/sources/pause-status", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  res.json({ paused: isTelegramScraperPaused() });
 });
 
 /** Telegram + WhatsApp + Eleman.net: sırayla sil ve yeniden tara */

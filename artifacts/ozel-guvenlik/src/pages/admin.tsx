@@ -14,7 +14,7 @@ import {
   Link, Globe, Radio, AlertCircle, Edit2, ExternalLink, Filter, Zap,
   Cpu, TrendingUp, ShieldCheck, Activity, ArrowUpRight, Bell, BarChart3, PieChart as PieChartIcon, Server, Database, Bot, MessageCircle, Wrench, Terminal, Wifi,
   ChevronRight, Menu, Sun, Moon, FileText, CreditCard, ShieldAlert, LogOut, Globe2, FilePlus, UserCheck, Award,
-  Home, CheckCheck, Heart, MessageCircle, Info, X, Power
+  Home, CheckCheck, Heart, MessageCircle, Info, X, Power, Play, Square
 } from "lucide-react";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -1427,14 +1427,16 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [d] = await Promise.all([
+      const [d, pauseSt] = await Promise.all([
         apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean; telegramGramJsConnected?: boolean; effectiveScanIntervalMinutes?: number; scanPhase?: "initial" | "incremental" }>,
+        apiCall("/admin/sources/pause-status", "GET").catch(() => ({ paused: false })) as Promise<{ paused?: boolean }>,
       ]);
       setSources(d.sources ?? []);
       setTelegramTokenSet(d.telegramTokenSet ?? false);
       setTelegramConnected(d.telegramGramJsConnected ?? false);
       setEffectiveScanInterval(d.effectiveScanIntervalMinutes ?? 30);
       setScanPhase(d.scanPhase ?? "incremental");
+      setTgPaused(!!pauseSt.paused);
     } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   };
 
@@ -1492,6 +1494,8 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
 
   const [resetting, setResetting] = useState(false);
   const [resettingAll, setResettingAll] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [tgPaused, setTgPaused] = useState(false);
   const [deepRescanning, setDeepRescanning] = useState(false);
   const [reparsing, setReparsing] = useState(false);
   const [deduping, setDeduping] = useState(false);
@@ -1513,10 +1517,33 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     setResetting(true);
     try {
       const r = await apiCall("/admin/sources/reset", "POST") as { message?: string };
+      setTgPaused(false);
       toast({ title: "Telegram botları sıfırlandı", description: r.message ?? "Yeniden tarama başlatıldı." });
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
     finally { setResetting(false); }
+  };
+
+  const stopAllTelegramBots = async () => {
+    setPausing(true);
+    try {
+      const r = await apiCall("/admin/sources/pause", "POST") as { message?: string };
+      setTgPaused(true);
+      toast({ title: "Telegram durduruldu", description: r.message ?? "Tarama durdu." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setPausing(false); }
+  };
+
+  const startAllTelegramBots = async () => {
+    setPausing(true);
+    try {
+      const r = await apiCall("/admin/sources/resume", "POST") as { message?: string };
+      setTgPaused(false);
+      toast({ title: "Telegram başlatıldı", description: r.message ?? "Tarama yeniden başladı." });
+      void load();
+    } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
+    finally { setPausing(false); }
   };
 
   const resetAllPlatformBots = async () => {
@@ -1529,6 +1556,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     setResettingAll(true);
     try {
       const r = await apiCall("/admin/bots/reset-all", "POST") as { message?: string };
+      setTgPaused(false);
       toast({ title: "Tüm botlar sıfırlandı", description: r.message ?? "Yeniden tarama başladı." });
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
@@ -1608,17 +1636,44 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </p>
       </div>
 
-      <div className="mb-3">
-        <button
-          onClick={() => void resetAllPlatformBots()}
-          disabled={resettingAll || resetting}
-          className="w-full flex items-center justify-center gap-2 text-sm px-4 py-3 bg-rose-600/90 text-white rounded-xl hover:bg-rose-500 transition-colors disabled:opacity-50 font-bold shadow-lg shadow-rose-900/30"
-        >
-          <RefreshCw className={`w-4 h-4 ${resettingAll ? "animate-spin" : ""}`} />
-          {resettingAll ? "Tüm botlar sıfırlanıyor…" : "Tüm Botları Sıfırla ve Yeniden Tara"}
-        </button>
-        <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-          Telegram → WhatsApp → Eleman.net sırasıyla ilanları siler ve yeniden tarar
+      <div className="mb-3 space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void resetAllPlatformBots()}
+            disabled={resettingAll || resetting || pausing}
+            className="w-full flex items-center justify-center gap-2 text-sm px-4 py-3 bg-rose-600/90 text-white rounded-xl hover:bg-rose-500 transition-colors disabled:opacity-50 font-bold shadow-lg shadow-rose-900/30"
+          >
+            <RefreshCw className={`w-4 h-4 ${resettingAll ? "animate-spin" : ""}`} />
+            {resettingAll ? "Tüm botlar sıfırlanıyor…" : "Tüm Botları Sıfırla ve Yeniden Tara"}
+          </button>
+          {tgPaused ? (
+            <button
+              type="button"
+              onClick={() => void startAllTelegramBots()}
+              disabled={pausing || resettingAll}
+              className="w-full flex items-center justify-center gap-2 text-sm px-4 py-3 bg-emerald-600/90 text-white rounded-xl hover:bg-emerald-500 transition-colors disabled:opacity-50 font-bold"
+            >
+              <Play className={`w-4 h-4 ${pausing ? "animate-pulse" : ""}`} />
+              {pausing ? "Başlatılıyor…" : "Tüm Botları Başlat"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void stopAllTelegramBots()}
+              disabled={pausing || resettingAll}
+              className="w-full flex items-center justify-center gap-2 text-sm px-4 py-3 bg-slate-700 text-white rounded-xl hover:bg-slate-600 transition-colors disabled:opacity-50 font-bold border border-white/10"
+            >
+              <Square className={`w-4 h-4 ${pausing ? "animate-pulse" : ""}`} />
+              {pausing ? "Durduruluyor…" : "Tüm Botları Durdur"}
+            </button>
+          )}
+        </div>
+        {tgPaused && (
+          <p className="text-[10px] text-amber-300 text-center">Telegram tarama duraklatıldı — WhatsApp / Eleman.net çalışmaya devam eder</p>
+        )}
+        <p className="text-[10px] text-muted-foreground text-center">
+          Sıfırla: Telegram → WhatsApp → Eleman.net sırasıyla siler ve yeniden tarar
         </p>
       </div>
 
@@ -1637,7 +1692,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>Tüm Botları Sıfırla:</strong> TG + WA + Eleman geçmiş ilanları siler, sırayla yeniden tarar. <strong>Telegram Sıfırla:</strong> sadece Telegram. <strong>30 Gün Yeniden Tara:</strong> ilan silmeden geriye tarar.
+        <strong>Tüm Botları Sıfırla:</strong> TG + WA + Eleman geçmiş ilanları siler, sırayla yeniden tarar. <strong>Durdur:</strong> sadece Telegram taramayı durdurur. <strong>Telegram Sıfırla:</strong> sadece Telegram.
       </p>
 
       <div className="flex justify-between items-center mb-3">

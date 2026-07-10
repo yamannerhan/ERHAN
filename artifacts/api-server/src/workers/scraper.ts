@@ -175,11 +175,13 @@ const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
 /** Her döngüde geriye kaç sayfa (×100 mesaj) — 30 güne daha hızlı ulaşmak için */
-const BACKWARD_PAGES_PER_RUN = 12;
+const BACKWARD_PAGES_PER_RUN = 8;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 0;
 let scraperIntervalHandle: ReturnType<typeof setInterval> | null = null;
+/** Admin «Tüm Botları Durdur» — sadece Telegram tarama durur (WA/Eleman etkilenmez) */
+let telegramScraperPaused = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,15 +245,15 @@ function computeBackwardProgress(
   current: number,
   reachedCutoff: boolean,
 ): number {
-  if (reachedCutoff) return 19;
-  let next = Math.min(18, Math.max(current, 1) + 4);
+  if (reachedCutoff) return 99;
+  let next = Math.min(95, Math.max(current, 1) + 6);
   const oldest = cumulativeOldest ?? oldestInBatch;
   if (oldest) {
     const ageMs = Math.max(0, Date.now() - oldest.getTime());
-    const byAge = 1 + Math.floor((Math.min(ageMs, INITIAL_SCAN_MS) / INITIAL_SCAN_MS) * 17);
+    const byAge = 1 + Math.floor((Math.min(ageMs, INITIAL_SCAN_MS) / INITIAL_SCAN_MS) * 94);
     next = Math.max(next, byAge);
   }
-  return Math.min(19, next);
+  return Math.min(99, next);
 }
 
 function computeForwardProgress(anchorId: number, topId: number, lastProcessedId: number): number {
@@ -745,13 +747,18 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
   await patchSourceProgress(source.id, { lastError: null, isScanning: true });
 
-  // ── Aşama 1: 30 gün sınırına geri git (mesaj işleme yok, sayfa sayfa ilerle) ──
-  if (isInitialScan && phase === "backward") {
+  // ── İlk tarama: geriye giderken İLANLARI İŞLE (eski 2 aşama takılıyordu / 0 ilan) ──
+  if (isInitialScan && phase !== "forward") {
     let currentOffset = scanOffset;
     let currentProgress = source.initialScanProgress ?? 1;
     let cumulativeOldest: Date | null = source.initialScanOldestAt ?? null;
     let totalRead = 0;
+    let newestId = topId;
     const baseMessagesRead = source.lastScanMessagesRead ?? 0;
+    const baseFound = source.lastScanFound ?? 0;
+    const baseAdded = source.lastScanAdded ?? 0;
+    const baseDupes = source.lastScanDuplicates ?? 0;
+    const baseErrors = source.lastScanErrors ?? 0;
 
     for (let page = 0; page < BACKWARD_PAGES_PER_RUN; page++) {
       let result;
@@ -759,7 +766,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         result = await fetchWithReconnect(username, {
           maxAgeDays: INITIAL_SCAN_DAYS,
           offsetId: currentOffset,
-          maxPages: 1,
+          maxPages: 2,
         });
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -771,20 +778,45 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         throw e;
       }
 
-      if (result.notConnected || (result.messages.length === 0 && !(await ensureTelegramConnected(5)))) {
+      if (result.notConnected) {
         await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
         return stats;
       }
 
-      const merged = mergeIdRange(anchorId, topId, result.minIdInBatch, result.maxIdInBatch);
-      anchorId = merged.anchor;
-      topId = merged.top;
-      totalRead += result.messages.length;
+      if (result.maxIdInBatch > newestId) newestId = result.maxIdInBatch;
+      if (result.minIdInBatch > 0) {
+        const merged = mergeIdRange(anchorId, topId, result.minIdInBatch, result.maxIdInBatch);
+        anchorId = merged.anchor;
+        topId = merged.top;
+        if (topId > newestId) newestId = topId;
+      }
 
       let oldestPostedAt: Date | undefined;
       for (const m of result.messages) {
+        totalRead++;
         if (m.postedAt && (!oldestPostedAt || m.postedAt < oldestPostedAt)) oldestPostedAt = m.postedAt;
+
+        const msgId = parseInt(m.id, 10);
+        if (!Number.isFinite(msgId)) continue;
+        try {
+          const procResult = await processMessage(
+            source,
+            `${username}_${m.id}`,
+            m.text,
+            m.url,
+            m.postedAt,
+            true,
+          );
+          if (procResult === "added") { stats.added++; stats.found++; }
+          else if (procResult === "updated") { stats.found++; }
+          else if (procResult === "duplicate") { stats.duplicates++; stats.found++; }
+        } catch (e) {
+          stats.errors++;
+          logger.error(e, `scraper: msg ${m.id} @${username}`);
+        }
+        if (MESSAGE_PROCESS_DELAY_MS > 0) await sleep(MESSAGE_PROCESS_DELAY_MS);
       }
+
       if (oldestPostedAt) {
         cumulativeOldest = !cumulativeOldest || oldestPostedAt < cumulativeOldest ? oldestPostedAt : cumulativeOldest;
       }
@@ -796,70 +828,63 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         result.reachedCutoff,
       );
 
-      const channelOlderThanCutoff = cumulativeOldest != null && cumulativeOldest <= new Date(Date.now() - INITIAL_SCAN_MS);
-      const discoveryComplete = result.reachedCutoff
-        || (result.noMoreMessages && (channelOlderThanCutoff || result.messages.length === 0 || anchorId > 0));
+      // Offset ilerlemese bile (boş metin batch) ham ID ile ilerle
+      const nextOff = result.nextOffsetId > 0 ? result.nextOffsetId : currentOffset;
+      if (nextOff === currentOffset && result.minIdInBatch > 0 && result.minIdInBatch < (currentOffset || Infinity)) {
+        currentOffset = result.minIdInBatch;
+      } else {
+        currentOffset = nextOff;
+      }
 
-      currentOffset = result.nextOffsetId;
+      const done = result.reachedCutoff
+        || result.noMoreMessages
+        || (cumulativeOldest != null && cumulativeOldest.getTime() <= Date.now() - INITIAL_SCAN_MS);
+
+      stats.messagesRead = baseMessagesRead + totalRead;
 
       await patchSourceProgress(source.id, {
         lastCheckedAt: new Date(),
         initialScanOffsetId: currentOffset > 0 ? String(currentOffset) : source.initialScanOffsetId,
         initialScanAnchorId: anchorId > 0 ? String(anchorId) : source.initialScanAnchorId,
-        initialScanTopId: topId > 0 ? String(topId) : source.initialScanTopId,
+        initialScanTopId: newestId > 0 ? String(newestId) : source.initialScanTopId,
         initialScanOldestAt: cumulativeOldest,
-        initialScanProgress: currentProgress,
+        initialScanPhase: "backward",
+        initialScanProgress: done ? 100 : currentProgress,
+        initialScanDone: done,
+        lastTelegramMessageId: newestId > 0 ? String(newestId) : source.lastTelegramMessageId,
         lastScanMessagesRead: baseMessagesRead + totalRead,
-        isScanning: page < BACKWARD_PAGES_PER_RUN - 1,
+        lastScanFound: baseFound + stats.found,
+        lastScanAdded: baseAdded + stats.added,
+        lastScanDuplicates: baseDupes + stats.duplicates,
+        lastScanErrors: baseErrors + stats.errors,
+        lastScanPublished: stats.added,
+        totalImported: (source.totalImported ?? 0) + stats.added,
+        lastError: done
+          ? (totalRead === 0 && stats.added === 0 ? "Kanalda son 30 günde işlenebilir metin ilanı bulunamadı." : null)
+          : `Taranıyor… 30g geri %${done ? 100 : currentProgress}`,
+        isScanning: !done && page < BACKWARD_PAGES_PER_RUN - 1,
       });
 
-      stats.messagesRead = baseMessagesRead + totalRead;
-
-      const switchToForward = async (reason: string) => {
-        const forwardStart = anchorId > 0 ? anchorId - 1 : 0;
-        if (anchorId === 0 && topId === 0) {
-          await patchSourceProgress(source.id, {
-            initialScanDone: true,
-            initialScanPhase: null,
-            initialScanProgress: 100,
-            initialScanOffsetId: null,
-            isScanning: false,
-            lastError: "Kanalda son 30 gün içinde metin mesajı bulunamadı.",
-          });
-          return;
-        }
-        await patchSourceProgress(source.id, {
-          initialScanPhase: "forward",
-          initialScanAnchorId: String(anchorId),
-          initialScanTopId: String(topId),
-          initialScanOffsetId: null,
-          lastTelegramMessageId: String(forwardStart),
-          initialScanProgress: Math.max(currentProgress, 20),
-          isScanning: false,
-          lastError: null,
-        });
-        logger.info({ username, anchorId, topId, reason }, "scraper: geriye tarama bitti, eski→yeni başlıyor");
-      };
-
-      if (discoveryComplete) {
-        await switchToForward(result.reachedCutoff ? "30g_cutoff" : "no_more_or_empty");
+      if (done) {
+        logger.info(
+          { username, newestId, totalRead, added: stats.added, reason: result.reachedCutoff ? "30g" : "end" },
+          "scraper: ilk tarama tamam (geriye+işle)",
+        );
+        await patchSourceProgress(source.id, { isScanning: false, initialScanProgress: 100, initialScanDone: true, lastError: null });
         return stats;
       }
 
-      // Geçmiş bitti ama 30 güne inemedik (kanal kısa) — yine de forward'a geç, takılma
-      if (result.noMoreMessages && !result.reachedCutoff) {
-        await switchToForward("channel_history_end");
-        return stats;
-      }
-
-      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(400);
+      if (page < BACKWARD_PAGES_PER_RUN - 1) await sleep(300);
     }
 
-    await patchSourceProgress(source.id, { isScanning: false, lastError: null });
+    await patchSourceProgress(source.id, {
+      isScanning: false,
+      lastError: `Taranıyor… 30g geri %${currentProgress}`,
+    });
     return stats;
   }
 
-  // ── Aşama 2: 30 gün sınırından yeniye doğru işle ──
+  // ── Aşama 2 (eski forward) veya artımlı: yeni mesajları işle ──
   let messages: ChannelMessage[] = [];
   let noMoreMessages = false;
 
@@ -977,13 +1002,6 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     isScanning: false,
   });
 
-  logger.info({
-    source: source.name, username, phase,
-    messagesRead: cumulativeStats.lastScanMessagesRead, batchRead: stats.messagesRead, added: stats.added,
-    maxId, topId, anchorId, scanProgress, initialComplete,
-  }, `scraper: @${username} tarama özeti`);
-
-  if (initialComplete) void refreshScraperInterval().catch(() => {});
   return stats;
 }
 
@@ -1009,13 +1027,16 @@ function pickNextTelegramSource(
 }
 
 function scheduleNextTelegramCycle(hasActiveTelegram: boolean, delayMs = INITIAL_BACKFILL_INTERVAL_MS): void {
+  if (telegramScraperPaused) return;
   void hasIncompleteInitialScan().then((incomplete) => {
     if (incomplete) {
       setTimeout(() => {
+        if (telegramScraperPaused) return;
         void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
       }, delayMs);
     } else if (hasActiveTelegram) {
       setTimeout(() => {
+        if (telegramScraperPaused) return;
         void runScraperCycle(true).catch((e) => logger.error(e, "scraper: incremental chain error"));
       }, INCREMENTAL_SOURCE_GAP_MS);
     }
@@ -1297,12 +1318,20 @@ async function scanElemanSources(
 // ── Main scraper loop ──────────────────────────────────────────────
 // Aynı anda iki tarama döngüsü çalışmasın (interval + manuel tetikleme yarışını önler).
 let cycleRunning = false;
+let cycleQueued = false;
 
 async function runScraperCycle(force = false): Promise<void> {
-  if (cycleRunning) return;
+  if (cycleRunning) {
+    cycleQueued = true;
+    return;
+  }
   cycleRunning = true;
   try {
-    await runScraperCycleInner(force);
+    do {
+      cycleQueued = false;
+      await runScraperCycleInner(force);
+      force = true;
+    } while (cycleQueued);
   } finally {
     cycleRunning = false;
   }
@@ -1314,21 +1343,28 @@ async function runScraperCycleInner(force = false): Promise<void> {
 
   const sources = await db.select().from(sourcesTable)
     .where(eq(sourcesTable.active, true));
-
   const now = new Date();
+
+  // Telegram önce — ilk tarama sırasında Eleman uzun sürmesin diye zinciri kesmesin
+  const telegramSources = sources.filter(s => s.platform === "telegram");
+  if (telegramSources.length > 0 && !telegramScraperPaused) {
+    await scanTelegramSources(telegramSources, force);
+  } else if (telegramScraperPaused && telegramSources.length > 0) {
+    logger.info("scraper: Telegram tarama duraklatıldı (admin)");
+  }
+
   const whatsappSources = sources.filter(s => s.platform === "whatsapp");
   if (whatsappSources.length > 0) {
     await scanWhatsAppSources(whatsappSources, force);
   }
 
-  const telegramSources = sources.filter(s => s.platform === "telegram");
-  if (telegramSources.length > 0) {
-    await scanTelegramSources(telegramSources, force);
-  }
-
-  const elemanSources = sources.filter(s => s.platform === "eleman");
-  if (elemanSources.length > 0) {
-    await scanElemanSources(elemanSources, force);
+  // Telegram ilk tarama bitmeden Eleman'ı aynı döngüde bekletme (cycle kilidi)
+  const tgInitialBusy = !telegramScraperPaused && await hasIncompleteInitialScan();
+  if (!tgInitialBusy) {
+    const elemanSources = sources.filter(s => s.platform === "eleman");
+    if (elemanSources.length > 0) {
+      await scanElemanSources(elemanSources, force);
+    }
   }
 
   for (const source of sources) {
@@ -2203,7 +2239,26 @@ export async function triggerDeepRescan30Days(): Promise<void> {
 // tarama döngüsü hemen çalıştırılır (interval beklenmez).
 export async function triggerRescan(): Promise<void> {
   botUpdateOffset = 0;
+  telegramScraperPaused = false;
   await runScraperCycle(true);
+}
+
+export function pauseTelegramScraper(): { paused: boolean } {
+  telegramScraperPaused = true;
+  void releaseStaleScanLocks(true);
+  logger.info("scraper: Telegram tarama DURDURULDU (admin)");
+  return { paused: true };
+}
+
+export function resumeTelegramScraper(): { paused: boolean } {
+  telegramScraperPaused = false;
+  logger.info("scraper: Telegram tarama BAŞLATILDI (admin)");
+  void triggerRescan().catch((e) => logger.error(e, "scraper: resume trigger failed"));
+  return { paused: false };
+}
+
+export function isTelegramScraperPaused(): boolean {
+  return telegramScraperPaused;
 }
 
 // Otomatik içe aktarılmış (sourceTag dolu) ilanları, kayıtlı metinlerinden
