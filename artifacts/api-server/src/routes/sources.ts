@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, getEffectiveScanIntervalMinutes, getScanPhase } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
@@ -359,18 +359,54 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
       res.status(503).json({ error: "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın." });
       return;
     }
+    const msg = result.mode === "initial"
+      ? `${result.pendingGroups} grupta 30 gün tarama devam ediyor` +
+        (result.currentGroup ? ` — şimdi: ${result.currentGroup}` : "") +
+        ". Bitince her 5 dk yeni mesaj dinler."
+      : `${result.pendingGroups} grup kaldığı yerden taranıyor (sadece yeni mesajlar). Üstüne aynı ilan eklenmez.`;
     res.json({
       success: true,
       scanned: result.scanned,
       queued: result.queued,
+      mode: result.mode,
       pendingGroups: result.pendingGroups,
       currentGroup: result.currentGroup,
       results: result.results,
-      message: result.queued
-        ? `${result.pendingGroups} grup sıraya alındı. Her grup tek tek son 30 güne geriye taranacak` +
-          (result.currentGroup ? ` — şimdi: ${result.currentGroup}` : "") +
-          ". İlerlemeyi listeden takip edin."
-        : "Tarama başlatılamadı.",
+      message: msg,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** WhatsApp sıfırla: WA ilanlarını sil, 30 gün temiz tara (Telegram Botları Sıfırla gibi). */
+router.post("/admin/whatsapp/reset", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    if (!isWhatsAppReady()) {
+      res.status(503).json({ error: "WhatsApp bağlı değil. Önce bağlanın." });
+      return;
+    }
+    const result = await resetAllWhatsAppSources();
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      pendingGroups: result.pendingGroups,
+      message: `${result.deletedListings} WhatsApp ilanı silindi. ${result.pendingGroups} grup sırayla 30 günden temiz taranacak.`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/admin/whatsapp/sources/:id/reset", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (!Number.isFinite(id)) { res.status(400).json({ error: "Geçersiz id" }); return; }
+    const result = await resetSingleWhatsAppSource(id);
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      message: `${result.deletedListings} ilan silindi. Bu grup 30 günden yeniden taranıyor.`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

@@ -270,9 +270,48 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     }));
 }
 
+/** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */
+async function harvestStoreMessages(
+  page: { evaluate: (fn: (...args: any[]) => any, ...args: any[]) => Promise<any> },
+  chatId: string,
+  groupJid: string,
+  cutoff: number,
+  byId: Map<string, WhatsAppMessage>,
+): Promise<{ count: number; oldest: number }> {
+  const storeMsgs: Array<{ id: string; text: string; timestamp: number }> = await page.evaluate(
+    (id: string, cut: number) => {
+      const w = window as any;
+      const storeChat =
+        w.Store?.Chat?.get?.(id) ||
+        w.Store?.Chat?.find?.(id) ||
+        (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+      if (!storeChat) return [];
+      const arr = storeChat.msgs?.getModelsArray?.() ?? [];
+      const out: Array<{ id: string; text: string; timestamp: number }> = [];
+      for (const m of arr) {
+        const mid = m.id?._serialized;
+        const ts = (m.t ?? m.timestamp ?? 0) * 1000;
+        if (!mid || !ts || ts <= cut) continue;
+        const text = String(m.body ?? m.caption ?? "").trim();
+        if (!text) continue;
+        out.push({ id: mid, text, timestamp: ts });
+      }
+      return out;
+    },
+    chatId,
+    cutoff,
+  );
+  let oldest = Date.now();
+  for (const m of storeMsgs) {
+    byId.set(m.id, { id: m.id, remoteJid: groupJid, text: m.text, timestamp: m.timestamp });
+    if (m.timestamp < oldest) oldest = m.timestamp;
+  }
+  return { count: storeMsgs.length, oldest: storeMsgs.length ? oldest : Date.now() };
+}
+
 /**
- * Grup mesajlarını çek — 30 güne kadar loadEarlierMsgs ile geriye iner.
- * WhatsApp Web varsayılanı ~50 mesaj tutar; binlerce mesaj için geçmişi zorla yükleriz.
+ * Grup mesajlarını çek — 30 güne kadar loadEarlierMsgs + Store'dan tur tur biriktir.
+ * WA Store penceresi kaydığı için sadece sonda okumak yetmez; her turda harvest şart.
  */
 export async function fetchWhatsAppMessages(
   groupJid: string,
@@ -287,7 +326,7 @@ export async function fetchWhatsAppMessages(
 
   try {
     await (client as any).interface?.openChatWindow?.(groupJid);
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 1500));
   } catch { /* ignore */ }
 
   const chat = await client.getChatById(groupJid);
@@ -299,12 +338,17 @@ export async function fetchWhatsAppMessages(
 
   const chatId = (chat as any).id?._serialized ?? groupJid;
   const page = (client as any).pupPage;
+  const byId = new Map<string, WhatsAppMessage>();
 
-  // Derin tarama: Store üzerinden daha eski mesajları yükle (30 güne kadar)
   if (opts.deep && page) {
+    // Önce mevcut pencereyi al
+    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+
     let stagnant = 0;
-    let lastCount = 0;
-    for (let i = 0; i < 120; i++) {
+    let lastHarvested = byId.size;
+    let lastOldest = Date.now();
+
+    for (let i = 0; i < 350; i++) {
       let info: { ok?: boolean; count?: number; oldest?: number; done?: boolean } = {};
       try {
         info = await page.evaluate(async (id: string) => {
@@ -326,10 +370,14 @@ export async function fetchWhatsAppMessages(
               await storeChat.loadEarlierMsgs();
             } else if (w.Store?.Msg?.loadEarlierMsgs) {
               await w.Store.Msg.loadEarlierMsgs(storeChat);
+            } else if (w.Store?.ConversationMsgs?.loadEarlierMsgs) {
+              await w.Store.ConversationMsgs.loadEarlierMsgs(storeChat);
             }
           } catch {
             return { ok: true, count: msgsBefore, oldest: Date.now(), done: true };
           }
+
+          await new Promise((r) => setTimeout(r, 280));
 
           const arr = storeChat.msgs?.getModelsArray?.() ?? [];
           const count = arr.length || msgsBefore;
@@ -346,75 +394,59 @@ export async function fetchWhatsAppMessages(
         break;
       }
 
+      // Her turda biriktir — Store eski mesajları düşürse bile kaybetmeyiz
+      const harvested = await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+      const oldest = Math.min(info.oldest ?? Date.now(), harvested.oldest);
       const count = info.count ?? 0;
-      const oldest = info.oldest ?? Date.now();
-      logger.info({ groupJid, round: i + 1, count, oldest: new Date(oldest).toISOString() }, "wa: geçmiş yükleniyor");
+
+      if (i % 8 === 0 || oldest <= cutoff || byId.size !== lastHarvested) {
+        logger.info(
+          { groupJid, round: i + 1, storeCount: count, harvested: byId.size, oldest: new Date(oldest).toISOString() },
+          "wa: geçmiş yükleniyor",
+        );
+      }
 
       if (oldest <= cutoff) break;
-      if (info.done || count <= lastCount) {
+
+      const progressed = byId.size > lastHarvested || oldest < lastOldest - 60_000;
+      if (info.done || !progressed) {
         stagnant++;
-        if (stagnant >= 3) break;
+        if (stagnant >= 10) break;
       } else {
         stagnant = 0;
       }
-      lastCount = count;
-      await new Promise((r) => setTimeout(r, 900));
-    }
-  }
-
-  // Yüklenen geçmişten mesajları al — yüksek limit
-  const fetchLimit = opts.deep
-    ? 10000
-    : Math.min(opts.limit ?? 100, 200);
-
-  let best: any[] = [];
-  try {
-    best = (await chat.fetchMessages({ limit: fetchLimit })) ?? [];
-  } catch (e) {
-    logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
-    best = [];
-  }
-
-  // Hâlâ azsa bir kez daha yükle + çek
-  if (opts.deep && best.length < 100 && page) {
-    for (let i = 0; i < 15; i++) {
-      try {
-        await page.evaluate(async (id: string) => {
-          const w = window as any;
-          const storeChat = w.Store?.Chat?.get?.(id) || w.Store?.Chat?.find?.(id);
-          if (!storeChat) return;
-          if (w.Store?.ConversationMsgs?.loadEarlierMsgs) {
-            await w.Store.ConversationMsgs.loadEarlierMsgs(storeChat);
-          }
-        }, chatId);
-      } catch { break; }
+      lastHarvested = byId.size;
+      lastOldest = oldest;
       await new Promise((r) => setTimeout(r, 700));
     }
+  } else if (page) {
+    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+  }
+
+  const fetchLimit = opts.deep ? 10000 : Math.min(opts.limit ?? 100, 300);
+  try {
+    const best = (await chat.fetchMessages({ limit: fetchLimit })) ?? [];
+    for (const m of best) {
+      const id = m.id?._serialized;
+      if (!id || byId.has(id)) continue;
+      const ts = (m.timestamp ?? 0) * 1000;
+      if (!ts || ts <= cutoff) continue;
+      const text = String(m.body ?? (m as any).caption ?? "").trim();
+      if (!text) continue;
+      byId.set(id, { id, remoteJid: groupJid, text, timestamp: ts });
+    }
+  } catch (e) {
+    logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
+  }
+
+  if (page) {
     try {
-      best = (await chat.fetchMessages({ limit: fetchLimit })) ?? best;
-    } catch { /* keep previous */ }
+      await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    } catch { /* ignore */ }
   }
 
-  const out: WhatsAppMessage[] = [];
-  const seen = new Set<string>();
-  for (const m of best) {
-    const id = m.id?._serialized;
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    const ts = (m.timestamp ?? 0) * 1000;
-    if (!ts || ts <= cutoff) continue;
-    const text = String(m.body ?? (m as any).caption ?? "").trim();
-    if (!text) continue;
-    out.push({
-      id,
-      remoteJid: groupJid,
-      text,
-      timestamp: ts,
-    });
-  }
-
-  out.sort((a, b) => a.timestamp - b.timestamp);
-  logger.info({ groupJid, fetched: best.length, inRange: out.length, deep: !!opts.deep }, "wa: mesajlar hazır");
+  const out = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
+  logger.info({ groupJid, inRange: out.length, deep: !!opts.deep, cutoff: new Date(cutoff).toISOString() }, "wa: mesajlar hazır");
   return out;
 }
 

@@ -1848,6 +1848,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     lastCheckedAt: string | null; lastError: string | null;
   }>>([]);
   const [totals, setTotals] = useState({ groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 });
+  const [resetting, setResetting] = useState(false);
+  const [resettingSourceId, setResettingSourceId] = useState<number | null>(null);
   const [form, setForm] = useState({
     sourceName: "",
     phoneNumber: "",
@@ -1971,19 +1973,56 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     try {
       const r = await apiCall("/admin/whatsapp/scan-now", "POST") as {
         message?: string;
+        mode?: string;
         pendingGroups?: number;
         currentGroup?: string | null;
       };
       setLastScanAt(new Date().toLocaleString("tr-TR"));
       toast({
-        title: "Sıralı 30 gün tarama başladı",
-        description: r.message || `${r.pendingGroups ?? 0} grup sıraya alındı. Tek tek taranacak.`,
+        title: r.mode === "incremental" ? "Yeni mesaj taraması" : "30 gün tarama devam",
+        description: r.message || `${r.pendingGroups ?? 0} grup.`,
       });
       await refresh();
     } catch (error) {
       toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resetAllWa = async () => {
+    if (!window.confirm("Tüm WhatsApp ilanları silinecek ve gruplar 30 günden temiz taranacak. Emin misiniz?")) return;
+    setResetting(true);
+    try {
+      const r = await apiCall("/admin/whatsapp/reset", "POST") as {
+        message?: string;
+        deletedListings?: number;
+        pendingGroups?: number;
+      };
+      setLastScanAt(new Date().toLocaleString("tr-TR"));
+      toast({
+        title: "WhatsApp sıfırlandı",
+        description: r.message || `${r.deletedListings ?? 0} ilan silindi, 30 gün tarama başladı.`,
+      });
+      await refresh();
+    } catch (error) {
+      toast({ title: "Sıfırlama başarısız", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const resetOneWa = async (id: number, name: string) => {
+    if (!window.confirm(`«${name}» grubunun WhatsApp ilanları silinip 30 günden yeniden taranacak. Devam?`)) return;
+    setResettingSourceId(id);
+    try {
+      const r = await apiCall(`/admin/whatsapp/sources/${id}/reset`, "POST") as { message?: string };
+      toast({ title: "Grup sıfırlandı", description: r.message || "30 gün tarama başladı." });
+      await refresh();
+    } catch (error) {
+      toast({ title: "Grup sıfırlanamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setResettingSourceId(null);
     }
   };
 
@@ -1998,10 +2037,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• Her grup <strong className="text-slate-200">tek tek</strong>: 30 gün geriye (binlerce mesaj) → bugüne</div>
-              <div>• İlk tarama bitince her <strong className="text-slate-200">5 dk</strong> kaldığı yerden yeni ilanlar</div>
+              <div>• <strong className="text-slate-200">Sıfırla / Tekrar Tara:</strong> WA ilanlarını siler, 30 günden temiz çeker</div>
+              <div>• <strong className="text-slate-200">Şimdi Tara:</strong> silmez — bitmemiş 30 günü devam / bittiyse sadece yeni mesaj</div>
+              <div>• İlk tarama bitince her <strong className="text-slate-200">5 dk</strong> kaldığı yerden dinler (gruplar ayrı)</div>
               <div>• Çift ilan: yalnızca <strong className="text-slate-200">aynı metnin tamamı</strong> eşleşirse</div>
-              <div>• Yayınlanan WA ilanı → bildirim <strong className="text-slate-200">sadece admin</strong></div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2014,8 +2053,11 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
             </button>
-            <button onClick={() => void scanNow()} disabled={loading || !connected} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
+            <button onClick={() => void scanNow()} disabled={loading || resetting || !connected} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
               Şimdi Tara
+            </button>
+            <button onClick={() => void resetAllWa()} disabled={loading || resetting || !connected} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
+              {resetting ? "Sıfırlanıyor…" : "Sıfırla / Tekrar Tara"}
             </button>
             {connected && (
               <button onClick={() => void disconnect()} disabled={loading} className="rounded-xl bg-rose-500/20 px-4 py-2 text-sm font-bold text-rose-300 hover:bg-rose-500/30 disabled:opacity-50">
@@ -2046,7 +2088,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             </div>
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">
-                WhatsApp Web oturumu aktif. Grupları seçip kaydedin, sonra «Şimdi Tara» ile 30 gün ilk taramayı başlatın.
+                WhatsApp Web oturumu aktif. Temiz 30 gün için «Sıfırla / Tekrar Tara»; sadece yeni mesaj için «Şimdi Tara».
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">
@@ -2121,11 +2163,19 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Son + </span><span className="font-bold text-amber-300">{s.lastScanAdded}</span></div>
                   <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Mesaj </span><span className="font-bold text-slate-200">{s.lastScanMessagesRead}</span></div>
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-3 text-[10px] text-slate-500">
+                <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
                   <span>Bulunan: {s.lastScanFound}</span>
                   <span>Çift: {s.lastScanDuplicates}</span>
                   <span>Hata: {s.lastScanErrors}</span>
                   <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
+                  <button
+                    type="button"
+                    onClick={() => void resetOneWa(s.id, s.name)}
+                    disabled={resetting || resettingSourceId === s.id || !connected}
+                    className="ml-auto text-[10px] font-bold text-rose-300 hover:text-rose-200 disabled:opacity-40"
+                  >
+                    {resettingSourceId === s.id ? "Sıfırlanıyor…" : "Bu Grubu Sıfırla"}
+                  </button>
                 </div>
                 {s.lastError && <div className="mt-1 text-[10px] text-rose-400 truncate">{s.lastError}</div>}
               </div>
