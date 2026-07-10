@@ -1,5 +1,3 @@
-import pkg from "whatsapp-web.js";
-const { Client, LocalAuth } = pkg;
 import QRCode from "qrcode";
 import fs from "node:fs";
 import { logger } from "../lib/logger";
@@ -11,6 +9,8 @@ let pairingCode: string | null = null;
 let lastError: string | null = null;
 let starting = false;
 let pendingPhone: string | null = null;
+let ClientCtor: any = null;
+let LocalAuthCtor: any = null;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 
@@ -47,6 +47,17 @@ function resolveExecutablePath(): string {
     "Chromium bulunamadı. Sunucu imajında chromium kurulu olmalı " +
     "(PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium). Deploy sonrası yeniden deneyin.",
   );
+}
+
+async function loadWhatsAppLib(): Promise<void> {
+  if (ClientCtor && LocalAuthCtor) return;
+  const pkg = await import("whatsapp-web.js");
+  const mod = (pkg as any).default ?? pkg;
+  ClientCtor = mod.Client;
+  LocalAuthCtor = mod.LocalAuth;
+  if (!ClientCtor || !LocalAuthCtor) {
+    throw new Error("whatsapp-web.js yüklenemedi (Client/LocalAuth yok).");
+  }
 }
 
 function normalizePhone(raw: string): string {
@@ -98,11 +109,6 @@ function attachHandlers(c: any): void {
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Bağlantı koptu: ${reason}`;
-    setTimeout(() => {
-      void startWhatsAppClient().catch((e) => {
-        logger.warn({ err: e }, "wa: auto-reconnect failed");
-      });
-    }, 5_000);
   });
 
   c.on("auth_failure", (msg: string) => {
@@ -128,6 +134,8 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
   }
 
   try {
+    await loadWhatsAppLib();
+
     if (client) {
       try { await client.destroy(); } catch { /* ignore */ }
       client = null;
@@ -138,7 +146,7 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
     logger.info({ executablePath }, "wa: Chromium yolu");
 
     const clientOpts: Record<string, unknown> = {
-      authStrategy: new LocalAuth({ dataPath: AUTH_PATH, clientId: "ozelguvenlik" }),
+      authStrategy: new LocalAuthCtor({ dataPath: AUTH_PATH, clientId: "ozelguvenlik" }),
       puppeteer: {
         headless: true,
         executablePath,
@@ -153,6 +161,7 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
           "--disable-extensions",
           "--disable-background-networking",
           "--mute-audio",
+          "--single-process",
         ],
       },
     };
@@ -165,7 +174,7 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
       };
     }
 
-    client = new Client(clientOpts);
+    client = new ClientCtor(clientOpts);
     attachHandlers(client);
     await client.initialize();
   } catch (e) {
@@ -182,10 +191,16 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
   }
 }
 
-/** Sunucu açılışında kayıtlı oturumu geri yükle (QR gerekmez). */
+/**
+ * Boot'ta Chromium AÇMA — Railway healthcheck'i bozar / OOM yapar.
+ * Sadece kayıtlı oturum varsa ve WA_AUTO_CONNECT=1 ise arka planda bağlan.
+ */
 export async function initWhatsAppClient(): Promise<void> {
+  if (process.env.WA_AUTO_CONNECT !== "1") {
+    logger.info("wa: boot auto-connect kapalı (admin panelden bağlanın)");
+    return;
+  }
   try {
-    // Chromium yoksa boot'ta sessizce atla — admin panelden bağlanınca net hata gösterilir
     resolveExecutablePath();
   } catch (e) {
     lastError = e instanceof Error ? e.message : String(e);
@@ -255,11 +270,6 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     }));
 }
 
-/**
- * Grup mesajlarını çek.
- * afterTimestampMs verilirse yalnızca daha yeni mesajlar döner.
- * Yoksa son maxAgeDays içindeki mesajlar.
- */
 export async function fetchWhatsAppMessages(
   groupJid: string,
   opts: { afterTimestampMs?: number; limit?: number; maxAgeDays?: number } = {},

@@ -955,25 +955,30 @@ setTimeout(() => {
 scheduleHourlyReminder();
 
 async function bootstrapWorkers(): Promise<void> {
-  await db.update(sourcesTable)
-    .set({ autoPublish: true, requireApproval: false })
-    .where(and(
-      eq(sourcesTable.active, true),
-      or(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.platform, "whatsapp")),
-    ));
+  try {
+    await db.update(sourcesTable)
+      .set({ autoPublish: true, requireApproval: false })
+      .where(and(
+        eq(sourcesTable.active, true),
+        or(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.platform, "whatsapp")),
+      ));
 
-  await initTelegramClient();
-  // WhatsApp oturumu diske kayıtlıysa QR olmadan geri yüklenir
-  void initWhatsAppClient();
-  startScraperWorker();
-  logger.info("Workers started (telegram + whatsapp + scraper)");
+    await initTelegramClient();
+    // WhatsApp Chromium boot'ta AÇILMAZ — healthcheck / OOM riski.
+    // Admin panelden «Bağlan» ile başlar (WA_AUTO_CONNECT=1 ile opsiyonel).
+    void initWhatsAppClient();
+    startScraperWorker();
+    logger.info("Workers started (telegram + scraper; whatsapp on-demand)");
+  } catch (e) {
+    logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
+  }
 }
 
-void bootstrapWorkers();
-
+// Önce dinle (Railway healthcheck), sonra worker'ları başlat
 httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
   logger.info({ port, host: "0.0.0.0" }, "Server listening");
+  setTimeout(() => { void bootstrapWorkers(); }, 1500);
 });
 
 const railwayFallbackPort = 8080;
