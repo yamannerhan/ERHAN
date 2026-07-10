@@ -19,9 +19,11 @@ services:
       NODE_ENV: production
       BASE_PATH: /
       PORT: "8080"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_SKIP_DOWNLOAD: "true"
     depends_on:
       - postgres
+    shm_size: "256mb"
 
 volumes:
   pgdata:
