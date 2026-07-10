@@ -387,12 +387,18 @@ function parseFloodWaitSeconds(err: unknown): number | null {
 async function withTelegramRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return await fn();
+      return await Promise.race([
+        fn(),
+        new Promise<T>((_, reject) => {
+          setTimeout(() => reject(new Error(`telegram timeout: ${label}`)), 45_000);
+        }),
+      ]);
     } catch (err) {
       const waitSec = parseFloodWaitSeconds(err);
       if (waitSec != null && attempt < 3) {
-        const delay = (waitSec + 1) * 1000;
-        logger.warn({ label, waitSec, attempt }, "telegram-client: rate limit, bekleniyor");
+        // Uzun FLOOD_WAIT tüm kuyruğu dondurmasın
+        const delay = (Math.min(waitSec, 40) + 1) * 1000;
+        logger.warn({ label, waitSec, cappedSec: Math.min(waitSec, 40), attempt }, "telegram-client: rate limit, bekleniyor");
         await sleep(delay);
         continue;
       }

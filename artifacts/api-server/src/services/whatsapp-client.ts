@@ -140,12 +140,13 @@ function scheduleWhatsAppReconnect(reason: string): void {
   if (manualStop) return;
   if (reconnectTimer) return;
   reconnectAttempts++;
-  if (reconnectAttempts > 8) {
+  if (reconnectAttempts > 20) {
     lastError = `WhatsApp tekrar bağlanamadı (${reason}). Admin panelinden QR/onay ile bağlanın.`;
     logger.error({ reason, reconnectAttempts }, "wa: reconnect vazgeçildi");
+    reconnectAttempts = 0; // sonra tekrar denenebilsin
     return;
   }
-  const delay = Math.min(60_000, 5_000 * reconnectAttempts);
+  const delay = Math.min(45_000, 3_000 * Math.min(reconnectAttempts, 8));
   logger.info({ reason, delay, reconnectAttempts }, "wa: otomatik yeniden bağlanma planlandı");
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -173,12 +174,14 @@ function startWhatsAppWatchdog(): void {
         scheduleWhatsAppReconnect("browser_disconnected");
         return;
       }
-      // Hafif canlı tutma: Store erişimi (oturumu uyutmaz)
+      // Canlı tutma — oturumu uyutma / düşürme
       const page = (client as { pupPage?: { evaluate?: (fn: () => unknown) => Promise<unknown> } }).pupPage;
       if (page?.evaluate) {
         void page.evaluate(() => {
           try {
-            return typeof (window as unknown as { Store?: unknown }).Store !== "undefined";
+            const w = window as unknown as { Store?: { AppState?: { presence?: string } }; WhatsApp?: unknown };
+            if (w.Store?.AppState) return true;
+            return typeof w.Store !== "undefined";
           } catch {
             return false;
           }
@@ -187,7 +190,7 @@ function startWhatsAppWatchdog(): void {
     } catch (e) {
       logger.warn({ err: e }, "wa: watchdog kontrolü başarısız");
     }
-  }, 45_000);
+  }, 30_000);
 }
 
 function stopWhatsAppWatchdog(): void {

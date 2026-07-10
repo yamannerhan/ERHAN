@@ -243,6 +243,12 @@ export default function Home() {
     ...(cityFilter ? { city: cityFilter } : {}),
   } as Parameters<typeof useGetListings>[0]);
 
+  const { data: featuredData } = useGetListings({
+    page: 1,
+    limit: 20,
+    featured: true,
+  } as Parameters<typeof useGetListings>[0]);
+
   useEffect(() => {
     sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify({ page, activePill, otherCity, sortNewest }));
   }, [page, activePill, otherCity, sortNewest]);
@@ -325,7 +331,10 @@ export default function Home() {
     return arr;
   }, [filtered, sortNewest]);
 
-  const featured = (allListings.filter(l => l.isFeatured)[0]) ?? null;
+  const featuredList = useMemo(
+    () => featuredData?.listings ?? [],
+    [featuredData],
+  );
   const totalCount = listingsData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -507,48 +516,64 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* ── Featured Listing ─────────────────────────────── */}
-        {featured && (
-          <section>
-            <Link
-              href={`/ilan/${featured.id}`}
-              onClick={saveHomeScroll}
-              className="og-featured-card block relative"
-            >
-              <div className="og-featured-pill">
-                <Star className="w-3 h-3 fill-current" /> ÖNE ÇIKAN
+        {/* ── Öne Çıkanlar (sağdan sola kayar) ─────────────── */}
+        {featuredList.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="og-section-title flex items-center gap-2">
+              <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+              Öne Çıkanlar
+            </h2>
+            <div className="featured-strip overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/[0.04]">
+              <div
+                className={`flex gap-3 w-max py-3 px-2 ${featuredList.length > 1 ? "animate-featured-scroll" : ""}`}
+                style={featuredList.length > 1 ? { animationDuration: `${Math.max(18, featuredList.length * 6)}s` } : undefined}
+              >
+                {[...featuredList, ...(featuredList.length > 1 ? featuredList : [])].map((item, idx) => {
+                  const company = displayCompany(item.company) || "Firma";
+                  const img = getListingImage(item.title, item.company, item.companyLogoUrl, item.id);
+                  return (
+                    <Link
+                      key={`${item.id}-${idx}`}
+                      href={`/ilan/${item.id}`}
+                      onClick={saveHomeScroll}
+                      className="og-featured-card featured-card-accent block relative shrink-0 w-[280px] sm:w-[320px]"
+                    >
+                      <div className="og-featured-pill">
+                        <Star className="w-3 h-3 fill-current" /> ÖNE ÇIKAN
+                      </div>
+                      <div className="flex gap-3 items-start">
+                        <div className="og-featured-logo shrink-0 overflow-hidden">
+                          {item.companyLogoUrl || img ? (
+                            <img src={item.companyLogoUrl || img} alt="" className="w-full h-full object-cover rounded-lg" />
+                          ) : (
+                            <ShieldCheck className="w-6 h-6 text-amber-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="og-featured-title text-sm leading-snug line-clamp-2">{item.title}</h3>
+                          <div className="flex items-center gap-1 text-xs mt-1 og-text-muted">
+                            <MapPin className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{item.city}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            <span className="og-chip">{item.workType || "Tam Zamanlı"}</span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="og-featured-salary text-sm">{item.salary || "Görüşülecek"}</div>
+                        </div>
+                      </div>
+                      <div className="og-featured-foot">
+                        <span className="og-text-muted text-[11px] truncate">
+                          {company} · {formatDate(item.createdAt)}
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
-              <div className="flex gap-3 items-start">
-                <div className="og-featured-logo shrink-0">
-                  {featured.companyLogoUrl ? (
-                    <img src={featured.companyLogoUrl} alt={displayCompany(featured.company) ?? ""} className="w-full h-full object-cover rounded-lg" />
-                  ) : (
-                    <ShieldCheck className="w-6 h-6 text-amber-400" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="og-featured-title">{featured.title}</h3>
-                  <div className="flex items-center gap-1 text-xs mt-1 og-text-muted">
-                    <MapPin className="w-3 h-3" />
-                    <span className="truncate">{featured.city}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    <span className="og-chip">{featured.workType || "Tam Zamanlı"}</span>
-                    <span className="og-chip">{detectArmed(featured.title, featured.description, featured.requirements)}</span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="og-featured-salary">{featured.salary || "Görüşülecek"}</div>
-                  <div className="og-text-muted text-[10px] font-semibold mt-0.5">Aylık</div>
-                </div>
-              </div>
-              <div className="og-featured-foot">
-                <span className="og-text-muted text-[11px] truncate">
-                  {displayCompany(featured.company) ?? "Firma"} · {formatDate(featured.createdAt)}
-                </span>
-                <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
-              </div>
-            </Link>
+            </div>
           </section>
         )}
 

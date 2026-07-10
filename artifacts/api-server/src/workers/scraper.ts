@@ -166,7 +166,7 @@ const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
 const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
-const STALE_SCAN_LOCK_MS = 3 * 60 * 1000;
+const STALE_SCAN_LOCK_MS = 90 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
 const WA_MESSAGE_PROCESS_DELAY_MS = 200;
 const WA_GROUP_GAP_MS = 12_000;
@@ -1005,7 +1005,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
-/** Sıradaki tek Telegram kaynağını seç: önce ilk taraması bitmemiş (id sırası), sonra id sırasıyla round-robin. */
+/** Sıradaki tek Telegram kaynağını seç: önce ilk taraması bitmemiş (id sırası), kilitli olanları atla. */
 function pickNextTelegramSource(
   telegramSources: Array<typeof sourcesTable.$inferSelect>,
 ): typeof sourcesTable.$inferSelect | null {
@@ -1013,7 +1013,15 @@ function pickNextTelegramSource(
   if (!active.length) return null;
 
   const incomplete = active.filter(s => !s.initialScanDone);
-  if (incomplete.length > 0) return incomplete[0] ?? null;
+  if (incomplete.length > 0) {
+    const now = Date.now();
+    const free = incomplete.filter((s) => {
+      if (!s.isScanning) return true;
+      const t = s.lastCheckedAt?.getTime() ?? 0;
+      return now - t > STALE_SCAN_LOCK_MS;
+    });
+    return (free[0] ?? incomplete[0]) ?? null;
+  }
 
   const allDone = active.every(s => s.initialScanDone);
   if (allDone) {
@@ -1024,6 +1032,49 @@ function pickNextTelegramSource(
   }
 
   return active[0] ?? null;
+}
+
+/** "Sırada bekliyor" ile donmuş kuyruğu kurtar */
+async function recoverStuckTelegramQueue(
+  telegramSources: Array<typeof sourcesTable.$inferSelect>,
+): Promise<void> {
+  const incomplete = telegramSources.filter((s) => s.active && !s.initialScanDone);
+  if (incomplete.length === 0) return;
+
+  const now = Date.now();
+  let forced = 0;
+  for (const s of incomplete) {
+    if (!s.isScanning) continue;
+    const age = now - (s.lastCheckedAt?.getTime() ?? 0);
+    if (age > STALE_SCAN_LOCK_MS || !s.lastCheckedAt) {
+      await db.update(sourcesTable)
+        .set({ isScanning: false })
+        .where(eq(sourcesTable.id, s.id));
+      forced++;
+    }
+  }
+  if (forced > 0) {
+    logger.warn({ forced }, "scraper: takılı Telegram kilitleri zorla açıldı");
+  }
+
+  const anyLive = incomplete.some((s) => {
+    if (s.isScanning) return true;
+    const t = s.lastCheckedAt?.getTime() ?? 0;
+    return t > 0 && now - t < 120_000 && s.lastError !== "Sırada bekliyor…";
+  });
+
+  if (!anyLive) {
+    await releaseStaleScanLocks(true);
+    for (const s of incomplete) {
+      if (s.lastError === "Sırada bekliyor…" || !s.lastError) {
+        await patchSourceProgress(s.id, {
+          lastError: "Kuyruk kurtarıldı — tarama başlıyor…",
+          isScanning: false,
+        });
+      }
+    }
+    logger.warn({ count: incomplete.length }, "scraper: ölü Telegram kuyruğu kurtarıldı");
+  }
 }
 
 function scheduleNextTelegramCycle(hasActiveTelegram: boolean, delayMs = INITIAL_BACKFILL_INTERVAL_MS): void {
@@ -1043,71 +1094,100 @@ function scheduleNextTelegramCycle(hasActiveTelegram: boolean, delayMs = INITIAL
   }).catch(() => {});
 }
 
-async function scanTelegramSources(
-  telegramSources: Array<typeof sourcesTable.$inferSelect>,
-  _force: boolean,
-): Promise<void> {
-  await releaseStaleScanLocks();
-  const now = new Date();
-  const hasActive = telegramSources.some(s => s.active);
-
-  const target = pickNextTelegramSource(telegramSources);
-  if (!target) return;
-
-  // Sırada bekleyen kaynaklarda hata gösterme
-  const waiting = telegramSources.filter(s => s.active && !s.initialScanDone && s.id !== target.id);
-  for (const w of waiting) {
-    await patchSourceProgress(w.id, { lastError: "Sırada bekliyor…" });
-  }
-
-  const fresh = await loadSourceById(target.id);
-  if (!fresh?.active) return;
-
-  if (fresh.isScanning) {
-    logger.info(`scraper: kaynak #${fresh.id} "${fresh.name}" kilitli — zincir devam (başka döngü bitince)`);
-    // Önceki döngü hâlâ çalışıyor olabilir; kilidi bırakıp zinciri KESME (takılma sebebi buydu)
-    scheduleNextTelegramCycle(hasActive, 8_000);
-    return;
-  }
-
-  const username = extractTelegramUsername(fresh.url);
-  const queueIndex = telegramSources.filter(s => s.active).sort((a, b) => a.id - b.id);
-  const pos = queueIndex.findIndex(s => s.id === fresh.id) + 1;
-  logger.info(
-    `scraper: sıra → kaynak #${fresh.id} "${fresh.name}" @${username ?? "?"} ` +
-    `(${pos}/${queueIndex.length}, ilk=${!fresh.initialScanDone}, %${fresh.initialScanProgress ?? 0}, offset=${fresh.initialScanOffsetId ?? "0"})`,
-  );
-
-  const locked = await acquireSourceScanLock(fresh.id);
+async function scanOneTelegramSource(
+  source: typeof sourcesTable.$inferSelect,
+  now: Date,
+): Promise<{ added: number; errors: number; stillInitial: boolean }> {
+  const username = extractTelegramUsername(source.url);
+  const locked = await acquireSourceScanLock(source.id);
   if (!locked) {
-    scheduleNextTelegramCycle(hasActive, 8_000);
-    return;
+    // Kilit alınamadı — zorla açmayı dene (takılma)
+    await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, source.id));
+    const retry = await acquireSourceScanLock(source.id);
+    if (!retry) return { added: 0, errors: 0, stillInitial: !source.initialScanDone };
   }
 
   let cycleAdded = 0;
   let cycleErrors = 0;
-
   try {
-    const stats = await checkTelegramSource(fresh);
+    await patchSourceProgress(source.id, { lastError: `Taranıyor… @${username ?? "?"}`, isScanning: true });
+    const stats = await checkTelegramSource(source);
     cycleAdded += stats.added;
     cycleErrors += stats.errors;
   } catch (e) {
     cycleErrors++;
     const errMsg = e instanceof Error ? e.message : String(e);
-    logger.warn(`scraper: telegram source ${fresh.id} (@${username ?? "?"}) failed: ${errMsg}`);
+    logger.warn(`scraper: telegram source ${source.id} (@${username ?? "?"}) failed: ${errMsg}`);
     await db.update(sourcesTable)
       .set({
         lastError: errMsg.slice(0, 500),
         lastCheckedAt: now,
         isScanning: false,
-        lastScanErrors: (fresh.lastScanErrors ?? 0) + 1,
+        lastScanErrors: (source.lastScanErrors ?? 0) + 1,
       })
-      .where(eq(sourcesTable.id, fresh.id));
+      .where(eq(sourcesTable.id, source.id));
   } finally {
-    await releaseSourceScanLock(fresh.id);
+    await releaseSourceScanLock(source.id);
   }
 
-  logger.info({ sourceId: fresh.id, cycleAdded, cycleErrors }, "scraper: döngü özeti (tek kaynak)");
+  const fresh = await loadSourceById(source.id);
+  return {
+    added: cycleAdded,
+    errors: cycleErrors,
+    stillInitial: !!(fresh && !fresh.initialScanDone),
+  };
+}
+
+async function scanTelegramSources(
+  telegramSources: Array<typeof sourcesTable.$inferSelect>,
+  _force: boolean,
+): Promise<void> {
+  await releaseStaleScanLocks();
+  await recoverStuckTelegramQueue(telegramSources);
+  const now = new Date();
+  const hasActive = telegramSources.some(s => s.active);
+
+  // Aynı döngüde en fazla 3 kaynak ilerle — kuyruk "Sırada bekliyor"da donmasın
+  const maxPerCycle = 3;
+  let scanned = 0;
+
+  for (let n = 0; n < maxPerCycle; n++) {
+    const live = await db.select().from(sourcesTable)
+      .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "telegram")));
+    const target = pickNextTelegramSource(live);
+    if (!target) break;
+
+    const waiting = live.filter(s => s.active && !s.initialScanDone && s.id !== target.id);
+    for (const w of waiting) {
+      await patchSourceProgress(w.id, { lastError: "Sırada bekliyor…" });
+    }
+
+    const fresh = await loadSourceById(target.id);
+    if (!fresh?.active) break;
+
+    if (fresh.isScanning) {
+      const age = Date.now() - (fresh.lastCheckedAt?.getTime() ?? 0);
+      if (age < STALE_SCAN_LOCK_MS) {
+        logger.info(`scraper: kaynak #${fresh.id} kilitli, sıradakine geç`);
+        await db.update(sourcesTable).set({ isScanning: false }).where(eq(sourcesTable.id, fresh.id));
+      }
+    }
+
+    const username = extractTelegramUsername(fresh.url);
+    const queueIndex = live.filter(s => s.active).sort((a, b) => a.id - b.id);
+    const pos = queueIndex.findIndex(s => s.id === fresh.id) + 1;
+    logger.info(
+      `scraper: sıra → kaynak #${fresh.id} "${fresh.name}" @${username ?? "?"} ` +
+      `(${pos}/${queueIndex.length}, ilk=${!fresh.initialScanDone}, %${fresh.initialScanProgress ?? 0}, offset=${fresh.initialScanOffsetId ?? "0"})`,
+    );
+
+    const result = await scanOneTelegramSource(fresh, now);
+    scanned++;
+    logger.info({ sourceId: fresh.id, ...result }, "scraper: döngü özeti (tek kaynak)");
+
+    // Bu kaynak hâlâ ilk taramadaysa sonraki döngüde devam (rate limit)
+    if (result.stillInitial) break;
+  }
 
   emitRealtime("scraper:status", {
     telegramGramJsConnected: await ensureTelegramConnected(1),
@@ -1115,7 +1195,11 @@ async function scanTelegramSources(
     effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
   });
 
-  scheduleNextTelegramCycle(hasActive);
+  if (scanned > 0 || await hasIncompleteInitialScan()) {
+    scheduleNextTelegramCycle(hasActive, await hasIncompleteInitialScan() ? 3_000 : INITIAL_BACKFILL_INTERVAL_MS);
+  } else if (hasActive) {
+    scheduleNextTelegramCycle(hasActive);
+  }
 }
 
 async function publishElemanJob(
