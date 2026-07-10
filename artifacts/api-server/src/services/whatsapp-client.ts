@@ -271,10 +271,8 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
 }
 
 /**
- * Grup mesajlarını çek.
- * - İlk/deep tarama: son maxAgeDays'e kadar geriye sayfa sayfa iner, sonra eski→yeni döner
- * - Sonraki: afterTimestampMs sonrası yeni mesajlar
- * Hızlı toplu çekim WhatsApp Web'i keser — derin taramada yavaş ve kademeli ilerler.
+ * Grup mesajlarını çek — 30 güne kadar loadEarlierMsgs ile geriye iner.
+ * WhatsApp Web varsayılanı ~50 mesaj tutar; binlerce mesaj için geçmişi zorla yükleriz.
  */
 export async function fetchWhatsAppMessages(
   groupJid: string,
@@ -287,10 +285,9 @@ export async function fetchWhatsAppMessages(
 ): Promise<WhatsAppMessage[]> {
   if (!client || !isReady) return [];
 
-  // Sohbeti aç — geçmiş senkronu için gerekli
   try {
     await (client as any).interface?.openChatWindow?.(groupJid);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 1000));
   } catch { /* ignore */ }
 
   const chat = await client.getChatById(groupJid);
@@ -300,29 +297,102 @@ export async function fetchWhatsAppMessages(
     ? opts.afterTimestampMs
     : (Date.now() - (opts.maxAgeDays ?? 30) * 24 * 60 * 60 * 1000);
 
-  const limits = opts.deep
-    ? [100, 250, 500, 800, 1200, 1800, 2500, 3500]
-    : [Math.min(opts.limit ?? 80, 150)];
+  const chatId = (chat as any).id?._serialized ?? groupJid;
+  const page = (client as any).pupPage;
+
+  // Derin tarama: Store üzerinden daha eski mesajları yükle (30 güne kadar)
+  if (opts.deep && page) {
+    let stagnant = 0;
+    let lastCount = 0;
+    for (let i = 0; i < 120; i++) {
+      let info: { ok?: boolean; count?: number; oldest?: number; done?: boolean } = {};
+      try {
+        info = await page.evaluate(async (id: string) => {
+          const w = window as any;
+          const storeChat =
+            w.Store?.Chat?.get?.(id) ||
+            w.Store?.Chat?.find?.(id) ||
+            (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+          if (!storeChat) return { ok: false, count: 0, oldest: Date.now(), done: true };
+
+          const msgsBefore = storeChat.msgs?.getModelsArray?.()?.length
+            ?? storeChat.msgs?.length
+            ?? 0;
+
+          try {
+            if (w.Store?.ConversationMsgs?.loadEarlierMsgs) {
+              await w.Store.ConversationMsgs.loadEarlierMsgs(storeChat);
+            } else if (typeof storeChat.loadEarlierMsgs === "function") {
+              await storeChat.loadEarlierMsgs();
+            } else if (w.Store?.Msg?.loadEarlierMsgs) {
+              await w.Store.Msg.loadEarlierMsgs(storeChat);
+            }
+          } catch {
+            return { ok: true, count: msgsBefore, oldest: Date.now(), done: true };
+          }
+
+          const arr = storeChat.msgs?.getModelsArray?.() ?? [];
+          const count = arr.length || msgsBefore;
+          let oldest = Date.now();
+          for (const m of arr) {
+            const t = (m.t ?? m.timestamp ?? 0) * 1000;
+            if (t > 0 && t < oldest) oldest = t;
+          }
+          const noMore = count <= msgsBefore;
+          return { ok: true, count, oldest, done: noMore };
+        }, chatId);
+      } catch (e) {
+        logger.warn({ err: e, groupJid }, "wa: loadEarlierMsgs evaluate failed");
+        break;
+      }
+
+      const count = info.count ?? 0;
+      const oldest = info.oldest ?? Date.now();
+      logger.info({ groupJid, round: i + 1, count, oldest: new Date(oldest).toISOString() }, "wa: geçmiş yükleniyor");
+
+      if (oldest <= cutoff) break;
+      if (info.done || count <= lastCount) {
+        stagnant++;
+        if (stagnant >= 3) break;
+      } else {
+        stagnant = 0;
+      }
+      lastCount = count;
+      await new Promise((r) => setTimeout(r, 900));
+    }
+  }
+
+  // Yüklenen geçmişten mesajları al — yüksek limit
+  const fetchLimit = opts.deep
+    ? 10000
+    : Math.min(opts.limit ?? 100, 200);
 
   let best: any[] = [];
-  for (const limit of limits) {
-    try {
-      const batch = await chat.fetchMessages({ limit });
-      best = batch ?? [];
-    } catch {
-      break;
-    }
-    if (!opts.deep) break;
+  try {
+    best = (await chat.fetchMessages({ limit: fetchLimit })) ?? [];
+  } catch (e) {
+    logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
+    best = [];
+  }
 
-    let oldest = Date.now();
-    for (const m of best) {
-      const ts = (m.timestamp ?? 0) * 1000;
-      if (ts > 0 && ts < oldest) oldest = ts;
+  // Hâlâ azsa bir kez daha yükle + çek
+  if (opts.deep && best.length < 100 && page) {
+    for (let i = 0; i < 15; i++) {
+      try {
+        await page.evaluate(async (id: string) => {
+          const w = window as any;
+          const storeChat = w.Store?.Chat?.get?.(id) || w.Store?.Chat?.find?.(id);
+          if (!storeChat) return;
+          if (w.Store?.ConversationMsgs?.loadEarlierMsgs) {
+            await w.Store.ConversationMsgs.loadEarlierMsgs(storeChat);
+          }
+        }, chatId);
+      } catch { break; }
+      await new Promise((r) => setTimeout(r, 700));
     }
-    // 30 gün sınırına ulaşıldı veya daha fazla mesaj yok
-    if (best.length < limit || oldest <= cutoff) break;
-    // WhatsApp'ı boğmamak için yavaşla
-    await new Promise((r) => setTimeout(r, 1200));
+    try {
+      best = (await chat.fetchMessages({ limit: fetchLimit })) ?? best;
+    } catch { /* keep previous */ }
   }
 
   const out: WhatsAppMessage[] = [];
@@ -344,6 +414,7 @@ export async function fetchWhatsAppMessages(
   }
 
   out.sort((a, b) => a.timestamp - b.timestamp);
+  logger.info({ groupJid, fetched: best.length, inRange: out.length, deep: !!opts.deep }, "wa: mesajlar hazır");
   return out;
 }
 

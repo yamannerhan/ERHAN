@@ -114,6 +114,7 @@ async function findDuplicateImported(hash: string, sourceId: number, externalId?
 }
 
 async function findDuplicateActiveListing(text: string, hash: string): Promise<number | null> {
+  // Sadece TAM metin (hash) eşleşmesi — benzer ilanlar yayınlanır
   const recent = await db.select({
     id: listingsTable.id,
     description: listingsTable.description,
@@ -126,13 +127,12 @@ async function findDuplicateActiveListing(text: string, hash: string): Promise<n
       isNotNull(listingsTable.sourceTag),
     ))
     .orderBy(desc(listingsTable.createdAt))
-    .limit(500);
+    .limit(1200);
 
   for (const row of recent) {
     const content = row.rawText ?? row.description ?? "";
     if (!content) continue;
     if (createDuplicateHash(content) === hash) return row.id;
-    if (isLikelyDuplicateJob(text, content)) return row.id;
   }
   return null;
 }
@@ -160,8 +160,8 @@ const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 15 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
-const WA_MESSAGE_PROCESS_DELAY_MS = 400;
-const WA_GROUP_GAP_MS = 20_000;
+const WA_MESSAGE_PROCESS_DELAY_MS = 200;
+const WA_GROUP_GAP_MS = 12_000;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
 const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
@@ -553,7 +553,17 @@ async function processMessage(
     .set({ status: "approved" })
     .where(eq(importedPostsTable.id, imported.id));
 
-  if (!isInitialScan) {
+  // WhatsApp: her yayınlanan ilanda sadece admin bildirimi (sohbet/herkese gitmez)
+  // Telegram: ilk tarama dışında herkese duyuru
+  if (source.platform === "whatsapp") {
+    void announceNewListing({
+      id: newListing.id,
+      title: newListing.title,
+      city: newListing.city,
+      company: newListing.company,
+    }, { adminOnly: true, skipChat: true })
+      .catch((err) => logger.error({ err }, "scraper: wa admin notify failed"));
+  } else if (!isInitialScan) {
     void announceNewListing({
       id: newListing.id,
       title: newListing.title,
@@ -1095,10 +1105,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   const lastTs = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
 
   await patchSourceProgress(source.id, {
-    lastError: null,
+    lastError: isInitialScan ? "30 gün geçmiş yükleniyor (binlerce mesaj)…" : null,
     isScanning: true,
-    initialScanPhase: isInitialScan ? "forward" : null,
-    initialScanProgress: isInitialScan ? Math.max(1, source.initialScanProgress ?? 1) : 100,
+    initialScanPhase: isInitialScan ? "backward" : null,
+    initialScanProgress: isInitialScan ? Math.max(2, source.initialScanProgress ?? 1) : 100,
   });
 
   logger.info(
@@ -1108,10 +1118,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 
   let messages;
   try {
-    // İlk tarama: 30 güne geri git, tüm mesajları eski→yeni al. Sonra: kaldığı yerden.
+    // İlk tarama: 30 güne geri git (loadEarlierMsgs), tüm mesajları eski→yeni al.
     messages = await fetchWhatsAppMessages(groupJid, isInitialScan
       ? { maxAgeDays: INITIAL_SCAN_DAYS, deep: true }
-      : { afterTimestampMs: lastTs, limit: 80 });
+      : { afterTimestampMs: lastTs, limit: 150 });
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
@@ -1144,6 +1154,13 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   stats.messagesRead = messages.length;
   let maxTs = lastTs;
   let processed = 0;
+
+  await patchSourceProgress(source.id, {
+    lastError: null,
+    initialScanPhase: isInitialScan ? "forward" : null,
+    initialScanProgress: isInitialScan ? 5 : 100,
+    lastScanMessagesRead: messages.length,
+  });
 
   for (const m of messages) {
     if (m.timestamp > maxTs) maxTs = m.timestamp;
