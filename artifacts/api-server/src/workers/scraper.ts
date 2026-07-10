@@ -571,7 +571,7 @@ async function processMessage(
       title: newListing.title,
       city: newListing.city,
       company: newListing.company,
-    }, { adminOnly: true, skipChat: true })
+    }, { adminOnly: true, skipChat: true, sourceLabel: "WhatsApp" })
       .catch((err) => logger.error({ err }, "scraper: wa admin notify failed"));
   } else if (!isInitialScan) {
     void announceNewListing({
@@ -1090,6 +1090,9 @@ async function publishElemanJob(
   job: ElemanJobDetail,
 ): Promise<ProcessResult> {
   if (!job.phone?.trim()) return "skipped";
+  if (!isSecurityJobPosting(job.rawText) && !isSecurityJobPosting(`${job.title}\n${job.description}`)) {
+    return "skipped";
+  }
 
   const externalId = `eleman_${job.id}`;
   const hash = createDuplicateHash(job.rawText);
@@ -1133,14 +1136,20 @@ async function publishElemanJob(
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
   const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
   const gender = extractGender(job.rawText);
+  const cleanDescription = (job.description || job.rawText)
+    .replace(/Eleman\.net['']?te yayınlanmaktadır\.?\s*İlan No:\s*\d+/gi, "")
+    .replace(/Kaynak:\s*Eleman\.net/gi, "")
+    .replace(/İlan URL:\s*\S+/gi, "")
+    .trim();
+
   const [newListing] = await db.insert(listingsTable).values({
     title: job.title || "Güvenlik Personeli Aranıyor",
     company: job.companyName ?? "Belirtilmemiş",
     city,
     salary: extractSalary(job.rawText) ?? undefined,
     workType: extractWorkType(job.rawText),
-    description: job.description || job.rawText,
-    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}\nKaynak: Eleman.net`,
+    description: cleanDescription,
+    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
     status: "active",
     isActive: true,
     autoDeleteOnExpiry: true,
@@ -1166,7 +1175,7 @@ async function publishElemanJob(
     title: newListing.title,
     city: newListing.city,
     company: newListing.company,
-  }, { adminOnly: true, skipChat: true })
+  }, { adminOnly: true, skipChat: true, sourceLabel: "Eleman.net" })
     .catch((err) => logger.error({ err }, "scraper: Eleman.net admin notify failed"));
 
   return "added";

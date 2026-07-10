@@ -2285,10 +2285,10 @@ function ElemanSourcesSection({ apiCall, toast }: { apiCall: (path: string, meth
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">Eleman.net</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• Girişsiz tarama — <strong className="text-slate-200">telefonu olmayan ilan çekilmez</strong></div>
+              <div>• Girişsiz tarama — <strong className="text-slate-200">sadece Özel Güvenlik</strong>, telefonu olmayan çekilmez</div>
               <div>• Türkiye illeri sırayla (İstanbul Avrupa/Anadolu ayrı) — {cityCount || "…"} il</div>
               <div>• İlk tarama bitince her <strong className="text-slate-200">30 dk</strong> yeni ilan dinler</div>
-              <div>• Yayında kaynak: <strong className="text-emerald-300">Kaynak: Eleman.net</strong></div>
+              <div>• Admin bildirimi: <strong className="text-emerald-300">Eleman.net ilanı yayınlandı</strong> (ilan metnine yazılmaz)</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

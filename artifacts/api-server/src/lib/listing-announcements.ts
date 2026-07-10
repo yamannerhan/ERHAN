@@ -10,10 +10,12 @@ type ListingAnnouncement = {
 };
 
 export type AnnounceOptions = {
-  /** true: sadece admin/moderatör bildirimi (WhatsApp ilanları) */
+  /** true: sadece admin/moderatör bildirimi */
   adminOnly?: boolean;
   /** true: sohbet kanalına yazma */
   skipChat?: boolean;
+  /** Admin bildirim metninde kaynak adı (WhatsApp / Eleman.net / …) */
+  sourceLabel?: string;
 };
 
 const BOT_USER_ID = 0;
@@ -32,6 +34,7 @@ export async function announceNewListing(
   const message = announcementText(listing);
   const adminOnly = !!opts.adminOnly;
   const skipChat = opts.skipChat ?? adminOnly;
+  const sourceLabel = opts.sourceLabel?.trim() || null;
 
   if (!skipChat) {
     const settings = await db.select({ chatAnnounceListings: adminSettingsTable.chatAnnounceListings })
@@ -70,7 +73,7 @@ export async function announceNewListing(
   }
 
   const notifMessage = adminOnly
-    ? `WhatsApp ilanı yayınlandı: ${listing.title}`
+    ? `${sourceLabel ?? "Kaynak"} ilanı yayınlandı: ${listing.title}`
     : `Yeni ilan eklendi: ${listing.title}`;
   const notifType = adminOnly ? "admin_listing" : "listing";
 

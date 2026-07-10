@@ -102,20 +102,55 @@ function getJsonLdJobPosting(html: string): Record<string, unknown> | null {
   return null;
 }
 
+function isOzelGuvenlikJob(title: string, description: string): boolean {
+  const t = `${title}\n${description}`.toLocaleLowerCase("tr-TR");
+  // Sadece özel güvenlik / güvenlik görevlisi ilanları
+  const ok = /(?:özel\s+güvenlik|ögg\b|güvenlik\s+görevlisi|güvenlik\s+personeli|kimlikli\s+güvenlik|silahl[ıi]\s+güvenlik|silahs[ıi]z\s+güvenlik|5188)/.test(t);
+  if (!ok) return false;
+  // Açıkça başka meslek
+  if (/(?:temizlik\s+personeli|aşçı|garson|kurye|şoför|muhasebe|yazılım|satış\s+danışmanı)/.test(t) && !/güvenlik/.test(t)) {
+    return false;
+  }
+  return true;
+}
+
+function cleanElemanDescription(text: string): string {
+  return text
+    .replace(/Eleman\.net['']?te yayınlanmaktadır\.?\s*İlan No:\s*\d+/gi, "")
+    .replace(/Eleman\.net['']?te yayınlanmaktadır\.?/gi, "")
+    .replace(/Kaynak:\s*Eleman\.net/gi, "")
+    .replace(/İlan URL:\s*\S+/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function parseElemanDetailHtml(html: string, item: ElemanListItem): ElemanJobDetail | null {
   const job = getJsonLdJobPosting(html);
   const title = typeof job?.title === "string" ? job.title : item.title;
-  const description = typeof job?.description === "string" ? decodeHtml(job.description) : decodeHtml(html);
+  let description = typeof job?.description === "string" ? decodeHtml(job.description) : "";
+  if (!description || description.length < 40) {
+    description = decodeHtml(html);
+  }
+  description = cleanElemanDescription(description);
+
+  if (!isOzelGuvenlikJob(title, description)) {
+    logger.info({ id: item.id, title }, "eleman: özel güvenlik değil — atlandı");
+    return null;
+  }
+
   const company = job?.hiringOrganization;
   const companyName = typeof company === "object" && company !== null && typeof (company as Record<string, unknown>).name === "string"
     ? (company as Record<string, unknown>).name as string
     : null;
-  const phone = extractPhoneNumber(`${description}\n${decodeHtml(html)}`);
-  if (!phone) return null;
-  const rawText = [title, companyName, description, `Kaynak: Eleman.net`, `İlan URL: ${item.url}`]
+  const phone = extractPhoneNumber(`${description}\n${title}`);
+  // Detayda numara yoksa HTML'in ilgili kısmından dene (footer/script hariç kısaltılmış)
+  const phoneFallback = phone || extractPhoneNumber(html.slice(0, 60_000));
+  if (!phoneFallback) return null;
+
+  const rawText = [title, companyName, description, `Telefon: ${phoneFallback}`]
     .filter(Boolean)
     .join("\n\n");
-  return { ...item, title, companyName, description, phone, rawText };
+  return { ...item, title, companyName, description, phone: phoneFallback, rawText };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {
@@ -151,6 +186,8 @@ export async function scrapeElemanCityPages(
   for (let page = Math.max(1, startPage); page < Math.max(1, startPage) + Math.max(1, pages); page += 1) {
     const listings = await fetchElemanListPage(citySlug, page);
     for (const listing of listings) {
+      // Liste başlığında güvenlik yoksa detaya girme
+      if (!isOzelGuvenlikJob(listing.title, "")) continue;
       await new Promise((r) => setTimeout(r, 350));
       const detail = await fetchElemanJobDetail(listing);
       if (detail) jobs.push(detail);
