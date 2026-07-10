@@ -2655,24 +2655,20 @@ function DashCard({
 function AdminDashboardHome({
   stats, onNavigate,
 }: {
-  stats: { totalUsers: number; onlineUsers: number; totalListings: number; pendingListings: number; totalMessages: number; bannedUsers: number } | null;
+  stats: {
+    totalUsers: number; onlineUsers: number; totalListings: number; pendingListings: number;
+    totalMessages: number; bannedUsers: number; todayUsers: number; weekUsers: number;
+    weekListings: number; totalViews: number; todayListings: number;
+    userTrendPct: number; listingTrendPct: number;
+    chartSeries: { day: string; uyeler: number; ilanlar: number }[];
+    recentActivities: { type: string; title: string; subtitle: string; time: string }[];
+  } | null;
   onNavigate: (tab: AdminTab) => void;
 }) {
-  // 7-day chart data — synthetic series scaled around current totals
-  const chartData = useMemo(() => {
-    const days = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
-    const u = stats?.totalUsers ?? 40;
-    const l = stats?.totalListings ?? 250;
-    return days.map((d, i) => ({
-      day: d,
-      uyeler: Math.max(0, Math.round(u * (0.5 + (i % 3) * 0.18 + i * 0.06))),
-      ilanlar: Math.max(0, Math.round(l * (0.4 + ((i + 1) % 4) * 0.16 + i * 0.04))),
-    }));
-  }, [stats?.totalUsers, stats?.totalListings]);
+  const chartData = stats?.chartSeries ?? [];
 
   const totalListings = stats?.totalListings ?? 0;
   const pendingListings = stats?.pendingListings ?? 0;
-  const totalAll = totalListings + pendingListings;
   const pieData = [
     { name: "Aktif İlanlar", value: totalListings, color: "#10b981" },
     { name: "Bekleyen İlanlar", value: pendingListings, color: "#f59e0b" },
@@ -2683,13 +2679,29 @@ function AdminDashboardHome({
     day: "numeric", month: "long", year: "numeric", weekday: "long",
   });
 
-  // NOTE: These traffic metrics are static stubs — backend endpoint TBD.
+  const fmt = (n: number) => n.toLocaleString("tr-TR");
+  const trendLabel = (pct: number) => `${pct > 0 ? "+" : ""}${pct}%`;
+
   const quickStats = [
-    { icon: Eye, label: "Bugünkü Ziyaretçiler", value: "1,247" },
-    { icon: Users, label: "Toplam Ziyaretçiler", value: "45,892" },
-    { icon: TrendingUp, label: "Dönüşüm Oranı", value: "%3.24" },
-    { icon: Clock, label: "Ortalama Oturum", value: "8:45" },
+    { icon: Users, label: "Bugünkü Kayıtlar", value: fmt(stats?.todayUsers ?? 0) },
+    { icon: User, label: "Haftalık Üye", value: fmt(stats?.weekUsers ?? 0) },
+    { icon: Eye, label: "Toplam İlan Tıklama", value: fmt(stats?.totalViews ?? 0) },
+    { icon: Briefcase, label: "Bugünkü İlan", value: fmt(stats?.todayListings ?? 0) },
   ];
+
+  const activityMeta: Record<string, { color: string; icon: React.ElementType }> = {
+    user: { color: "from-violet-500 to-indigo-600", icon: User },
+    listing: { color: "from-blue-500 to-cyan-500", icon: Briefcase },
+    support: { color: "from-pink-500 to-rose-500", icon: Headphones },
+  };
+
+  const activities = (stats?.recentActivities ?? []).map(a => ({
+    color: activityMeta[a.type]?.color ?? "from-slate-500 to-slate-600",
+    icon: activityMeta[a.type]?.icon ?? Bell,
+    title: a.title,
+    subtitle: a.subtitle,
+    time: a.time,
+  }));
 
   const services = [
     { icon: Globe, label: "Web Sitesi" },
@@ -2700,13 +2712,9 @@ function AdminDashboardHome({
     { icon: Bell, label: "Bildirim Servisi" },
   ];
 
-  const activities = [
-    { color: "from-violet-500 to-indigo-600", icon: User, title: "Yeni üye kaydı", subtitle: "Yeni bir kullanıcı kayıt oldu", time: "2 dk önce" },
-    { color: "from-blue-500 to-cyan-500", icon: Briefcase, title: "Yeni ilan oluşturuldu", subtitle: "Güvenlik görevlisi ilanı eklendi", time: "8 dk önce" },
-    { color: "from-emerald-500 to-teal-500", icon: CheckCircle, title: "İlan onaylandı", subtitle: "Bekleyen ilan onaya alındı", time: "23 dk önce" },
-    { color: "from-amber-500 to-orange-500", icon: CreditCard, title: "Bakiye yüklendi", subtitle: "Kullanıcı bakiyesi güncellendi", time: "1 sa önce" },
-    { color: "from-pink-500 to-rose-500", icon: Headphones, title: "Destek talebi", subtitle: "Yeni destek talebi açıldı", time: "2 sa önce" },
-  ];
+  const userTrend = stats?.userTrendPct ?? 0;
+  const listingTrend = stats?.listingTrendPct ?? 0;
+  const trendDir = (pct: number): "up" | "down" | "flat" => pct > 0 ? "up" : pct < 0 ? "down" : "flat";
 
   const quickAccess = [
     { icon: Plus, title: "Yeni İlan Oluştur", subtitle: "Hızlı ilan ekle", color: "from-emerald-500 to-teal-500", tab: "ilan-olustur" as AdminTab },
@@ -2740,12 +2748,12 @@ function AdminDashboardHome({
 
       {/* Stats grid (6 cards) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <DashStatCard label="Toplam Üye" value={stats?.totalUsers ?? 0} icon={Users} color="from-violet-500 to-indigo-600" trend="12%" trendDir="up" desc="Geçen aya göre artış" />
-        <DashStatCard label="Çevrimiçi" value={stats?.onlineUsers ?? 0} icon={Activity} color="from-emerald-500 to-teal-500" trend="8%" trendDir="up" desc="Şu anda aktif" />
-        <DashStatCard label="Aktif İlan" value={stats?.totalListings ?? 0} icon={Briefcase} color="from-orange-500 to-amber-500" trend="15%" trendDir="up" desc="Toplam aktif ilan" />
-        <DashStatCard label="Bekleyen" value={stats?.pendingListings ?? 0} icon={Clock} color="from-blue-500 to-cyan-500" trend="5%" trendDir="up" desc="Onay bekleyen ilan" />
-        <DashStatCard label="Mesaj" value={stats?.totalMessages ?? 0} icon={MessageSquare} color="from-violet-500 to-fuchsia-500" trend="0%" trendDir="flat" desc="Okunmamış mesaj" />
-        <DashStatCard label="Yasaklı" value={stats?.bannedUsers ?? 0} icon={ShieldAlert} color="from-red-500 to-rose-600" trend="0%" trendDir="flat" desc="Yasaklı kullanıcı" />
+        <DashStatCard label="Toplam Üye" value={stats?.totalUsers ?? 0} icon={Users} color="from-violet-500 to-indigo-600" trend={trendLabel(userTrend)} trendDir={trendDir(userTrend)} desc="Son 7 güne göre" />
+        <DashStatCard label="Çevrimiçi" value={stats?.onlineUsers ?? 0} icon={Activity} color="from-emerald-500 to-teal-500" desc="Şu anda aktif" />
+        <DashStatCard label="Aktif İlan" value={stats?.totalListings ?? 0} icon={Briefcase} color="from-orange-500 to-amber-500" trend={trendLabel(listingTrend)} trendDir={trendDir(listingTrend)} desc="Son 7 güne göre" />
+        <DashStatCard label="Bekleyen" value={stats?.pendingListings ?? 0} icon={Clock} color="from-blue-500 to-cyan-500" desc="Onay bekleyen ilan" />
+        <DashStatCard label="Mesaj" value={stats?.totalMessages ?? 0} icon={MessageSquare} color="from-violet-500 to-fuchsia-500" desc="Sohbet mesajı" />
+        <DashStatCard label="Yasaklı" value={stats?.bannedUsers ?? 0} icon={ShieldAlert} color="from-red-500 to-rose-600" desc="Yasaklı kullanıcı" />
       </div>
 
       {/* Middle row: chart + quick access + status */}
@@ -2849,7 +2857,7 @@ function AdminDashboardHome({
           }
         >
           <div className="space-y-2">
-            {activities.map((a, i) => (
+            {activities.length > 0 ? activities.map((a, i) => (
               <div key={i} className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-white/[0.03]">
                 <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${a.color} flex items-center justify-center shrink-0 shadow-lg shadow-black/30`}>
                   <a.icon className="w-4 h-4 text-white" />
@@ -2860,7 +2868,9 @@ function AdminDashboardHome({
                 </div>
                 <span className="text-[10px] text-slate-500 shrink-0">{a.time}</span>
               </div>
-            ))}
+            )) : (
+              <p className="text-xs text-slate-500 text-center py-6">Henüz aktivite yok</p>
+            )}
           </div>
         </DashCard>
 
@@ -2906,7 +2916,6 @@ function AdminDashboardHome({
               </div>
             ))}
           </div>
-          <p className="text-[9px] text-slate-600 mt-2 italic">* Trafik verileri henüz canlı değil — backend bağlantısı gerekli.</p>
         </DashCard>
       </div>
     </div>
@@ -2935,6 +2944,10 @@ export default function AdminDashboard() {
   const { data: stats, refetch: refetchStats } = useAdminApi<{
     totalUsers: number; onlineUsers: number; totalListings: number;
     todayListings: number; totalMessages: number; bannedUsers: number; pendingListings: number;
+    todayUsers: number; weekUsers: number; weekListings: number; totalViews: number;
+    userTrendPct: number; listingTrendPct: number;
+    chartSeries: { day: string; uyeler: number; ilanlar: number }[];
+    recentActivities: { type: string; title: string; subtitle: string; time: string }[];
   }>("/admin/stats");
 
   const { data: settings, refetch: refetchSettings } = useAdminApi<{

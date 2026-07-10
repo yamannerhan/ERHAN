@@ -138,8 +138,16 @@ function adminUserJson(u: typeof usersTable.$inferSelect) {
 }
 
 router.get("/admin/stats", authMiddleware, requireAdminOrModerator, async (_req, res): Promise<void> => {
-  const today = new Date();
+  const now = new Date();
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 6);
+  const prevWeekStart = new Date(weekAgo);
+  prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const prevWeekEnd = new Date(weekAgo);
+  prevWeekEnd.setMilliseconds(-1);
+
   const settings = await db.select().from(adminSettingsTable).limit(1);
   const s0 = settings[0];
   const fakeMin = s0?.fakeOnlineMin ?? 0;
@@ -148,14 +156,95 @@ router.get("/admin/stats", authMiddleware, requireAdminOrModerator, async (_req,
     ? Math.floor(Math.random() * (Math.max(fakeMin, fakeMax) - Math.min(fakeMin, fakeMax) + 1)) + Math.min(fakeMin, fakeMax)
     : (s0?.fakeOnlineBonus ?? 0);
 
-  const [totalUsers, totalListings, todayListings, totalMessages, bannedUsers, pendingListings] = await Promise.all([
+  const [
+    totalUsers, totalListings, todayListings, totalMessages, bannedUsers, pendingListings,
+    todayUsers, weekUsers, weekListings, prevWeekUsers, prevWeekListings, totalViews,
+    usersByDay, listingsByDay, recentUsers, recentListings, recentTickets,
+  ] = await Promise.all([
     db.select({ count: sql<number>`count(*)::int` }).from(usersTable),
     db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(eq(listingsTable.status, "active")),
     db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(and(eq(listingsTable.status, "active"), sql`${listingsTable.createdAt} >= ${today}`)),
     db.select({ count: sql<number>`count(*)::int` }).from(chatMessagesTable).where(eq(chatMessagesTable.isDeleted, false)),
     db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.isBanned, true)),
     db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(eq(listingsTable.status, "pending")),
+    db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(sql`${usersTable.createdAt} >= ${today}`),
+    db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(sql`${usersTable.createdAt} >= ${weekAgo}`),
+    db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(sql`${listingsTable.createdAt} >= ${weekAgo}`),
+    db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(and(sql`${usersTable.createdAt} >= ${prevWeekStart}`, sql`${usersTable.createdAt} < ${weekAgo}`)),
+    db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(and(sql`${listingsTable.createdAt} >= ${prevWeekStart}`, sql`${listingsTable.createdAt} < ${weekAgo}`)),
+    db.select({ total: sql<number>`coalesce(sum(${listingsTable.viewCount}), 0)::int` }).from(listingsTable).where(eq(listingsTable.status, "active")),
+    db.select({
+      day: sql<string>`to_char(date_trunc('day', ${usersTable.createdAt}), 'YYYY-MM-DD')`,
+      count: sql<number>`count(*)::int`,
+    }).from(usersTable).where(sql`${usersTable.createdAt} >= ${weekAgo}`).groupBy(sql`date_trunc('day', ${usersTable.createdAt})`),
+    db.select({
+      day: sql<string>`to_char(date_trunc('day', ${listingsTable.createdAt}), 'YYYY-MM-DD')`,
+      count: sql<number>`count(*)::int`,
+    }).from(listingsTable).where(sql`${listingsTable.createdAt} >= ${weekAgo}`).groupBy(sql`date_trunc('day', ${listingsTable.createdAt})`),
+    db.select({ username: usersTable.username, createdAt: usersTable.createdAt }).from(usersTable).orderBy(desc(usersTable.createdAt)).limit(3),
+    db.select({ title: listingsTable.title, createdAt: listingsTable.createdAt }).from(listingsTable).orderBy(desc(listingsTable.createdAt)).limit(3),
+    db.select({ subject: supportTicketsTable.subject, createdAt: supportTicketsTable.createdAt }).from(supportTicketsTable).orderBy(desc(supportTicketsTable.createdAt)).limit(2),
   ]);
+
+  const dayLabels = ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"];
+  const userDayMap = new Map(usersByDay.map(r => [r.day, r.count]));
+  const listingDayMap = new Map(listingsByDay.map(r => [r.day, r.count]));
+  const chartSeries = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekAgo);
+    d.setDate(d.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    return {
+      day: dayLabels[d.getDay()],
+      uyeler: userDayMap.get(key) ?? 0,
+      ilanlar: listingDayMap.get(key) ?? 0,
+    };
+  });
+
+  const pct = (current: number, previous: number) => {
+    if (previous <= 0) return current > 0 ? 100 : 0;
+    return Math.round(((current - previous) / previous) * 100);
+  };
+
+  const formatRelative = (date: Date) => {
+    const diffMs = now.getTime() - date.getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "Az önce";
+    if (mins < 60) return `${mins} dk önce`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} sa önce`;
+    const days = Math.floor(hours / 24);
+    return `${days} gün önce`;
+  };
+
+  type ActivityItem = { type: string; title: string; subtitle: string; time: string; at: number };
+  const recentActivities: ActivityItem[] = [
+    ...recentUsers.map(u => ({
+      type: "user",
+      title: "Yeni üye kaydı",
+      subtitle: u.username,
+      time: formatRelative(u.createdAt),
+      at: u.createdAt.getTime(),
+    })),
+    ...recentListings.map(l => ({
+      type: "listing",
+      title: "Yeni ilan oluşturuldu",
+      subtitle: l.title,
+      time: formatRelative(l.createdAt),
+      at: l.createdAt.getTime(),
+    })),
+    ...recentTickets.map(t => ({
+      type: "support",
+      title: "Destek talebi",
+      subtitle: t.subject,
+      time: formatRelative(t.createdAt),
+      at: t.createdAt.getTime(),
+    })),
+  ].sort((a, b) => b.at - a.at).slice(0, 5);
+
+  const weekUsersCount = weekUsers[0]?.count ?? 0;
+  const prevWeekUsersCount = prevWeekUsers[0]?.count ?? 0;
+  const weekListingsCount = weekListings[0]?.count ?? 0;
+  const prevWeekListingsCount = prevWeekListings[0]?.count ?? 0;
 
   res.json({
     totalUsers: totalUsers[0]?.count ?? 0,
@@ -166,6 +255,14 @@ router.get("/admin/stats", authMiddleware, requireAdminOrModerator, async (_req,
     bannedUsers: bannedUsers[0]?.count ?? 0,
     pendingListings: pendingListings[0]?.count ?? 0,
     reportedMessages: 0,
+    todayUsers: todayUsers[0]?.count ?? 0,
+    weekUsers: weekUsersCount,
+    weekListings: weekListingsCount,
+    totalViews: totalViews[0]?.total ?? 0,
+    userTrendPct: pct(weekUsersCount, prevWeekUsersCount),
+    listingTrendPct: pct(weekListingsCount, prevWeekListingsCount),
+    chartSeries,
+    recentActivities: recentActivities.map(({ type, title, subtitle, time }) => ({ type, title, subtitle, time })),
   });
 });
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useCreateListing } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
-import { useLocation } from "wouter";
+import { Redirect, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,16 +46,25 @@ export default function AddListing() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const createMutation = useCreateListing();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const [dupWarning, setDupWarning] = useState<string | null>(null);
-  const [autoDeleteOnExpiry, setAutoDeleteOnExpiry] = useState(true);
+  const [smartText, setSmartText] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
-
-  // Image upload state
   const [imageMode, setImageMode] = useState<"file" | "url">("file");
   const [imagePreview, setImagePreview] = useState<string>("");
   const [imageUploading, setImageUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const form = useForm<ListingFormValues>({
+    resolver: zodResolver(listingSchema),
+    defaultValues: {
+      title: "", company: "", city: "", workType: "", salary: "", description: "", requirements: "", applyUrl: "", cardTheme: "auto",
+    },
+  });
+
+  useEffect(() => {
+    if (!isLoading && !user) setLocation("/giris");
+  }, [user, isLoading, setLocation]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -93,19 +102,6 @@ export default function AddListing() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const form = useForm<ListingFormValues>({
-    resolver: zodResolver(listingSchema),
-    defaultValues: {
-      title: "", company: "", city: "", workType: "", salary: "", description: "", requirements: "", applyUrl: "", cardTheme: "auto"
-    },
-  });
-
-  useEffect(() => {
-    if (!user) setLocation("/giris");
-  }, [user, setLocation]);
-
-  if (!user) return null;
-
   const parseSmartListing = async () => {
     if (!smartText.trim()) return;
     setSmartLoading(true);
@@ -131,8 +127,9 @@ export default function AddListing() {
         setImagePreview(data.companyLogoUrl);
       }
       toast({ title: "İlan bilgileri ayıklandı", description: "Alanları kontrol edip yayınlayabilirsiniz." });
-    } catch (error: any) {
-      toast({ title: "Ayıklama başarısız", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Ayıklama başarısız";
+      toast({ title: "Ayıklama başarısız", description: message, variant: "destructive" });
     } finally {
       setSmartLoading(false);
     }
@@ -149,20 +146,32 @@ export default function AddListing() {
         applyUrl: values.applyUrl || null,
         companyLogoUrl: values.companyLogoUrl || null,
         cardTheme: values.cardTheme && values.cardTheme !== "auto" ? values.cardTheme : null,
-        autoDeleteOnExpiry,
       };
-      await createMutation.mutateAsync({ data: payload as any });
+      await createMutation.mutateAsync({ data: payload as never });
       toast({ title: "İlan başarıyla yayınlandı", description: "İlan 1 ay boyunca yayında kalacaktır. Adminlere inceleme bildirimi gönderildi." });
       setLocation("/ilanlar");
-    } catch (error: any) {
-      const serverMsg = (error?.data as any)?.error || error?.message || "İlan eklenirken bir hata oluştu.";
-      if (error?.status === 409) {
+    } catch (error: unknown) {
+      const err = error as { data?: { error?: string }; message?: string; status?: number };
+      const serverMsg = err?.data?.error || err?.message || "İlan eklenirken bir hata oluştu.";
+      if (err?.status === 409) {
         setDupWarning(serverMsg);
       } else {
         toast({ title: "Hata", description: serverMsg, variant: "destructive" });
       }
     }
   };
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="p-4 flex items-center justify-center min-h-[40vh] text-sm text-muted-foreground">
+          Yükleniyor...
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!user) return <Redirect to="/giris" />;
 
   return (
     <Layout>
@@ -238,7 +247,7 @@ export default function AddListing() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Çalışma Şekli</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger className="glass-card border-white/10">
                             <SelectValue placeholder="Seçiniz" />
@@ -336,7 +345,6 @@ export default function AddListing() {
                 )}
               />
 
-              {/* ── İlan Görseli ── */}
               <div className="space-y-2">
                 <label className="text-sm font-medium block">İlan Görseli (Opsiyonel)</label>
                 <div className="grid grid-cols-2 gap-2 mb-2">
@@ -439,21 +447,6 @@ export default function AddListing() {
                   {dupWarning}
                 </div>
               )}
-
-              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoDeleteOnExpiry}
-                  onChange={e => setAutoDeleteOnExpiry(e.target.checked)}
-                  className="w-4 h-4 mt-0.5 rounded accent-primary shrink-0"
-                />
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Bitince otomatik sil</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    İşaretliyse süre dolunca ilan tamamen silinir. Kapalıysa pasif olur, profilinizden yeniden yayınlayabilirsiniz.
-                  </p>
-                </div>
-              </label>
 
               <Button
                 type="submit"

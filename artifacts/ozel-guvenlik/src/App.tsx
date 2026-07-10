@@ -42,7 +42,7 @@ function Router() {
       <Route path="/giris" component={Login} />
       <Route path="/kayit" component={Register} />
       <Route path="/profil/:username" component={Profile} />
-      <Route path="/ilan-ekle" component={AddListing} />
+      <Route path="/ilan-ekle">{() => <RequireAuth component={AddListing} />}</Route>
       <Route path="/bildirimler" component={Notifications} />
       <Route path="/favoriler" component={Favorites} />
       <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
