@@ -2669,6 +2669,7 @@ function AdminDashboardHome({
 
   const totalListings = stats?.totalListings ?? 0;
   const pendingListings = stats?.pendingListings ?? 0;
+  const totalAll = totalListings + pendingListings;
   const pieData = [
     { name: "Aktif İlanlar", value: totalListings, color: "#10b981" },
     { name: "Bekleyen İlanlar", value: pendingListings, color: "#f59e0b" },
