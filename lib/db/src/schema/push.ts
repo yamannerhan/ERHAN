@@ -27,6 +27,9 @@ export const pushCampaignsTable = pgTable("push_campaigns", {
   schedule: text("schedule").notNull().default("instant"),
   sentCount: integer("sent_count").notNull().default(0),
   createdBy: integer("created_by"),
+  /** Tekrarlayan kampanya aktif mi */
+  isActive: boolean("is_active").notNull().default(false),
+  nextSendAt: timestamp("next_send_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   sentAt: timestamp("sent_at", { withTimezone: true }),
 });

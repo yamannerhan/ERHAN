@@ -132,12 +132,15 @@ export function playNotificationBeep(): void {
 export function playPushSound(soundUrl?: string | null): void {
   try {
     if (localStorage.getItem("og_notif_sound") === "0") return;
-    // Arka plan tercihi açıksa ve UI görünürse ses çalma
-    if (localStorage.getItem("og_notif_bg_only") !== "0" && document.visibilityState === "visible") return;
   } catch { /* ignore */ }
+  // YouTube asla çalmaz
+  if (soundUrl && /youtube\.com|youtu\.be|music\.youtube/i.test(soundUrl)) {
+    playNotificationBeep();
+    return;
+  }
   if (soundUrl) {
     try {
-      const audio = new Audio(soundUrl);
+      const audio = new Audio(soundUrl.startsWith("http") || soundUrl.startsWith("/") ? soundUrl : soundUrl);
       audio.volume = 0.85;
       void audio.play().catch(() => playNotificationBeep());
       return;

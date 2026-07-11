@@ -1,5 +1,5 @@
 /* ÖzelGüvenlik PWA Service Worker — Web Push + custom sounds */
-const CACHE_NAME = "ozelguvenlik-push-v5";
+const CACHE_NAME = "ozelguvenlik-push-v6";
 const NOTIF_ICON = "/notification-icon.png";
 const NOTIF_BADGE = "/notification-badge.png";
 
@@ -13,6 +13,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+function isYoutubeSound(url) {
+  if (!url) return false;
+  const u = String(url).toLowerCase();
+  return u.includes("youtube.com") || u.includes("youtu.be") || u.includes("music.youtube");
+}
+
 self.addEventListener("push", (event) => {
   let data = {
     title: "Özel Güvenlik",
@@ -24,6 +30,7 @@ self.addEventListener("push", (event) => {
     soundUrl: null,
     icon: null,
     badge: null,
+    force: false,
   };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
@@ -36,20 +43,22 @@ self.addEventListener("push", (event) => {
   const badgePath = data.badge || NOTIF_BADGE;
   const icon = iconPath.startsWith("http") ? iconPath : `${origin}${iconPath}`;
   const badge = badgePath.startsWith("http") ? badgePath : `${origin}${badgePath}`;
+  const soundUrl = isYoutubeSound(data.soundUrl) ? null : data.soundUrl;
 
   event.waitUntil((async () => {
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    // Uygulama sekmesi öndeyse OS bildirimi gösterme (arka plan tercihi)
     const anyVisible = clients.some((c) => {
       try {
-        return c.visibilityState === "visible" && "focused" in c ? c.focused !== false : c.visibilityState === "visible";
+        return c.visibilityState === "visible";
       } catch {
         return false;
       }
     });
 
-    if (anyVisible) {
-      // Sadece açık sekmeye sessiz ipucu (ses yok)
+    // Kampanya / force: uygulama açıkken de OS bildirimi göster
+    // Diğer türler: sadece arka planda göster
+    const forceShow = data.force === true || data.kind === "campaign" || data.kind === "digest";
+    if (anyVisible && !forceShow) {
       for (const c of clients) {
         c.postMessage({ type: "OG_PUSH_SILENT", kind: data.kind || "campaign", title: data.title, body: data.body });
       }
@@ -65,14 +74,25 @@ self.addEventListener("push", (event) => {
       requireInteraction: false,
       silent: data.sound === false,
       vibrate: data.sound === false ? undefined : [120, 60, 120],
-      data: { url: data.url || "/", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" },
+      data: { url: data.url || "/", soundUrl: soundUrl || null, kind: data.kind || "campaign", force: !!forceShow },
       actions: [{ action: "open", title: "Aç" }],
     };
 
     await self.registration.showNotification(data.title || "Özel Güvenlik", options);
-    if (data.sound === false) return;
+
+    // Özel ses: YouTube yok. Kampanya/force ise uygulama açıkken de çal (admin test).
+    const playSound = data.sound !== false && soundUrl && (!anyVisible || forceShow);
+    if (!playSound) {
+      // Sistem bip: arka planda veya force kampanyada (URL yoksa)
+      if (data.sound !== false && (!anyVisible || forceShow)) {
+        for (const c of clients) {
+          c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: null, kind: data.kind || "campaign" });
+        }
+      }
+      return;
+    }
     for (const c of clients) {
-      c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" });
+      c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: soundUrl || null, kind: data.kind || "campaign" });
     }
   })());
 });

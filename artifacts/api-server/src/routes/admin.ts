@@ -531,10 +531,42 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (pushOnChatReply !== undefined) updates.pushOnChatReply = Boolean(pushOnChatReply);
   if (pushSoundEnabled !== undefined) updates.pushSoundEnabled = Boolean(pushSoundEnabled);
   if (pushOnUserJoin !== undefined) updates.pushOnUserJoin = Boolean(pushOnUserJoin);
-  if (pushSoundListingUrl !== undefined) updates.pushSoundListingUrl = pushSoundListingUrl == null || pushSoundListingUrl === "" ? null : String(pushSoundListingUrl);
-  if (pushSoundJoinUrl !== undefined) updates.pushSoundJoinUrl = pushSoundJoinUrl == null || pushSoundJoinUrl === "" ? null : String(pushSoundJoinUrl);
-  if (pushSoundReplyUrl !== undefined) updates.pushSoundReplyUrl = pushSoundReplyUrl == null || pushSoundReplyUrl === "" ? null : String(pushSoundReplyUrl);
-  if (pushSoundCampaignUrl !== undefined) updates.pushSoundCampaignUrl = pushSoundCampaignUrl == null || pushSoundCampaignUrl === "" ? null : String(pushSoundCampaignUrl);
+  if (pushSoundListingUrl !== undefined) {
+    const raw = pushSoundListingUrl == null || pushSoundListingUrl === "" ? null : String(pushSoundListingUrl);
+    const { sanitizeSoundUrl } = await import("../lib/web-push");
+    updates.pushSoundListingUrl = sanitizeSoundUrl(raw);
+    if (raw && !updates.pushSoundListingUrl) {
+      res.status(400).json({ error: "YouTube linki ses olarak kullanılamaz. Doğrudan .mp3 / .wav / .ogg HTTPS linki girin." });
+      return;
+    }
+  }
+  if (pushSoundJoinUrl !== undefined) {
+    const raw = pushSoundJoinUrl == null || pushSoundJoinUrl === "" ? null : String(pushSoundJoinUrl);
+    const { sanitizeSoundUrl } = await import("../lib/web-push");
+    updates.pushSoundJoinUrl = sanitizeSoundUrl(raw);
+    if (raw && !updates.pushSoundJoinUrl) {
+      res.status(400).json({ error: "YouTube linki ses olarak kullanılamaz. Doğrudan .mp3 / .wav / .ogg HTTPS linki girin." });
+      return;
+    }
+  }
+  if (pushSoundReplyUrl !== undefined) {
+    const raw = pushSoundReplyUrl == null || pushSoundReplyUrl === "" ? null : String(pushSoundReplyUrl);
+    const { sanitizeSoundUrl } = await import("../lib/web-push");
+    updates.pushSoundReplyUrl = sanitizeSoundUrl(raw);
+    if (raw && !updates.pushSoundReplyUrl) {
+      res.status(400).json({ error: "YouTube linki ses olarak kullanılamaz. Doğrudan .mp3 / .wav / .ogg HTTPS linki girin." });
+      return;
+    }
+  }
+  if (pushSoundCampaignUrl !== undefined) {
+    const raw = pushSoundCampaignUrl == null || pushSoundCampaignUrl === "" ? null : String(pushSoundCampaignUrl);
+    const { sanitizeSoundUrl } = await import("../lib/web-push");
+    updates.pushSoundCampaignUrl = sanitizeSoundUrl(raw);
+    if (raw && !updates.pushSoundCampaignUrl) {
+      res.status(400).json({ error: "YouTube linki ses olarak kullanılamaz. Doğrudan .mp3 / .wav / .ogg HTTPS linki girin." });
+      return;
+    }
+  }
   if (pushDigestMode !== undefined) {
     const m = String(pushDigestMode);
     if (["off", "daily", "weekly", "monthly"].includes(m)) updates.pushDigestMode = m;

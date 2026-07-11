@@ -1,6 +1,6 @@
 import webpush from "web-push";
-import { db, adminSettingsTable, pushSubscriptionsTable, listingsTable } from "@workspace/db";
-import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { db, adminSettingsTable, pushSubscriptionsTable, listingsTable, pushCampaignsTable } from "@workspace/db";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import {
   DEFAULT_NOTIF_PREFS,
@@ -15,14 +15,47 @@ export type PushPayload = {
   url?: string;
   tag?: string;
   sound?: boolean;
-  /** listing | join | reply | campaign | digest */
+  /** listing | join | reply | campaign | digest | welcome */
   kind?: string;
   soundUrl?: string | null;
   icon?: string | null;
   badge?: string | null;
+  /** true = uygulama açık olsa bile OS bildirimi göster */
+  force?: boolean;
 };
 
 let ensured = false;
+
+/** YouTube sayfa linki ses dosyası değildir — çalmaz */
+export function sanitizeSoundUrl(url: string | null | undefined): string | null {
+  if (!url?.trim()) return null;
+  const u = url.trim();
+  const low = u.toLowerCase();
+  if (
+    low.includes("youtube.com")
+    || low.includes("youtu.be")
+    || low.includes("youtube.com/shorts")
+    || low.includes("music.youtube")
+  ) {
+    return null;
+  }
+  // Doğrudan ses / genel https dosya
+  return u;
+}
+
+export function isInvalidSoundUrl(url: string | null | undefined): boolean {
+  if (!url?.trim()) return false;
+  return sanitizeSoundUrl(url) == null;
+}
+
+function nextSendDate(schedule: string, from = new Date()): Date {
+  const d = new Date(from.getTime());
+  if (schedule === "daily") d.setDate(d.getDate() + 1);
+  else if (schedule === "weekly") d.setDate(d.getDate() + 7);
+  else if (schedule === "monthly") d.setMonth(d.getMonth() + 1);
+  else d.setDate(d.getDate() + 1);
+  return d;
+}
 
 /** Deploy'da drizzle push gecikse bile tablolar/kolonlar hazır olsun */
 export async function ensurePushSchema(): Promise<void> {
@@ -53,6 +86,8 @@ export async function ensurePushSchema(): Promise<void> {
         sent_at TIMESTAMPTZ
       )
     `);
+    await db.execute(sql`ALTER TABLE push_campaigns ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE push_campaigns ADD COLUMN IF NOT EXISTS next_send_at TIMESTAMPTZ`);
     const cols: Array<[string, string]> = [
       ["push_enabled", "BOOLEAN NOT NULL DEFAULT TRUE"],
       ["push_on_new_listing", "BOOLEAN NOT NULL DEFAULT TRUE"],
@@ -177,20 +212,25 @@ async function sendToSub(
   }
 }
 
-export async function broadcastPush(payload: PushPayload, opts?: { userIds?: number[] }): Promise<{ sent: number; total: number }> {
+export async function broadcastPush(
+  payload: PushPayload,
+  opts?: { userIds?: number[]; force?: boolean },
+): Promise<{ sent: number; total: number; skippedForeground: number }> {
   await ensureVapidKeys();
   const s = await getOrCreateSettings();
-  if (s.pushEnabled === false) return { sent: 0, total: 0 };
+  if (s.pushEnabled === false) return { sent: 0, total: 0, skippedForeground: 0 };
 
+  const force = opts?.force === true || payload.force === true;
   const adminSoundOn = s.pushSoundEnabled !== false && payload.sound !== false;
   const kind = payload.kind || "campaign";
-  const baseSoundUrl =
+  const rawSound =
     payload.soundUrl
     ?? (kind === "listing" ? s.pushSoundListingUrl
       : kind === "join" ? s.pushSoundJoinUrl
       : kind === "reply" ? s.pushSoundReplyUrl
       : s.pushSoundCampaignUrl)
     ?? null;
+  const baseSoundUrl = sanitizeSoundUrl(rawSound) || (kind === "campaign" || kind === "digest" ? "/sounds/notify.wav" : null);
 
   let subs = await db.select().from(pushSubscriptionsTable);
   if (opts?.userIds?.length) {
@@ -203,6 +243,7 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
 
   let sent = 0;
   let eligible = 0;
+  let skippedForeground = 0;
   for (const sub of subs) {
     const prefs = sub.userId != null
       ? (prefsMap.get(sub.userId) ?? DEFAULT_NOTIF_PREFS)
@@ -211,12 +252,14 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
     // Giriş yapmış kullanıcı tercihi kapalıysa gönderme
     if (sub.userId != null && !prefsAllowPushKind(prefs, kind)) continue;
 
-    // Uygulama öndeyse (ekran açık) ve tercih açıksa push gönderme
+    // Uygulama öndeyse (kampanya force değilse) atla
     if (
-      sub.userId != null
+      !force
+      && sub.userId != null
       && prefs.notifOnlyBackground !== false
       && isUserForeground(sub.userId)
     ) {
+      skippedForeground++;
       continue;
     }
     eligible++;
@@ -225,6 +268,7 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
     const full: PushPayload = {
       ...payload,
       kind,
+      force,
       sound,
       soundUrl: sound ? baseSoundUrl : null,
       icon: payload.icon || "/notification-icon.png",
@@ -232,7 +276,7 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
     };
     if (await sendToSub(sub, full)) sent++;
   }
-  return { sent, total: eligible };
+  return { sent, total: eligible, skippedForeground };
 }
 
 /** Sadece gerçek kullanıcı ilanı — bot/scraper çağırmaz */
@@ -333,7 +377,8 @@ export async function runPushDigestIfDue(): Promise<void> {
       url: "/",
       tag: `digest-${mode}`,
       kind: "campaign",
-    });
+      force: true,
+    }, { force: true });
     await db.update(adminSettingsTable)
       .set({ pushDigestLastSentAt: new Date() })
       .where(eq(adminSettingsTable.id, s.id));
@@ -343,8 +388,45 @@ export async function runPushDigestIfDue(): Promise<void> {
   }
 }
 
+/** Tekrarlayan kampanyaları gönder (günlük/haftalık/aylık aynı içerik) */
+export async function runScheduledCampaigns(): Promise<void> {
+  try {
+    await ensurePushSchema();
+    const s = await getOrCreateSettings();
+    if (s.pushEnabled === false) return;
+    const now = new Date();
+    const due = await db.select().from(pushCampaignsTable)
+      .where(and(
+        eq(pushCampaignsTable.isActive, true),
+        lte(pushCampaignsTable.nextSendAt, now),
+      ));
+    for (const c of due) {
+      const result = await broadcastPush({
+        title: c.title,
+        body: c.body,
+        url: c.url ?? "/",
+        tag: `campaign-sched-${c.id}-${Date.now()}`,
+        kind: "campaign",
+        force: true,
+      }, { force: true });
+      await db.update(pushCampaignsTable).set({
+        sentCount: (c.sentCount ?? 0) + result.sent,
+        sentAt: now,
+        nextSendAt: nextSendDate(c.schedule || "daily", now),
+      }).where(eq(pushCampaignsTable.id, c.id));
+      logger.info({ id: c.id, sent: result.sent, schedule: c.schedule }, "web-push: scheduled campaign sent");
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "web-push: scheduled campaigns failed");
+  }
+}
+
 export function startPushDigestWorker(): void {
   void ensurePushSchema().then(() => ensureVapidKeys()).catch(() => {});
-  setInterval(() => { void runPushDigestIfDue(); }, 30 * 60 * 1000);
-  setTimeout(() => { void runPushDigestIfDue(); }, 45_000);
+  const tick = () => {
+    void runPushDigestIfDue();
+    void runScheduledCampaigns();
+  };
+  setInterval(tick, 15 * 60 * 1000);
+  setTimeout(tick, 45_000);
 }

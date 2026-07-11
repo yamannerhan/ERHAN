@@ -2108,11 +2108,16 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
     pushSoundJoinUrl: string | null;
     pushSoundReplyUrl: string | null;
     pushSoundCampaignUrl: string | null;
-    recent: Array<{ id: number; title: string; body: string; schedule: string; sentCount: number; createdAt: string; sentAt: string | null }>;
+    recent: Array<{
+      id: number; title: string; body: string; schedule: string; sentCount: number;
+      isActive?: boolean; nextSendAt?: string | null;
+      createdAt: string; sentAt: string | null;
+    }>;
   } | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [url, setUrl] = useState("/");
+  const [schedule, setSchedule] = useState<"instant" | "daily" | "weekly" | "monthly">("instant");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [soundDraft, setSoundDraft] = useState({
@@ -2121,6 +2126,8 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
     pushSoundReplyUrl: "",
     pushSoundCampaignUrl: "",
   });
+
+  const isYoutube = (s: string) => /youtube\.com|youtu\.be|music\.youtube/i.test(s);
 
   const refresh = async () => {
     try {
@@ -2154,13 +2161,22 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
 
   const previewSound = (src: string) => {
     if (!src.trim()) {
-      toast({ title: "Önce ses linki girin", variant: "destructive" });
+      void new Audio("/sounds/notify.wav").play().catch(() => {});
+      toast({ title: "Varsayılan site sesi çalıyor" });
+      return;
+    }
+    if (isYoutube(src)) {
+      toast({
+        title: "YouTube linki çalışmaz",
+        description: "Tarayıcı YouTube sayfasını ses dosyası olarak çalamaz. .mp3 / .wav / .ogg doğrudan link kullanın.",
+        variant: "destructive",
+      });
       return;
     }
     try {
       const a = new Audio(src.trim());
       a.volume = 0.9;
-      void a.play().catch(() => toast({ title: "Ses çalınamadı", description: "Linki kontrol edin (HTTPS mp3/ogg)", variant: "destructive" }));
+      void a.play().catch(() => toast({ title: "Ses çalınamadı", description: "HTTPS .mp3/.wav/.ogg linki olmalı", variant: "destructive" }));
     } catch {
       toast({ title: "Ses çalınamadı", variant: "destructive" });
     }
@@ -2177,9 +2193,19 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
         title: title.trim(),
         body: body.trim(),
         url: url.trim() || "/",
-        schedule: "instant",
-      }) as { message?: string; sent?: number; total?: number };
-      toast({ title: "Bildirim gönderildi", description: r.message || `${r.sent ?? 0} cihaz` });
+        schedule,
+      }) as { message?: string; sent?: number; total?: number; warning?: string | null };
+      toast({
+        title: "Bildirim gönderildi",
+        description: [r.message, r.warning].filter(Boolean).join(" — ") || `${r.sent ?? 0} cihaz`,
+      });
+      if ((r.sent ?? 0) === 0) {
+        toast({
+          title: "Kimseye gitmedi",
+          description: "Abone cihaz 0 ise kullanıcılar bildirim izni vermemiş. Siz de sitede izin verin.",
+          variant: "destructive",
+        });
+      }
       setTitle("");
       setBody("");
       await refresh();
@@ -2187,6 +2213,26 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
       toast({ title: "Gönderilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     } finally {
       setSending(false);
+    }
+  };
+
+  const resend = async (id: number) => {
+    try {
+      const r = await apiCall(`/admin/push/resend/${id}`, "POST") as { message?: string; sent?: number };
+      toast({ title: "Tekrar gönderildi", description: r.message || `${r.sent ?? 0} cihaz` });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Tekrar gönderilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  const stopCampaign = async (id: number) => {
+    try {
+      await apiCall(`/admin/push/stop/${id}`, "POST");
+      toast({ title: "Otomatik gönderim durduruldu" });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Durdurulamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
   };
 
@@ -2212,14 +2258,19 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
   return (
     <Section title="Canlı Push Bildirimleri (PWA / Tarayıcı)" icon={Bell} defaultOpen>
       <div className="space-y-4">
-        <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-[11px] text-amber-100/80 leading-relaxed">
-          Sadece <b>gerçek üyeler</b> ilan paylaşınca veya sohbete katılınca push gider (bot/scraper değil). Ses linkleri mp3/ogg HTTPS olmalı; site açıkken özel ses çalar.
+        <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-[11px] text-amber-100/80 leading-relaxed space-y-1">
+          <p>YouTube / Shorts linki <b>ses dosyası değildir</b> — çalmaz. Doğrudan <b>.mp3 / .wav / .ogg</b> HTTPS linki kullanın.</p>
+          <p>Boş bırakırsanız site varsayılan sesi kullanılır: <code className="text-amber-200">/sounds/notify.wav</code></p>
+          <p>Kampanya gönderimi uygulama açıkken de gider (admin dahil). Abone sayısı 0 ise kimseye gitmez — tarayıcıda bildirim izni şart.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
             <div className="text-[10px] text-slate-400 uppercase">Abone cihaz</div>
             <div className="text-2xl font-black text-emerald-400 mt-1">{stats?.subscribers ?? "—"}</div>
+            {(stats?.subscribers ?? 0) === 0 && (
+              <div className="text-[10px] text-red-300 mt-1">Henüz abone yok — bildirim gitmez</div>
+            )}
           </div>
           <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
             <div className="text-[10px] text-slate-400 uppercase">Özet modu</div>
@@ -2232,12 +2283,12 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
           <Toggle on={stats?.pushOnNewListing !== false} label="Gerçek üye ilanı" desc="Üye ilan paylaşınca herkese push (botlar hariç)" onClick={() => void patch({ pushOnNewListing: !(stats?.pushOnNewListing !== false) }, "İlan bildirimi güncellendi")} />
           <Toggle on={stats?.pushOnUserJoin !== false} label="Gerçek üye katılımı" desc="Sohbete gerçek kullanıcı girince push" onClick={() => void patch({ pushOnUserJoin: !(stats?.pushOnUserJoin !== false) }, "Katılım bildirimi güncellendi")} />
           <Toggle on={stats?.pushOnChatReply !== false} label="Sohbet yanıt bildirimi" desc="Mesajına yanıt gelince kullanıcıya push" onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Yanıt bildirimi güncellendi")} />
-          <Toggle on={stats?.pushSoundEnabled !== false} label="Sesli bildirim" desc="Sistem sesi + titreşim + özel ses (açık sekme)" onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")} />
+          <Toggle on={stats?.pushSoundEnabled !== false} label="Sesli bildirim" desc="Sistem sesi + titreşim + özel ses" onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")} />
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
-          <div className="text-sm font-bold text-white">Bildirim sesleri (link ile)</div>
-          <p className="text-[10px] text-slate-400">Her tür için farklı ses veya hepsine aynı link. Önizle → Kaydet.</p>
+          <div className="text-sm font-bold text-white">Bildirim sesleri (doğrudan dosya linki)</div>
+          <p className="text-[10px] text-slate-400">YouTube yasak. Örnek: https://siteniz.com/sounds/notify.wav — Önizle → Kaydet.</p>
           {soundFields.map((f) => (
             <div key={f.key} className="space-y-1">
               <div className="text-[11px] font-semibold text-slate-300">{f.label}</div>
@@ -2246,17 +2297,20 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
                 <Input
                   value={soundDraft[f.key]}
                   onChange={(e) => setSoundDraft((d) => ({ ...d, [f.key]: e.target.value }))}
-                  placeholder="https://.../ses.mp3"
-                  className="border-white/10 bg-white/5 text-xs"
+                  placeholder="https://.../ses.mp3 veya /sounds/notify.wav"
+                  className={`border-white/10 bg-white/5 text-xs ${isYoutube(soundDraft[f.key]) ? "border-red-400/60" : ""}`}
                 />
                 <Button type="button" variant="outline" className="border-white/15 text-xs shrink-0" onClick={() => previewSound(soundDraft[f.key])}>
                   Önizle
                 </Button>
               </div>
+              {isYoutube(soundDraft[f.key]) && (
+                <div className="text-[10px] text-red-300">YouTube linki kaydedilemez / çalmaz</div>
+              )}
             </div>
           ))}
           <Button
-            disabled={loading}
+            disabled={loading || Object.values(soundDraft).some(isYoutube)}
             onClick={() => void patch({
               pushSoundListingUrl: soundDraft.pushSoundListingUrl.trim() || null,
               pushSoundJoinUrl: soundDraft.pushSoundJoinUrl.trim() || null,
@@ -2270,7 +2324,7 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
         </div>
 
         <div>
-          <label className="text-xs text-slate-400 mb-1.5 block">Özet bildirim (günlük / haftalık / aylık)</label>
+          <label className="text-xs text-slate-400 mb-1.5 block">Otomatik özet (ilan sayısı — günlük / haftalık / aylık)</label>
           <div className="flex flex-wrap gap-2">
             {(["off", "daily", "weekly", "monthly"] as const).map((m) => (
               <button
@@ -2292,23 +2346,61 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
           <div className="text-sm font-bold text-white flex items-center gap-2">
-            <Megaphone className="w-4 h-4 text-amber-300" /> Anlık bildirim gönder
+            <Megaphone className="w-4 h-4 text-amber-300" /> Bildirim gönder
           </div>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Başlık" className="border-white/10 bg-white/5" />
           <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Mesaj metni" rows={3} className="border-white/10 bg-white/5" />
           <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Tıklanınca açılsın (/ veya /ilanlar)" className="border-white/10 bg-white/5" />
+          <div className="flex flex-wrap gap-2">
+            {([
+              { id: "instant" as const, label: "Anlık" },
+              { id: "daily" as const, label: "Günlük tekrar" },
+              { id: "weekly" as const, label: "Haftalık tekrar" },
+              { id: "monthly" as const, label: "Aylık tekrar" },
+            ]).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setSchedule(m.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
+                  schedule === m.id ? "bg-emerald-400 text-black border-emerald-400" : "bg-white/5 text-white/70 border-white/10"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           <Button onClick={() => void sendNow()} disabled={sending} className="w-full bg-amber-400 text-black hover:bg-amber-300 font-bold">
-            {sending ? "Gönderiliyor…" : "Tüm abonelere gönder"}
+            {sending ? "Gönderiliyor…" : schedule === "instant" ? "Tüm abonelere gönder" : "Gönder + otomatik tekrarı başlat"}
           </Button>
         </div>
 
         {stats?.recent && stats.recent.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs font-semibold text-slate-400 uppercase">Son gönderimler</div>
-            {stats.recent.slice(0, 8).map((c) => (
-              <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                <div className="text-xs font-bold text-white">{c.title}</div>
-                <div className="text-[10px] text-slate-400 line-clamp-1">{c.body}</div>
+            {stats.recent.slice(0, 10).map((c) => (
+              <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white">{c.title}</div>
+                    <div className="text-[10px] text-slate-400 line-clamp-1">{c.body}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {c.schedule} · {c.sentCount} gönderim
+                      {c.isActive ? " · otomatik aktif" : ""}
+                      {c.nextSendAt ? ` · sonraki: ${new Date(c.nextSendAt).toLocaleString("tr-TR")}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-[10px] border-amber-400/40 text-amber-300" onClick={() => void resend(c.id)}>
+                    Tekrar gönder
+                  </Button>
+                  {c.isActive && c.schedule !== "instant" && (
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-[10px] border-red-400/40 text-red-300" onClick={() => void stopCampaign(c.id)}>
+                      Otomatiği durdur
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
