@@ -44,8 +44,9 @@ export async function applyFreeFeatureIfAvailable(
     })
     .where(eq(listingsTable.id, listingId));
 
+  const usedSoFar = FREE_FEATURE_LIMIT - remaining;
   await db.update(usersTable)
-    .set({ freeFeatureUsed: (Number(u?.used ?? 0) + 1) })
+    .set({ freeFeatureUsed: usedSoFar + 1 })
     .where(eq(usersTable.id, userId));
 
   return { applied: true, remaining: remaining - 1, featuredUntil: until };
