@@ -70,14 +70,39 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const savedState = getSavedListingsState();
   const [search, setSearch] = useState(initialSearch ?? savedState.search);
   const [city, setCity] = useState(initialCity ?? savedState.city);
-  const [page, setPage] = useState(savedState.page);
+  const [page, setPage] = useState(initialCity || initialSearch ? 1 : savedState.page);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
   const [activeSubFilter, setActiveSubFilter] = useState<null | "anadolu" | "avrupa">(null);
-  const [otherCity, setOtherCity] = useState("");
+  const [otherCity, setOtherCity] = useState(() => {
+    if (!initialCity) return "";
+    if (["İstanbul", "Anadolu Yakası", "Avrupa Yakası"].includes(initialCity)) return "";
+    return initialCity;
+  });
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
+
+  // SEO /il sayfasından gelince filtreyi zorla uygula (eski sessionStorage ezmesin)
+  useEffect(() => {
+    if (!initialCity) return;
+    setCity(initialCity);
+    setPage(1);
+    setActiveSubFilter(
+      initialCity === "Anadolu Yakası" ? "anadolu"
+        : initialCity === "Avrupa Yakası" ? "avrupa"
+          : null,
+    );
+    setOtherCity(
+      ["İstanbul", "Anadolu Yakası", "Avrupa Yakası"].includes(initialCity) ? "" : initialCity,
+    );
+  }, [initialCity]);
+
+  useEffect(() => {
+    if (initialSearch == null) return;
+    setSearch(initialSearch);
+    setPage(1);
+  }, [initialSearch]);
 
   const effectiveCity = useMemo(() => {
     if (!city) return undefined;
@@ -253,8 +278,14 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
         {/* ── Page Heading ─────────────────────────────────── */}
         <section className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="og-page-title">İlanlar</h1>
-            <p className="og-page-sub">Size uygun özel güvenlik ilanlarını keşfedin</p>
+            <h1 className="og-page-title">
+              {city ? `${city} Özel Güvenlik İş İlanları` : "İlanlar"}
+            </h1>
+            <p className="og-page-sub">
+              {city
+                ? `${city} bölgesinde güncel güvenlik personeli alımları`
+                : "Size uygun özel güvenlik ilanlarını keşfedin"}
+            </p>
           </div>
           <button
             type="button"
