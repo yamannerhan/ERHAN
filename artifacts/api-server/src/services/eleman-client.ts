@@ -141,12 +141,32 @@ function isGarbageDescription(text: string): boolean {
 function cleanElemanDescription(text: string): string {
   return text
     .replace(/Eleman\.net['']?te yayınlanmaktadır\.?\s*İlan No:\s*\d+/gi, "")
-    .replace(/Eleman\.net['']?te yayınlanmaktadır\.?/gi, "")
-    .replace(/Kaynak:\s*Eleman\.net/gi, "")
-    .replace(/İlan URL:\s*\S+/gi, "")
+    .replace(/Eleman\.net['']?te\s+yayınlanmaktadır\.?/gi, "")
+    .replace(/bu\s+ilan\s+eleman\.net[^\n]*/gi, "")
+    .replace(/ilan\s+(?:eleman\.net|eleman\s*net)[^\n]*/gi, "")
+    .replace(/başvuru\s+için\s+eleman\.net[^\n]*/gi, "")
+    .replace(/detay(?:lı|li)?\s+(?:bilgi|başvuru).*eleman\.net[^\n]*/gi, "")
+    .replace(/www\.eleman\.net\/[^\s]*/gi, "")
+    .replace(/https?:\/\/(?:www\.)?eleman\.net\/[^\s]*/gi, "")
+    .replace(/\beleman\.net\b/gi, "")
+    .replace(/Kaynak\s*:\s*Eleman\.net/gi, "")
+    .replace(/İlan\s*(?:No|Numarası|URL|Kodu)\s*[:#]?\s*\S+/gi, "")
+    .replace(/Eleman\s*Net/gi, "")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s{3,}/g, " ")
+    .replace(/[ \t]{3,}/g, " ")
     .trim();
+}
+
+/** Açıklamaya telefon ekle (yoksa); Eleman.net markasını temizle. */
+export function finalizeElemanListingText(description: string, phone: string): string {
+  let text = cleanElemanDescription(description || "");
+  const phoneDigits = phone.replace(/\D/g, "");
+  const textDigits = text.replace(/\D/g, "");
+  const alreadyHasPhone = phoneDigits.length >= 10 && textDigits.includes(phoneDigits.slice(-10));
+  if (phone.trim() && !alreadyHasPhone) {
+    text = `${text}\n\nTelefon: ${phone.trim()}`.trim();
+  }
+  return text;
 }
 
 /** Detay sayfasından yalnızca ilan gövdesini çek — tüm HTML değil. */
@@ -216,10 +236,10 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     if (!Number.isNaN(d.getTime())) postedAt = d;
   }
 
-  const rawText = [title, companyName, description, `Telefon: ${phone}`]
+  const rawText = [title, companyName, finalizeElemanListingText(description, phone)]
     .filter(Boolean)
     .join("\n\n");
-  return { ...item, title, companyName, description, phone, rawText, postedAt };
+  return { ...item, title, companyName, description: finalizeElemanListingText(description, phone), phone, rawText, postedAt };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {

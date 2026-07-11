@@ -42,18 +42,52 @@ function renderMessageContent(content: string) {
   });
 }
 
-function RoleBadge({ role, isVip }: { role: string; isVip?: boolean; isBot?: boolean }) {
+function RoleBadge({ role, isVip }: { role: string; isVip?: boolean }) {
   if (role === "bot") return null;
-  if (role === "admin") return <span className="text-[7px] font-black tracking-widest uppercase text-red-400">YÖNETİCİ</span>;
-  if (role === "moderator") return <span className="text-[7px] font-black tracking-widest uppercase text-blue-400">MODERATÖR</span>;
+  if (role === "admin") {
+    return <span className="badge-admin text-[7px] font-black tracking-widest uppercase">YÖNETİCİ</span>;
+  }
+  if (role === "moderator") {
+    return <span className="badge-mod text-[7px] font-black tracking-widest uppercase">MODERATÖR</span>;
+  }
   if (isVip) {
     return (
-      <span className="inline-flex items-center gap-0.5 text-[7px] font-black tracking-widest uppercase text-amber-300">
+      <span className="badge-vip text-[7px] font-black tracking-widest uppercase inline-flex items-center gap-0.5">
         <Crown className="w-2.5 h-2.5" /> VIP
       </span>
     );
   }
   return null;
+}
+
+function chatNameClass(msg: ExtMsg): string {
+  // Rol animasyonu öncelikli — admin/mod isimleri her zaman efektli
+  if (msg.userRole === "admin") return "name-admin";
+  if (msg.userRole === "moderator") return "name-mod";
+  if (msg.isVip) return "name-vip";
+  if (msg.userNameAnimated) return "animate-rainbow";
+  if (msg.userNameColor) return "";
+  return "name-user";
+}
+
+function chatNameStyle(msg: ExtMsg): React.CSSProperties {
+  if (msg.userRole === "admin" || msg.userRole === "moderator") return {};
+  if (msg.userNameColor && !msg.userNameAnimated && !msg.isVip) return { color: msg.userNameColor };
+  return {};
+}
+
+function ChatDisplayName({ msg, name }: { msg: ExtMsg; name: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <RoleBadge role={msg.userRole ?? "user"} isVip={msg.isVip} />
+      <span className={`text-[12px] font-extrabold leading-tight tracking-wide ${chatNameClass(msg)}`} style={chatNameStyle(msg)}>
+        {msg.isVip && msg.userRole !== "admin" && msg.userRole !== "moderator" && (
+          <Crown className="inline w-3 h-3 mr-0.5 text-amber-300 fill-amber-300" />
+        )}
+        {name}
+      </span>
+    </span>
+  );
 }
 
 function UserAvatar({ src, username, role, isVip, online }: { src?: string | null; username: string; role: string; isVip?: boolean; online?: boolean }) {
@@ -510,8 +544,7 @@ export function ChatBubble() {
         <UserAvatar src={chatMsg.userAvatarUrl} username={chatMsg.username} role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} online />
         <div className={`flex flex-col max-w-[78%] ${isMe ? "items-end" : "items-start"}`}>
           <div className="flex items-center gap-1.5 mb-1 px-0.5">
-            <span className={`text-[12px] font-extrabold ${isMe ? "text-white" : "text-amber-300"}`}>{name}</span>
-            <RoleBadge role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} />
+            <ChatDisplayName msg={chatMsg} name={name} />
             <span className="text-[9px] text-white/30">{formatTime(chatMsg.createdAt)}</span>
           </div>
           <div
@@ -519,7 +552,11 @@ export function ChatBubble() {
             style={
               isMe
                 ? { background: "rgba(18,22,31,0.95)", border: "1.5px solid rgba(245,197,24,0.75)", boxShadow: "0 0 12px rgba(245,197,24,0.15)" }
-                : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }
+                : chatMsg.userRole === "admin"
+                  ? { background: "linear-gradient(135deg,rgba(110,8,8,0.6),rgba(35,4,4,0.75))", border: "1px solid rgba(239,68,68,0.45)", boxShadow: "0 0 18px rgba(239,68,68,0.22)" }
+                  : chatMsg.userRole === "moderator"
+                    ? { background: "linear-gradient(135deg,rgba(10,38,115,0.6),rgba(4,14,55,0.75))", border: "1px solid rgba(59,130,246,0.45)", boxShadow: "0 0 18px rgba(59,130,246,0.22)" }
+                    : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }
             }
           >
             {chatMsg.replyToId && (chatMsg.replyToUsername || chatMsg.replyToContent) && (

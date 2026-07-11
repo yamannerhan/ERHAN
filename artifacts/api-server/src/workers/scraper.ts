@@ -10,6 +10,7 @@ import {
   getElemanCityByIndex,
   parseElemanCursor,
   scrapeElemanCityPages,
+  finalizeElemanListingText,
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
 import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
@@ -1262,11 +1263,7 @@ async function publishElemanJob(
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
   const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
   const gender = extractGender(job.rawText);
-  const cleanDescription = (job.description || job.rawText)
-    .replace(/Eleman\.net['']?te yayınlanmaktadır\.?\s*İlan No:\s*\d+/gi, "")
-    .replace(/Kaynak:\s*Eleman\.net/gi, "")
-    .replace(/İlan URL:\s*\S+/gi, "")
-    .trim();
+  const cleanDescription = finalizeElemanListingText(job.description || job.rawText, job.phone);
 
   const postedAt = job.postedAt ?? now;
   const [newListing] = await db.insert(listingsTable).values({

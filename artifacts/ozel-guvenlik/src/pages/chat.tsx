@@ -59,15 +59,16 @@ function RoleBadge({ role, isVip }: { role: string; isVip?: boolean }) {
 }
 
 function chatNameClass(msg: ChatMessage & { isBot?: boolean }) {
+  if (msg.userRole === "admin") return "name-admin";
+  if (msg.userRole === "moderator") return "name-mod";
   if (msg.isVip) return "name-vip";
   if (msg.userNameAnimated) return "animate-rainbow";
   if (msg.userNameColor) return "";
-  if (msg.userRole === "admin") return "name-admin";
-  if (msg.userRole === "moderator") return "name-mod";
   return "name-user";
 }
 
 function chatNameStyle(msg: ChatMessage & { isBot?: boolean }): React.CSSProperties {
+  if (msg.userRole === "admin" || msg.userRole === "moderator") return {};
   if (msg.userNameColor && !msg.userNameAnimated && !msg.isVip) return { color: msg.userNameColor };
   return {};
 }

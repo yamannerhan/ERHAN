@@ -168,6 +168,62 @@
   box-shadow: 0 0 12px rgba(250,204,21,.18);
 }
 
+/* ── Admin / Moderatör isim + rozet animasyonları (FAB + sayfa) ── */
+@keyframes shimmer-blue {
+  0%   { background-position: -250% 0; }
+  100% { background-position: 250% 0; }
+}
+@keyframes smoke-mod {
+  0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 3px rgba(167,139,250,0.25)); }
+  25%  { background-position: 80% 50%;  filter: drop-shadow(0 0 12px rgba(196,181,253,0.85)); }
+  55%  { background-position: 200% 50%; filter: drop-shadow(0 0 18px rgba(221,214,254,0.95)); }
+  80%  { background-position: 300% 50%; filter: drop-shadow(0 0 9px rgba(167,139,250,0.6));  }
+  100% { background-position: 0% 50%;   filter: drop-shadow(0 0 3px rgba(167,139,250,0.25)); }
+}
+.badge-admin {
+  background: linear-gradient(90deg,
+    #1e3a8a 0%, #3b82f6 25%, #bfdbfe 50%, #93c5fd 65%, #3b82f6 80%, #1e3a8a 100%);
+  background-size: 250% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer-blue 2.8s linear infinite;
+  filter: drop-shadow(0 0 5px rgba(96,165,250,0.7));
+}
+.badge-mod {
+  background: linear-gradient(90deg,
+    #4c1d95 0%, #7c3aed 25%, #ddd6fe 50%, #a78bfa 65%, #7c3aed 80%, #4c1d95 100%);
+  background-size: 250% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: smoke-mod 3.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(167,139,250,0.7));
+}
+.name-admin {
+  background: linear-gradient(90deg,
+    #60a5fa 0%, #bfdbfe 30%, #e0f2fe 55%, #bfdbfe 75%, #60a5fa 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer-blue 7s linear infinite;
+  filter: drop-shadow(0 0 8px rgba(96,165,250,0.55));
+}
+.name-mod {
+  background: linear-gradient(90deg,
+    #3b0764 0%, #6d28d9 15%, #a78bfa 35%, #ddd6fe 52%, #f5f3ff 60%, #c4b5fd 73%, #7c3aed 88%, #3b0764 100%);
+  background-size: 350% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: smoke-mod 5s ease-in-out infinite;
+}
+.name-user {
+  color: #e2e8f0;
+  text-shadow: 0 0 8px rgba(148,163,184,0.3);
+}
+
 /* VIP Frame — öne çıkan ilanlar için altın/holo cerceve + glow */
 @keyframes vip-frame-glow {
   0%, 100% {
