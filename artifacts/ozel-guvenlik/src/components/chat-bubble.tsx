@@ -8,6 +8,7 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatPollCard } from "@/components/chat-poll-card";
+import { ChatModActions } from "@/components/chat-mod-actions";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 function formatTime(iso: string) {
@@ -716,12 +717,25 @@ export function ChatBubble() {
             )}
           </div>
           {user && (
-            <button
-              onClick={() => startReply(chatMsg)}
-              className={`flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-amber-400/80 hover:bg-amber-400/10 ${isMe ? "self-end" : "self-start"}`}
-            >
-              <CornerUpLeft className="w-2.5 h-2.5" /> Yanıtla
-            </button>
+            <div className={`flex items-center gap-1 mt-1 flex-wrap ${isMe ? "self-end flex-row-reverse" : "self-start"}`}>
+              <button
+                onClick={() => startReply(chatMsg)}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-amber-400/80 hover:bg-amber-400/10"
+              >
+                <CornerUpLeft className="w-2.5 h-2.5" /> Yanıtla
+              </button>
+              {(user.role === "admin" || user.role === "moderator") && isDbMessageId(chatMsg.id) && (
+                <ChatModActions
+                  messageId={chatMsg.id}
+                  targetUserId={chatMsg.userId}
+                  targetRole={chatMsg.userRole}
+                  isOwn={isMe}
+                  align={isMe ? "end" : "start"}
+                  compact
+                  onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
+                />
+              )}
+            </div>
           )}
         </div>
       </motion.div>

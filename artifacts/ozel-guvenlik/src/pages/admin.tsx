@@ -14,7 +14,7 @@ import {
   Link, Globe, Radio, AlertCircle, Edit2, ExternalLink, Filter, Zap,
   Cpu, TrendingUp, ShieldCheck, Activity, ArrowUpRight, Bell, BarChart3, PieChart as PieChartIcon, Server, Database, Bot, MessageCircle, Wrench, Terminal, Wifi,
   ChevronRight, Menu, Sun, Moon, FileText, CreditCard, ShieldAlert, LogOut, Globe2, FilePlus, UserCheck, Award,
-  Home, CheckCheck, Heart, MessageCircle, Info, X, Power, Play, Square
+  Home, CheckCheck, Heart, MessageCircle, Info, X, Power, Play, Square, Ban
 } from "lucide-react";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -871,8 +871,102 @@ function ChatManagementSection({ apiCall, toast }: {
             </button>
           </div>
         </div>
+
+        {/* Yasaklı küfür / kelimeler */}
+        <BannedWordsBlock apiCall={apiCall} toast={toast} />
       </div>
     </Section>
+  );
+}
+
+function BannedWordsBlock({ apiCall, toast }: {
+  apiCall: (path: string, method: string, body?: unknown) => Promise<unknown>;
+  toast: ReturnType<typeof useToast>["toast"];
+}) {
+  const [words, setWords] = useState<{ id: number; word: string }[]>([]);
+  const [newWord, setNewWord] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await apiCall("/admin/banned-words", "GET") as { id: number; word: string }[];
+      setWords(d ?? []);
+    } catch {
+      /* admin-only; mods may 403 */
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const add = async () => {
+    if (!newWord.trim()) return;
+    setAdding(true);
+    try {
+      const created = await apiCall("/admin/banned-words", "POST", { word: newWord.trim() }) as { id: number; word: string };
+      setWords(prev => [created, ...prev]);
+      setNewWord("");
+      toast({ title: "Kelime eklendi — sohbette sansürlenir" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    try {
+      await apiCall(`/admin/banned-words/${id}`, "DELETE");
+      setWords(prev => prev.filter(w => w.id !== id));
+      toast({ title: "Kelime kaldırıldı" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="bg-white/5 rounded-xl p-3 space-y-3 border border-red-400/15">
+      <p className="text-xs font-semibold text-red-300 uppercase tracking-wider flex items-center gap-1.5">
+        <Ban className="w-3.5 h-3.5" /> Küfür / Yasaklı Kelimeler
+      </p>
+      <p className="text-[10px] text-muted-foreground">
+        Sohbete yazılan bu kelimeler otomatik sansürlenir. Sistemde hazır Türkçe küfür listesi de vardır.
+      </p>
+      <div className="flex gap-1.5">
+        <input
+          value={newWord}
+          onChange={e => setNewWord(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") void add(); }}
+          placeholder="Yeni yasaklı kelime..."
+          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40"
+        />
+        <button
+          type="button"
+          onClick={() => void add()}
+          disabled={adding}
+          className="px-3 py-2 rounded-xl text-xs font-semibold bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+        >
+          {adding ? "..." : "Ekle"}
+        </button>
+      </div>
+      {loading ? (
+        <p className="text-[10px] text-muted-foreground">Yükleniyor…</p>
+      ) : words.length === 0 ? (
+        <p className="text-[10px] text-muted-foreground">Ek kelime yok (varsayılan liste aktif).</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
+          {words.map(w => (
+            <span key={w.id} className="inline-flex items-center gap-1 rounded-full bg-red-500/10 border border-red-400/20 px-2 py-0.5 text-[10px] text-red-200">
+              {w.word}
+              <button type="button" onClick={() => void remove(w.id)} className="text-red-400/80 hover:text-red-300" title="Kaldır">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -973,7 +1067,7 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
     try {
       const res = await apiCall(`/admin/users/${id}/mute`, "POST", { hours, days }) as { mutedUntil: string };
       setUsers(prev => prev.map(u => u.id === id ? { ...u, mutedUntil: res.mutedUntil } : u));
-      toast({ title: "Kullanıcı susturuldu" });
+      toast({ title: "Sohbet yasağı uygulandı" });
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
     finally { setMuteLoading(null); }
   };
@@ -983,7 +1077,7 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
     try {
       await apiCall(`/admin/users/${id}/unmute`, "POST");
       setUsers(prev => prev.map(u => u.id === id ? { ...u, mutedUntil: null } : u));
-      toast({ title: "Susturma kaldırıldı" });
+      toast({ title: "Sohbet yasağı kaldırıldı" });
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
     finally { setMuteLoading(null); }
   };
@@ -1246,12 +1340,17 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                     {isMuted ? (
                       <button onClick={() => unmuteUser(u.id)} disabled={muteLoading === u.id}
                         className="text-[10px] px-2 py-1 bg-orange-500/20 text-orange-400 rounded-lg hover:bg-orange-500/30 transition-colors flex items-center gap-0.5 disabled:opacity-50">
-                        {muteLoading === u.id ? "..." : "Susturmayı Kaldır"}
+                        {muteLoading === u.id ? "..." : "Sohbet Yasağını Kaldır"}
                       </button>
                     ) : (
                       <>
-                        <span className="text-[9px] text-muted-foreground self-center pr-0.5">Sustir:</span>
-                        {[{ label: "1s", hours: 1 }, { label: "8s", hours: 8 }, { label: "24s", hours: 24 }, { label: "7g", days: 7 }].map(opt => (
+                        <span className="text-[9px] text-muted-foreground self-center pr-0.5">Sohbet yasağı:</span>
+                        {[
+                          { label: "1s", hours: 1 },
+                          { label: "1g", days: 1 },
+                          { label: "1ay", days: 30 },
+                          { label: "1yıl", days: 365 },
+                        ].map(opt => (
                           <button key={opt.label}
                             onClick={() => muteUser(u.id, opt.hours, opt.days)}
                             disabled={muteLoading === u.id}

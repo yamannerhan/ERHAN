@@ -4,6 +4,7 @@ import { eq, desc, and, lt, gt, inArray } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { triggerContextualReply } from "../lib/chat-bot";
 import { filterProfanity } from "../lib/profanity";
+import { getExtraBannedWords } from "../lib/banned-words-cache";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
 import { emitRealtimeToUser } from "../lib/realtime";
 
@@ -163,7 +164,8 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     return;
   }
 
-  const filteredContent = filterProfanity(content.trim());
+  const extraBanned = await getExtraBannedWords();
+  const filteredContent = filterProfanity(content.trim(), extraBanned);
 
   const [msg] = await db.insert(chatMessagesTable).values({
     content: filteredContent,
@@ -265,10 +267,23 @@ router.post("/chat/messages/:id/react", authMiddleware, async (req, res): Promis
   res.json({ reactions });
 });
 
-router.delete("/chat/messages/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+router.delete("/chat/messages/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
   const id = parseInt(rawId ?? "", 10);
   if (isNaN(id)) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+
+  // Moderatör yalnızca normal kullanıcı mesajını silebilir
+  if (req.user!.role === "moderator") {
+    const [row] = await db.select({ userId: chatMessagesTable.userId }).from(chatMessagesTable).where(eq(chatMessagesTable.id, id)).limit(1);
+    if (!row) { res.status(404).json({ error: "Mesaj bulunamadı" }); return; }
+    if (row.userId > 0) {
+      const [author] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, row.userId)).limit(1);
+      if (author && author.role !== "user") {
+        res.status(403).json({ error: "Moderatörler yalnızca üye mesajlarını silebilir" });
+        return;
+      }
+    }
+  }
 
   await db.update(chatMessagesTable).set({ isDeleted: true }).where(eq(chatMessagesTable.id, id));
 

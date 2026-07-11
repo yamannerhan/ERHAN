@@ -2,10 +2,13 @@
 // Mesaj DB'ye kaydedilmeden önce uygulanır — sansürlü hâli saklanır.
 
 const PROFANITY_LIST: string[] = [
-  // Temel küfürler ve varyasyonlar
   "orospu",
   "orospuçocuğu",
   "orosbuçocuğu",
+  "orospu çocuğu",
+  "orospu cocu",
+  "orspu",
+  "orsp",
   "göt",
   "goot",
   "g0t",
@@ -21,6 +24,11 @@ const PROFANITY_LIST: string[] = [
   "bok",
   "boktan",
   "boklu",
+  "bok yemek",
+  "bokyedi",
+  "bok gibi",
+  "bok kadar",
+  "boku",
   "sik",
   "sikmek",
   "sikiş",
@@ -33,76 +41,50 @@ const PROFANITY_LIST: string[] = [
   "siktirgit",
   "sikilmiş",
   "sikişmek",
+  "hassiktir",
   "piç",
   "piçlik",
   "piçkurusu",
-  "oğlan",
   "ibne",
   "ibnelik",
-  "götveren",
   "salak",
   "aptal",
   "gerizekalı",
   "geri zekalı",
-  "mal",
   "dangalak",
   "ahmak",
-  "eşek",
-  "eşşek",
   "serseri",
   "puşt",
   "puştluk",
   "lavuk",
-  "toprak",
   "haysiyetsiz",
-  "orspu",
+  "haysız",
   "kahpe",
   "kahpelik",
   "kaltak",
   "sürtük",
   "fahişe",
-  "bok yemek",
-  "bokyedi",
   "oç",
   "pezevenk",
   "pezevenklik",
-  "dölü",
-  "döl",
-  "göbeğine",
   "kancık",
   "şerefsiz",
   "şerefsizlik",
   "namussuz",
   "namussuzluk",
   "aşağılık",
-  "hıyar",
   "yarrak",
   "yarak",
   "taşak",
   "taşşak",
-  "hassiktir",
-  "haysız",
-  "boku",
-  "bok gibi",
-  "bok kadar",
-  "boktan",
-  "orospu çocuğu",
-  "orospu cocu",
-  "orsp",
 ];
 
-// Türkçe karakter normalize (küçük harf + i/ı uyumu)
-function normalize(s: string): string {
+/** Türkçe karakter + leet normalize */
+export function normalizeProfanity(s: string): string {
   return s
-    .toLowerCase()
+    .toLocaleLowerCase("tr-TR")
     .replace(/İ/g, "i")
     .replace(/I/g, "ı")
-    .replace(/Ğ/g, "ğ")
-    .replace(/Ş/g, "ş")
-    .replace(/Ç/g, "ç")
-    .replace(/Ü/g, "ü")
-    .replace(/Ö/g, "ö")
-    // Leet-speak yaklaşımı
     .replace(/0/g, "o")
     .replace(/3/g, "e")
     .replace(/4/g, "a")
@@ -113,34 +95,43 @@ function normalize(s: string): string {
 
 function censor(word: string): string {
   if (word.length <= 2) return "*".repeat(word.length);
-  return word[0] + "*".repeat(word.length - 2) + word[word.length - 1];
+  return word[0]! + "*".repeat(word.length - 2) + word[word.length - 1]!;
 }
 
-// Kelimenin bulunduğu yeri sansürle, büyük/küçük harf ve Türkçe karaktere duyarsız
-export function filterProfanity(text: string): string {
+function isWordBoundary(ch: string | undefined): boolean {
+  if (ch === undefined) return true;
+  return /[\s,!?.;:()\-"'`´/\\|]/.test(ch);
+}
+
+/** extraWords: admin panelinden eklenen yasaklı kelimeler */
+export function filterProfanity(text: string, extraWords: string[] = []): string {
+  const words = [...PROFANITY_LIST, ...extraWords]
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2)
+    .sort((a, b) => b.length - a.length);
+
   let result = text;
 
-  for (const bad of PROFANITY_LIST) {
-    // Boşluklu ifadeler için basit substring araması
-    const normBad = normalize(bad);
-    const normResult = normalize(result);
+  for (const bad of words) {
+    const normBad = normalizeProfanity(bad);
+    if (!normBad) continue;
 
     let searchFrom = 0;
     while (true) {
+      const normResult = normalizeProfanity(result);
       const idx = normResult.indexOf(normBad, searchFrom);
       if (idx === -1) break;
 
-      // Sözcük sınırı kontrolü — hem boşlukla hem de metin başı/sonu
-      const before = idx > 0 ? normResult[idx - 1]! : " ";
-      const after = idx + normBad.length < normResult.length ? normResult[idx + normBad.length]! : " ";
-      const isBoundaryBefore = /[\s,!?.;:()\-"'']/.test(before) || idx === 0;
-      const isBoundaryAfter = /[\s,!?.;:()\-"'']/.test(after) || idx + normBad.length === normResult.length;
+      // Orijinal dilimde aynı uzunluk (normalize karakter sayısı korur)
+      const span = normBad.length;
+      const before = idx > 0 ? normResult[idx - 1] : undefined;
+      const after = idx + span < normResult.length ? normResult[idx + span] : undefined;
 
-      if (isBoundaryBefore || isBoundaryAfter || normBad.length >= 4) {
-        const original = result.slice(idx, idx + bad.length);
+      // Her iki sınır da şart — "eşek" → "teşekkür" içine yanlış denk gelmesin
+      if (isWordBoundary(before) && isWordBoundary(after)) {
+        const original = result.slice(idx, idx + span);
         const censored = censor(original);
-        result = result.slice(0, idx) + censored + result.slice(idx + bad.length);
-        // normResult güncellenmez, ama result değişti — idx aynı kaldığı için devam edebiliriz
+        result = result.slice(0, idx) + censored + result.slice(idx + span);
         searchFrom = idx + censored.length;
       } else {
         searchFrom = idx + 1;
@@ -149,4 +140,8 @@ export function filterProfanity(text: string): string {
   }
 
   return result;
+}
+
+export function containsProfanity(text: string, extraWords: string[] = []): boolean {
+  return filterProfanity(text, extraWords) !== text;
 }

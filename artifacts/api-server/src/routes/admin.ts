@@ -312,14 +312,20 @@ router.post("/admin/users/:id/mute", authMiddleware, requireAdminOrModerator, as
     const [target] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, id));
     if (!target || target.role !== "user") { res.status(403).json({ error: "Moderatörler yalnızca normal kullanıcıları susturabilir" }); return; }
   }
-  const { hours, days } = req.body as { hours?: number; days?: number };
+  const { hours, days, months, years } = req.body as {
+    hours?: number; days?: number; months?: number; years?: number;
+  };
   let mutedUntil: Date;
-  if (days && days > 0) {
+  if (years && years > 0) {
+    mutedUntil = new Date(Date.now() + years * 365 * 24 * 3600 * 1000);
+  } else if (months && months > 0) {
+    mutedUntil = new Date(Date.now() + months * 30 * 24 * 3600 * 1000);
+  } else if (days && days > 0) {
     mutedUntil = new Date(Date.now() + days * 24 * 3600 * 1000);
   } else if (hours && hours > 0) {
     mutedUntil = new Date(Date.now() + hours * 3600 * 1000);
   } else {
-    res.status(400).json({ error: "Geçerli bir süre belirtilmeli (hours veya days)" }); return;
+    res.status(400).json({ error: "Geçerli bir süre belirtilmeli (hours, days, months veya years)" }); return;
   }
   await db.update(usersTable).set({ mutedUntil }).where(eq(usersTable.id, id));
   res.json({ success: true, mutedUntil: mutedUntil.toISOString() });
@@ -1326,16 +1332,21 @@ router.get("/admin/banned-words", authMiddleware, requireAdmin, async (_req, res
 router.post("/admin/banned-words", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const { word } = req.body as { word?: string };
   if (!word?.trim()) { res.status(400).json({ error: "Kelime zorunludur" }); return; }
-  const [existing] = await db.select().from(bannedWordsTable).where(eq(bannedWordsTable.word, word.trim().toLowerCase()));
+  const normalized = word.trim().toLocaleLowerCase("tr-TR");
+  const [existing] = await db.select().from(bannedWordsTable).where(eq(bannedWordsTable.word, normalized));
   if (existing) { res.status(400).json({ error: "Bu kelime zaten engelli" }); return; }
-  const [created] = await db.insert(bannedWordsTable).values({ word: word.trim().toLowerCase() }).returning();
-  res.status(201).json({ id: created.id, word: created.word, createdAt: created.createdAt.toISOString() });
+  const [created] = await db.insert(bannedWordsTable).values({ word: normalized }).returning();
+  const { invalidateBannedWordsCache } = await import("../lib/banned-words-cache");
+  invalidateBannedWordsCache();
+  res.status(201).json({ id: created!.id, word: created!.word, createdAt: created!.createdAt.toISOString() });
 });
 
 router.delete("/admin/banned-words/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   await db.delete(bannedWordsTable).where(eq(bannedWordsTable.id, id));
+  const { invalidateBannedWordsCache } = await import("../lib/banned-words-cache");
+  invalidateBannedWordsCache();
   res.sendStatus(204);
 });
 

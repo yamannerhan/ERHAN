@@ -11,8 +11,13 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatPollCard } from "@/components/chat-poll-card";
+import { ChatModActions } from "@/components/chat-mod-actions";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
+
+function isDbMessageId(id: number): boolean {
+  return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
+}
 
 interface SystemMsg { id: number; type: "join" | "welcome" | "cleared"; text: string; createdAt: string; }
 type Reaction = { emoji: string; userId: number; username: string; displayName: string | null };
@@ -620,11 +625,25 @@ export default function Chat() {
 
               {/* Her zaman görünen Yanıtla butonu */}
               {user && (
-                <button
-                  onClick={e => { e.stopPropagation(); setReplyTo(chatMsg); setActiveMsg(null); }}
-                  className={`flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-lg text-[11px] font-semibold text-blue-400 hover:bg-blue-400/10 active:scale-95 transition-all ${isMe ? "self-end" : "self-start"}`}>
-                  <CornerUpLeft className="w-3 h-3" /> Yanıtla
-                </button>
+                <div className={`flex items-center gap-1 mt-1 flex-wrap ${isMe ? "self-end flex-row-reverse" : "self-start"}`}>
+                  <button
+                    onClick={e => { e.stopPropagation(); setReplyTo(chatMsg); setActiveMsg(null); }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[11px] font-semibold text-blue-400 hover:bg-blue-400/10 active:scale-95 transition-all">
+                    <CornerUpLeft className="w-3 h-3" /> Yanıtla
+                  </button>
+                  {(user.role === "admin" || user.role === "moderator") && isDbMessageId(chatMsg.id) && (
+                    <div onClick={e => e.stopPropagation()}>
+                      <ChatModActions
+                        messageId={chatMsg.id}
+                        targetUserId={chatMsg.userId}
+                        targetRole={chatMsg.userRole}
+                        isOwn={isMe}
+                        align={isMe ? "end" : "start"}
+                        onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
+                      />
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Emoji reactions display */}
