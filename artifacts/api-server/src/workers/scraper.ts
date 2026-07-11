@@ -2614,7 +2614,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (newCity) next.city = newCity;
     if (newSalary) next.salary = newSalary;
     if (newPhone) next.applyUrl = `tel:${newPhone}`;
-    else if (row.applyUrl && /t\.me\/|telegram\.me\/i.test(row.applyUrl)) next.applyUrl = null;
+    else if (row.applyUrl && /t\.me\/|telegram\.me\//i.test(row.applyUrl)) next.applyUrl = null;
 
     const changed = next.title !== row.title
       || next.requirements !== row.requirements
