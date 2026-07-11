@@ -2382,7 +2382,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       {/* İstatistik özeti */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
-          <div className="text-[10px] text-slate-400 uppercase">Kayıtlı Grup</div>
+          <div className="text-[10px] text-slate-400 uppercase">Kayıtlı Kaynak</div>
           <div className="text-2xl font-black text-white mt-1">{totals.groups}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
