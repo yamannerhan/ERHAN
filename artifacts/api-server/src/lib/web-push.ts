@@ -17,6 +17,8 @@ export type PushPayload = {
   /** listing | join | reply | campaign | digest */
   kind?: string;
   soundUrl?: string | null;
+  icon?: string | null;
+  badge?: string | null;
 };
 
 let ensured = false;
@@ -215,6 +217,8 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
       kind,
       sound,
       soundUrl: sound ? baseSoundUrl : null,
+      icon: payload.icon || "/notification-icon.png",
+      badge: payload.badge || "/notification-badge.png",
     };
     if (await sendToSub(sub, full)) sent++;
   }

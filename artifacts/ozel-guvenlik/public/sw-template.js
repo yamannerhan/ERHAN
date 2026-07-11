@@ -1,5 +1,7 @@
 /* ÖzelGüvenlik PWA Service Worker — Web Push + custom sounds */
-const CACHE_NAME = "ozelguvenlik-push-v3";
+const CACHE_NAME = "ozelguvenlik-push-v4";
+const NOTIF_ICON = "/notification-icon.png";
+const NOTIF_BADGE = "/notification-badge.png";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -20,6 +22,8 @@ self.addEventListener("push", (event) => {
     sound: true,
     kind: "campaign",
     soundUrl: null,
+    icon: null,
+    badge: null,
   };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
@@ -27,10 +31,16 @@ self.addEventListener("push", (event) => {
     try { data.body = event.data ? event.data.text() : data.body; } catch { /* ignore */ }
   }
 
+  const origin = self.location.origin;
+  const iconPath = data.icon || NOTIF_ICON;
+  const badgePath = data.badge || NOTIF_BADGE;
+  const icon = iconPath.startsWith("http") ? iconPath : `${origin}${iconPath}`;
+  const badge = badgePath.startsWith("http") ? badgePath : `${origin}${badgePath}`;
+
   const options = {
     body: data.body,
-    icon: "/favicon-192x192.png",
-    badge: "/favicon-32x32.png",
+    icon,
+    badge,
     tag: data.tag || "og-push",
     renotify: true,
     requireInteraction: false,
