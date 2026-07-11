@@ -450,13 +450,16 @@ async function harvestStoreMessages(
 export type WhatsAppFetchResult = {
   messages: WhatsAppMessage[];
   oldestTs: number;
+  /** Hedef güne (örn. 30g) ulaşıldı */
   reachedCutoff: boolean;
+  /** Chromium/WA daha eski yükleyemiyor — gidebildiği kadar bitti */
+  historyExhausted: boolean;
   rounds: number;
 };
 
 /**
- * Grup mesajlarını çek — 30 güne kadar agresif loadEarlier + DOM scroll + Store harvest.
- * reachedCutoff=false ise tarama bitmiş sayılmamalı.
+ * Grup mesajlarını çek — hedef güne (varsayılan 30) veya WA’nın verdiği en eskiye kadar.
+ * historyExhausted=true: daha geriye gidilemiyor → ilk tarama bu noktadan tamamlanmalı.
  */
 export async function fetchWhatsAppMessages(
   groupJid: string,
@@ -481,7 +484,7 @@ export async function fetchWhatsAppMessagesDetailed(
   } = {},
 ): Promise<WhatsAppFetchResult> {
   if (!client || !isReady) {
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, rounds: 0 };
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
   }
 
   const page = (client as any).pupPage;
@@ -510,10 +513,10 @@ export async function fetchWhatsAppMessagesDetailed(
     chat = await client.getChatById(groupJid);
   } catch (e) {
     logger.warn({ err: e, groupJid }, "wa: getChatById failed");
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, rounds: 0 };
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
   }
   if (!chat) {
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, rounds: 0 };
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
   }
 
   // syncHistory (wwebjs) — sunucudan geçmiş çekmeye zorla
@@ -535,6 +538,7 @@ export async function fetchWhatsAppMessagesDetailed(
   const byId = new Map<string, WhatsAppMessage>();
   let rounds = 0;
   let reachedCutoff = false;
+  let historyExhausted = false;
 
   const pullFetchMessages = async (limit: number) => {
     try {
@@ -562,7 +566,10 @@ export async function fetchWhatsAppMessagesDetailed(
     let stagnant = 0;
     let lastHarvested = byId.size;
     let lastOldest = Date.now();
-    const maxRounds = 500;
+    // QR/Chromium genelde 30 güne inemez — uzun tur boşa zaman kaybettirir
+    const maxRounds = 120;
+    /** İlerleme yoksa bu kadar tur sonra “gidebildiği kadar” kabul et */
+    const STAGNANT_LIMIT = 12;
 
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
@@ -622,6 +629,7 @@ export async function fetchWhatsAppMessagesDetailed(
         }, chatId);
       } catch (e) {
         logger.warn({ err: e, groupJid }, "wa: loadEarlierMsgs evaluate failed");
+        historyExhausted = true;
         break;
       }
 
@@ -645,7 +653,7 @@ export async function fetchWhatsAppMessagesDetailed(
         });
       } catch { /* ignore */ }
 
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 500));
 
       // 3) Her tur harvest + ara ara fetchMessages
       const harvested = await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
@@ -675,20 +683,28 @@ export async function fetchWhatsAppMessagesDetailed(
       }
 
       const progressed = byId.size > lastHarvested || oldest < lastOldest - 30_000 || (info.loaded ?? 0) > 0;
-      if (info.done && !progressed) {
-        stagnant++;
-        // WA bazen geç yanıt verir — daha sabırlı ol
-        if (stagnant >= 40) {
-          logger.warn({ groupJid, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString() }, "wa: geçmiş yükleme tıkandı");
+      if (!progressed || info.done) {
+        if (!progressed) stagnant++;
+        // WA QR oturumu daha eski yükleyemiyor — gidebildiği kadar kabul et
+        if (stagnant >= STAGNANT_LIMIT) {
+          historyExhausted = true;
+          logger.warn(
+            { groupJid, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString(), stagnant },
+            "wa: geçmiş tükendi (Chromium daha eski yüklemiyor)",
+          );
           break;
         }
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 900));
       } else {
         stagnant = 0;
       }
       lastHarvested = byId.size;
       lastOldest = oldest;
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 350));
+    }
+
+    if (!reachedCutoff && rounds >= maxRounds) {
+      historyExhausted = true;
     }
 
     // Son bir syncHistory + büyük fetch
@@ -699,12 +715,19 @@ export async function fetchWhatsAppMessagesDetailed(
     await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
 
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
-    if (finalOldest <= cutoff) reachedCutoff = true;
+    if (finalOldest <= cutoff) {
+      reachedCutoff = true;
+      historyExhausted = false;
+    } else if (!reachedCutoff && byId.size > 0) {
+      // Hedefe inilemedi ama mesaj var → mevcut geçmiş tükendi sayılır
+      historyExhausted = true;
+    }
   } else {
     if (page) await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
     await pullFetchMessages(Math.min(opts.limit ?? 200, 500));
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     reachedCutoff = byId.size === 0 || finalOldest <= cutoff;
+    historyExhausted = !reachedCutoff && byId.size > 0;
     rounds = 1;
   }
 
@@ -716,13 +739,14 @@ export async function fetchWhatsAppMessagesDetailed(
       inRange: out.length,
       deep: !!opts.deep,
       reachedCutoff,
+      historyExhausted,
       rounds,
       oldest: new Date(oldestTs).toISOString(),
       cutoff: new Date(cutoff).toISOString(),
     },
-    "wa: mesajlar hazır",
+    "wa: mesajlar hazır (eski→yeni)",
   );
-  return { messages: out, oldestTs, reachedCutoff, rounds };
+  return { messages: out, oldestTs, reachedCutoff, historyExhausted, rounds };
 }
 
 export async function sendWhatsAppMessage(jid: string, text: string): Promise<void> {
