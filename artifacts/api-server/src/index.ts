@@ -1068,8 +1068,8 @@ async function bootstrapWorkers(): Promise<void> {
       ));
 
     await initTelegramClient();
-    // WhatsApp Chromium boot'ta AÇILMAZ — healthcheck / OOM riski.
-    // Admin panelden «Bağlan» ile başlar (WA_AUTO_CONNECT=1 ile opsiyonel).
+    // Kayıtlı WA oturumu varsa otomatik bağlan (imleçler DB'de kalır; Sıfırla gerekmez).
+    // WA_AUTO_CONNECT=0 ile boot bağlantısı kapatılabilir.
     void initWhatsAppClient();
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});

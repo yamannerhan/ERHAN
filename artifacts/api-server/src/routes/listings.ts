@@ -246,7 +246,16 @@ function hasSensitiveInfo(text: string | null, applyUrl: string | null): boolean
 function formatListing(listing: typeof listingsTable.$inferSelect, userId?: number, likedIds?: Set<number>, favIds?: Set<number>, authorUsername?: string | null) {
   const isAuth = userId != null;
   const rawDesc = listing.description;
-  const rawApplyUrl = listing.applyUrl;
+  let rawApplyUrl = listing.applyUrl;
+
+  // Telegram/WA linkine düşme — açıklamadan telefon varsa tel: kullan
+  if (rawApplyUrl && /t\.me\/|telegram\.me\/|wa\.me\//i.test(rawApplyUrl)) {
+    const phone = extractPhoneNumber(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`);
+    rawApplyUrl = phone ? `tel:${phone}` : null;
+  } else if (!rawApplyUrl && rawDesc) {
+    const phone = extractPhoneNumber(rawDesc);
+    if (phone) rawApplyUrl = `tel:${phone}`;
+  }
 
   // Mask sensitive info for unauthenticated users
   const description = rawDesc ? (isAuth ? rawDesc : maskContactInfo(rawDesc)) : null;

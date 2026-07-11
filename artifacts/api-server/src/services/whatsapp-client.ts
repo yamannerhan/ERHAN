@@ -1,5 +1,6 @@
 import QRCode from "qrcode";
 import fs from "node:fs";
+import path from "node:path";
 import { logger } from "../lib/logger";
 
 let client: any = null;
@@ -18,6 +19,33 @@ let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
+
+export function hasWhatsAppLocalSession(): boolean {
+  try {
+    const sessionDir = path.join(AUTH_PATH, "session-ozelguvenlik");
+    if (fs.existsSync(sessionDir)) return true;
+    // Eski/alternatif LocalAuth klasör adları
+    if (!fs.existsSync(AUTH_PATH)) return false;
+    const entries = fs.readdirSync(AUTH_PATH);
+    return entries.some((e) => e.startsWith("session-"));
+  } catch {
+    return false;
+  }
+}
+
+export function isWhatsAppStarting(): boolean {
+  return starting;
+}
+
+/** Kayıtlı oturum varsa arka planda yeniden bağlan (sıfırlama gerekmez) */
+export function ensureWhatsAppAutoConnect(): void {
+  if (manualStop || isReady || starting) return;
+  if (process.env.WA_AUTO_CONNECT === "0") return;
+  if (!hasWhatsAppLocalSession() && process.env.WA_AUTO_CONNECT !== "1") return;
+  void startWhatsAppClient().catch((e) => {
+    logger.warn({ err: e }, "wa: auto-connect failed");
+  });
+}
 
 const CHROME_CANDIDATES = [
   process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -277,12 +305,18 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
 }
 
 /**
- * Boot'ta Chromium AÇMA — Railway healthcheck'i bozar / OOM yapar.
- * Sadece kayıtlı oturum varsa ve WA_AUTO_CONNECT=1 ise arka planda bağlan.
+ * Boot'ta: kayıtlı oturum varsa otomatik bağlan (Sıfırla gerekmez).
+ * WA_AUTO_CONNECT=0 ile tamamen kapatılabilir.
  */
 export async function initWhatsAppClient(): Promise<void> {
-  if (process.env.WA_AUTO_CONNECT !== "1") {
-    logger.info("wa: boot auto-connect kapalı (admin panelden bağlanın)");
+  if (process.env.WA_AUTO_CONNECT === "0") {
+    logger.info("wa: boot auto-connect kapalı (WA_AUTO_CONNECT=0)");
+    return;
+  }
+  const force = process.env.WA_AUTO_CONNECT === "1";
+  const hasSession = hasWhatsAppLocalSession();
+  if (!force && !hasSession) {
+    logger.info("wa: kayıtlı oturum yok — admin panelden bağlanın");
     return;
   }
   try {
@@ -293,6 +327,9 @@ export async function initWhatsAppClient(): Promise<void> {
     return;
   }
   try {
+    lastError = hasSession
+      ? "WhatsApp yeniden bağlanıyor… (imleçler korunuyor)"
+      : null;
     await startWhatsAppClient();
     logger.info(`wa: init ${isReady ? "hazır" : "oturum/QR bekleniyor"}`);
   } catch (e) {
@@ -323,6 +360,7 @@ export function getWhatsAppStatus() {
     ready: isWhatsAppReady(),
     connected: isWhatsAppReady(),
     starting,
+    hasSession: hasWhatsAppLocalSession(),
     qr: qrDataUrl,
     pairingCode,
     phone: pendingPhone,

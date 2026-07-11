@@ -6,7 +6,31 @@
   border: 0;
 }
 .job-card {
-  position: static;
+  position: relative;
+}
+.job-card--read {
+  opacity: 0.62;
+  filter: saturate(0.82);
+}
+.job-card--read:hover {
+  opacity: 0.78;
+}
+.job-card__read-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.85);
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  padding: 2px 6px;
+  line-height: 1.2;
+  pointer-events: none;
 }
 .job-card__header {
   grid-template-columns: 48px minmax(0, 1fr) auto;

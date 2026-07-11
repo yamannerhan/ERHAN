@@ -3,7 +3,7 @@ import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import {
   startAuth, verifyCode, verifyPassword, logout,
   getAuthState, getCurrentPhone, isClientConnected,
-  getBotInfo, isBotTokenSet, ensureTelegramConnected,
+  getBotInfo, isBotTokenSet, ensureTelegramConnected, hasTelegramSessionStored,
 } from "../services/telegram-client";
 
 const router = Router();
@@ -13,7 +13,8 @@ router.get("/admin/telegram/status", authMiddleware, requireAdmin, async (_req, 
   const state = getAuthState();
   const phone = getCurrentPhone();
   const botInfo = isBotTokenSet() ? await getBotInfo() : null;
-  res.json({ state, phone, connected, bot: botInfo });
+  const hasSession = await hasTelegramSessionStored();
+  res.json({ state, phone, connected, hasSession, bot: botInfo });
 });
 
 router.post("/admin/telegram/reconnect", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {

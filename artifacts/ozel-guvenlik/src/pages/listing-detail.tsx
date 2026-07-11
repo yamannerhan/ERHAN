@@ -13,6 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { getListingImage } from "@/lib/listing-image";
 import { displayCompany } from "@/lib/utils";
+import { markListingRead } from "@/lib/read-listings";
+import { resolveApplyHref } from "@/lib/apply-url";
 import {
   SEO_BASE_URL, SEO_OG_IMAGE, buildListingTitle, buildListingDescription,
   buildJobPostingSchema, breadcrumbSchema,
@@ -67,6 +69,10 @@ export default function ListingDetail() {
       queryKey: getGetListingQueryKey(listingId)
     }
   });
+
+  useEffect(() => {
+    if (listingId > 0) markListingRead(listingId);
+  }, [listingId]);
 
   const toggleLike = useToggleListingLike();
   const toggleFavorite = useToggleListingFavorite();
@@ -513,17 +519,34 @@ export default function ListingDetail() {
         <div className="fixed bottom-16 left-0 right-0 p-4 bg-gradient-to-t from-background via-background/90 to-transparent z-40">
           <div className="max-w-md mx-auto">
             {user ? (
-              listing.applyUrl ? (
-                <a href={listing.applyUrl} target="_blank" rel="noopener noreferrer" className="block">
-                  <Button className="w-full h-12 rounded-full text-base font-bold bg-gradient-to-r from-primary via-secondary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all">
-                    Hemen Başvur
+              (() => {
+                const applyHref = resolveApplyHref({
+                  applyUrl: listing.applyUrl,
+                  description: listing.description,
+                  requirements: listing.requirements,
+                  title: listing.title,
+                });
+                if (applyHref && applyHref !== "auth_required") {
+                  const isTel = applyHref.startsWith("tel:");
+                  return (
+                    <a
+                      href={applyHref}
+                      target={isTel ? undefined : "_blank"}
+                      rel={isTel ? undefined : "noopener noreferrer"}
+                      className="block"
+                    >
+                      <Button className="w-full h-12 rounded-full text-base font-bold bg-gradient-to-r from-primary via-secondary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all">
+                        {isTel ? "Numarayı Ara" : "Hemen Başvur"}
+                      </Button>
+                    </a>
+                  );
+                }
+                return (
+                  <Button disabled className="w-full h-12 rounded-full text-base font-bold bg-white/10 text-muted-foreground border border-white/5">
+                    Telefon bulunamadı
                   </Button>
-                </a>
-              ) : (
-                <Button disabled className="w-full h-12 rounded-full text-base font-bold bg-white/10 text-muted-foreground border border-white/5">
-                  Başvuru Linki Yok
-                </Button>
-              )
+                );
+              })()
             ) : (
               <Link href="/giris" className="block">
                 <Button className="w-full h-12 rounded-full text-base font-bold bg-white/10 border border-primary/30 gap-2 hover:bg-primary/20 transition-all">

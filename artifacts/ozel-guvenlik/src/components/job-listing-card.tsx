@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { displayCompany } from "@/lib/utils";
 import { getListingImage } from "@/lib/listing-image";
+import { markListingRead, useListingRead } from "@/lib/read-listings";
+import { resolveApplyHref } from "@/lib/apply-url";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -79,6 +81,7 @@ type Props = {
 
 /** İş ilanı kartı — mevcut liste kolon genişliğini doldurur */
 export function JobListingCard({ listing, onNavigate, adminOverlay }: Props) {
+  const isRead = useListingRead(listing.id);
   const company = displayCompany(listing.company) || "Firma";
   const initials = company.split(/\s+/).map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "G";
   const blob = `${listing.title} ${listing.description ?? ""} ${listing.requirements ?? ""}`;
@@ -90,15 +93,28 @@ export function JobListingCard({ listing, onNavigate, adminOverlay }: Props) {
   const verified = !!(listing.companyLogoUrl || listing.authorId);
   const salary = (listing.salary || "").trim() || "Belirtilmedi";
   const detailHref = `/ilan/${listing.id}`;
-  const applyHref = listing.applyUrl?.trim() || detailHref;
+  const resolvedApply = resolveApplyHref({
+    applyUrl: listing.applyUrl,
+    description: listing.description,
+    requirements: listing.requirements,
+    title: listing.title,
+  });
+  const applyHref = resolvedApply && resolvedApply !== "auth_required" ? resolvedApply : detailHref;
+  const applyIsTel = applyHref.startsWith("tel:");
   const postedLabel = relativeTime(listing.createdAt);
   const isToday =
     postedLabel === "Az önce" ||
     postedLabel.includes("dk") ||
     postedLabel.includes("saat");
 
+  const markReadAndNavigate = () => {
+    markListingRead(listing.id);
+    onNavigate?.();
+  };
+
   return (
-    <article className="job-card">
+    <article className={`job-card${isRead ? " job-card--read" : ""}`}>
+      {isRead && <span className="job-card__read-badge">Okundu</span>}
       {adminOverlay ? <div className="job-card__admin">{adminOverlay}</div> : null}
 
       <div className="job-card__header">
@@ -179,21 +195,25 @@ export function JobListingCard({ listing, onNavigate, adminOverlay }: Props) {
           {postedLabel}
         </span>
         <div className="job-card__actions">
-          <Link href={detailHref} onClick={onNavigate} className="btn-details">
+          <Link href={detailHref} onClick={markReadAndNavigate} className="btn-details">
             Detaylar
           </Link>
           <a
             href={applyHref}
             className="btn-apply"
             onClick={(e) => {
-              if (!listing.applyUrl?.trim()) {
+              markListingRead(listing.id);
+              if (resolvedApply === "auth_required") {
                 e.preventDefault();
-                onNavigate?.();
+                window.location.assign("/giris");
+                return;
+              }
+              if (!applyIsTel) {
+                e.preventDefault();
+                markReadAndNavigate();
                 window.location.assign(detailHref);
               }
             }}
-            target={listing.applyUrl?.trim()?.startsWith("http") ? "_blank" : undefined}
-            rel={listing.applyUrl?.trim()?.startsWith("http") ? "noopener noreferrer" : undefined}
           >
             Başvur <ArrowRight className="btn-apply__arrow" aria-hidden />
           </a>

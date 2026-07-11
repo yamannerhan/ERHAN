@@ -1870,7 +1870,7 @@ function TelegramAuthSection({ apiCall, toast }: { apiCall: (path: string, metho
 
   const loadStatus = async () => {
     try {
-      const d = await apiCall("/admin/telegram/status") as { state: TgAuthStateType; phone: string | null; connected: boolean };
+      const d = await apiCall("/admin/telegram/status") as { state: TgAuthStateType; phone: string | null; connected: boolean; hasSession?: boolean };
       setState(d.state ?? "disconnected");
       setPhone(d.phone);
     } catch { /* ignore */ } finally { setChecking(false); }
@@ -2032,6 +2032,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [sources, setSources] = useState<Source[]>([]);
   const [telegramTokenSet, setTelegramTokenSet] = useState(false);
   const [telegramConnected, setTelegramConnected] = useState<boolean | null>(null);
+  const [telegramHasSession, setTelegramHasSession] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -2044,12 +2045,13 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
     if (!silent) setLoading(true);
     try {
       const [d, pauseSt] = await Promise.all([
-        apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean; telegramGramJsConnected?: boolean; effectiveScanIntervalMinutes?: number; scanPhase?: "initial" | "incremental" }>,
+        apiCall("/admin/sources") as Promise<{ sources: Source[]; telegramTokenSet: boolean; telegramGramJsConnected?: boolean; telegramHasSession?: boolean; effectiveScanIntervalMinutes?: number; scanPhase?: "initial" | "incremental" }>,
         apiCall("/admin/sources/pause-status", "GET").catch(() => ({ paused: false })) as Promise<{ paused?: boolean }>,
       ]);
       setSources(d.sources ?? []);
       setTelegramTokenSet(d.telegramTokenSet ?? false);
       setTelegramConnected(d.telegramGramJsConnected ?? false);
+      setTelegramHasSession(!!d.telegramHasSession);
       setEffectiveScanInterval(d.effectiveScanIntervalMinutes ?? 30);
       setScanPhase(d.scanPhase ?? "incremental");
       setTgPaused(!!pauseSt.paused);
@@ -2228,11 +2230,20 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
       </div>
 
       {telegramConnected === false && sources.some(s => s.platform === "telegram" && s.active) && (
-        <div className="flex items-start gap-2 bg-destructive/10 border border-destructive/30 rounded-xl p-3 mb-4">
-          <AlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
-          <div className="text-xs text-destructive space-y-1">
-            <p><strong>Telegram hesabı bağlı değil!</strong> Botlar çalışmıyor — önizlemesi kapalı kanallardan ilan çekilemez.</p>
-            <p>Sol menüden <strong>Telegram Hesabı</strong> sekmesine gidip giriş yapın veya «Oturumu yenile» butonuna basın.</p>
+        <div className={`flex items-start gap-2 rounded-xl p-3 mb-4 border ${telegramHasSession ? "bg-amber-500/10 border-amber-500/30" : "bg-destructive/10 border-destructive/30"}`}>
+          <AlertCircle className={`w-4 h-4 mt-0.5 shrink-0 ${telegramHasSession ? "text-amber-400" : "text-destructive"}`} />
+          <div className={`text-xs space-y-1 ${telegramHasSession ? "text-amber-200" : "text-destructive"}`}>
+            {telegramHasSession ? (
+              <>
+                <p><strong>Telegram oturumu yeniden bağlanıyor…</strong> Gruplar aktif; son mesaj imleçleri korunuyor.</p>
+                <p>Sıfırlamayın — bağlanınca kaldığı yerden devam eder. Gerekirse «Oturumu yenile» yeterli.</p>
+              </>
+            ) : (
+              <>
+                <p><strong>Telegram hesabı bağlı değil!</strong> Botlar çalışmıyor — önizlemesi kapalı kanallardan ilan çekilemez.</p>
+                <p>Sol menüden <strong>Telegram Hesabı</strong> sekmesine gidip giriş yapın veya «Oturumu yenile» butonuna basın.</p>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -1,9 +1,10 @@
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
 import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
+import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
-import { fetchWhatsAppMessagesDetailed, isWhatsAppReady } from "../services/whatsapp-client";
+import { fetchWhatsAppMessagesDetailed, isWhatsAppReady, hasWhatsAppLocalSession, ensureWhatsAppAutoConnect, isWhatsAppStarting } from "../services/whatsapp-client";
+import { telegramSessionsTable } from "@workspace/db/schema";
 import {
   elemanCityCount,
   formatElemanCursor,
@@ -225,6 +226,20 @@ type InitialScanPhase = "backward" | "forward";
 const CONNECTION_ERR =
   "Telegram hesabı bu kaynağı okuyamadı: Telegram hesabı bağlı değil veya oturum yenilenemedi. " +
   "Admin → Telegram Hesabı sekmesinden bağlayın.";
+
+const CONNECTION_RECONNECTING =
+  "Telegram oturumu yeniden bağlanıyor… Son mesaj imleci korunuyor (Sıfırla gerekmez).";
+
+async function telegramConnectionErrorMessage(): Promise<string> {
+  return (await hasTelegramSessionStored()) ? CONNECTION_RECONNECTING : CONNECTION_ERR;
+}
+
+function whatsappNotReadyError(): string {
+  if (hasWhatsAppLocalSession() || isWhatsAppStarting()) {
+    return "WhatsApp yeniden bağlanıyor… İmleçler korunuyor (Sıfırla gerekmez).";
+  }
+  return "WhatsApp bağlı değil. Admin → WhatsApp Kaynakları'ndan QR/onay kodu ile bağlanın.";
+}
 
 function resolveInitialPhase(source: typeof sourcesTable.$inferSelect): InitialScanPhase {
   if (source.initialScanDone) return "forward";
@@ -568,7 +583,7 @@ async function processMessage(
     isActive: true,
     autoDeleteOnExpiry: true,
     sourceTag: source.platform,
-    applyUrl: phone ? `tel:${phone}` : sourceUrl,
+    applyUrl: phone ? `tel:${phone}` : null,
     expiresAt: listingExpiryFrom(postedAt),
     ...listingMeta,
   }).returning();
@@ -602,9 +617,42 @@ async function processMessage(
 
 // ── Bot API polling state ──────────────────────────────────────────
 let botUpdateOffset = 0;
+let botOffsetLoaded = false;
+
+async function loadBotUpdateOffset(): Promise<void> {
+  if (botOffsetLoaded) return;
+  try {
+    const rows = await db.select({ botUpdateOffset: telegramSessionsTable.botUpdateOffset })
+      .from(telegramSessionsTable).limit(1);
+    botUpdateOffset = rows[0]?.botUpdateOffset ?? 0;
+    botOffsetLoaded = true;
+  } catch {
+    botOffsetLoaded = true;
+  }
+}
+
+async function persistBotUpdateOffset(offset: number): Promise<void> {
+  botUpdateOffset = offset;
+  try {
+    const rows = await db.select({ id: telegramSessionsTable.id }).from(telegramSessionsTable).limit(1);
+    if (rows[0]) {
+      await db.update(telegramSessionsTable)
+        .set({ botUpdateOffset: offset, updatedAt: new Date() })
+        .where(eq(telegramSessionsTable.id, rows[0].id));
+    } else {
+      await db.insert(telegramSessionsTable).values({
+        authState: "disconnected",
+        botUpdateOffset: offset,
+      });
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "scraper: botUpdateOffset kaydedilemedi");
+  }
+}
 
 async function processBotUpdates(): Promise<void> {
   if (!isBotTokenSet()) return;
+  await loadBotUpdateOffset();
 
   const updates = await getUpdates(botUpdateOffset);
   if (updates.length === 0) return;
@@ -617,7 +665,7 @@ async function processBotUpdates(): Promise<void> {
   for (const update of updates) {
     const post = update.channel_post ?? update.message;
     if (!post?.text || post.text.length < 30) {
-      botUpdateOffset = update.update_id + 1;
+      await persistBotUpdateOffset(update.update_id + 1);
       continue;
     }
 
@@ -650,7 +698,7 @@ async function processBotUpdates(): Promise<void> {
       }
     }
 
-    botUpdateOffset = update.update_id + 1;
+    await persistBotUpdateOffset(update.update_id + 1);
   }
 }
 
@@ -785,14 +833,14 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         const errMsg = e instanceof Error ? e.message : String(e);
         if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
         if (!(await ensureTelegramConnected(5))) {
-          await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+          await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: await telegramConnectionErrorMessage(), isScanning: false });
           return stats;
         }
         throw e;
       }
 
       if (result.notConnected) {
-        await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+        await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: await telegramConnectionErrorMessage(), isScanning: false });
         return stats;
       }
 
@@ -909,7 +957,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     messages = result.messages;
     noMoreMessages = result.noMoreMessages;
     if (result.notConnected) {
-      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: await telegramConnectionErrorMessage(), isScanning: false });
       return stats;
     }
     if (isInitialScan && phase === "forward") {
@@ -920,7 +968,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
     const errMsg = e instanceof Error ? e.message : String(e);
     if (/FLOOD_WAIT|rate limit|wait of \d+ seconds/i.test(errMsg)) bumpScanBackoffOnRateLimit();
     if (!(await ensureTelegramConnected(5))) {
-      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: CONNECTION_ERR, isScanning: false });
+      await patchSourceProgress(source.id, { lastCheckedAt: new Date(), lastError: await telegramConnectionErrorMessage(), isScanning: false });
       return stats;
     }
     throw e;
@@ -929,7 +977,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   if (messages.length === 0 && isInitialScan && !(await ensureTelegramConnected(5))) {
     await patchSourceProgress(source.id, {
       lastCheckedAt: new Date(),
-      lastError: CONNECTION_ERR,
+      lastError: await telegramConnectionErrorMessage(),
       isScanning: false,
     });
     return stats;
@@ -1482,8 +1530,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   };
 
   if (!isWhatsAppReady()) {
+    ensureWhatsAppAutoConnect();
     await patchSourceProgress(source.id, {
-      lastError: "WhatsApp bağlı değil. Admin → WhatsApp Kaynakları'ndan QR/onay kodu ile bağlanın.",
+      lastError: whatsappNotReadyError(),
       isScanning: false,
       lastCheckedAt: new Date(),
     });
@@ -1974,9 +2023,10 @@ async function scanWhatsAppSources(
   if (whatsappSources.length === 0) return;
 
   if (!isWhatsAppReady()) {
+    ensureWhatsAppAutoConnect();
     for (const s of whatsappSources) {
       await patchSourceProgress(s.id, {
-        lastError: "WhatsApp bağlı değil. Admin panelinden bağlanın.",
+        lastError: whatsappNotReadyError(),
         lastCheckedAt: new Date(),
       });
     }
@@ -2139,29 +2189,19 @@ export function startScraperWorker(): void {
   void releaseStaleScanLocks(true).then(async (n) => {
     if (n > 0) logger.info({ released: n }, "scraper: deploy sonrası scan kilitleri açıldı (imleçler korundu)");
 
-    // WhatsApp: az mesajla yanlışlıkla "günlük"e düşmüş grupları yeniden 30g kuyruğuna al (ilan silinmez)
+    // Aktif kaynakları uyandır: bağlan uyarısı / takılı hata temizle (Sıfırla değil — imleç korunur)
     try {
-      const requeued = await db.update(sourcesTable)
-        .set({
-          initialScanDone: false,
-          initialScanProgress: 1,
-          initialScanPhase: "backward",
-          lastError: "Eksik geçmiş — 30 gün yeniden taranacak (mevcut ilanlar silinmez).",
-        })
-        .where(and(
-          eq(sourcesTable.platform, "whatsapp"),
-          eq(sourcesTable.active, true),
-          eq(sourcesTable.initialScanDone, true),
-          sql`COALESCE(${sourcesTable.lastScanMessagesRead}, 0) < 150`,
-        ))
-        .returning({ id: sourcesTable.id, name: sourcesTable.name });
-      if (requeued.length > 0) {
-        logger.info({ count: requeued.length, ids: requeued.map((r) => r.id) }, "scraper: wa eksik geçmiş grupları 30g kuyruğuna alındı");
-        waScanGeneration++;
-        void runWhatsAppSequentialDeepScan();
+      const active = await db.select({ id: sourcesTable.id, lastError: sourcesTable.lastError })
+        .from(sourcesTable).where(eq(sourcesTable.active, true));
+      for (const s of active) {
+        const err = (s.lastError ?? "").toLowerCase();
+        const soft = /bağlı değil|bağlanın|oturum yenilenemedi|yeniden bağlanıyor/.test(err);
+        await db.update(sourcesTable)
+          .set({ isScanning: false, ...(soft ? { lastError: null } : {}) })
+          .where(eq(sourcesTable.id, s.id));
       }
     } catch (e) {
-      logger.warn({ err: e }, "scraper: wa requeue atlandı");
+      logger.warn({ err: e }, "scraper: soft lastError temizliği atlandı");
     }
 
     const rows = await db.select({
@@ -2185,9 +2225,11 @@ export function startScraperWorker(): void {
       }, "scraper: kaynak kaldığı yerden devam edecek");
     }
   });
-  void ensureTelegramConnected(5).then((ok) => {
+  void ensureTelegramConnected(8).then((ok) => {
     logger.info(`scraper: GramJS ${ok ? "bağlı — kaldığı mesajdan devam" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
   });
+  ensureWhatsAppAutoConnect();
+  void loadBotUpdateOffset();
   const mode = isClientConnected()
     ? "GramJS"
     : isBotTokenSet()
@@ -2199,6 +2241,7 @@ export function startScraperWorker(): void {
 
   setInterval(() => {
     if (!isClientConnected()) void ensureTelegramConnected(5).catch(() => {});
+    ensureWhatsAppAutoConnect();
   }, 5 * 60 * 1000);
 
   if (isBotTokenSet()) {
@@ -2214,7 +2257,11 @@ export function startScraperWorker(): void {
   void scheduleScraperInterval();
 
   setTimeout(async () => {
-    try { await runScraperCycle(); }
+    try {
+      await ensureTelegramConnected(8);
+      ensureWhatsAppAutoConnect();
+      await runScraperCycle();
+    }
     catch (e) { logger.error(e, "scraper: initial run error"); }
   }, 5_000);
 }
@@ -2507,7 +2554,8 @@ export async function triggerDeepRescan30Days(): Promise<void> {
 // İçe aktarma geçmişi route tarafında temizlenir; burada bot offset sıfırlanıp
 // tarama döngüsü hemen çalıştırılır (interval beklenmez).
 export async function triggerRescan(): Promise<void> {
-  botUpdateOffset = 0;
+  await persistBotUpdateOffset(0);
+  botOffsetLoaded = true;
   telegramScraperPaused = false;
   await runScraperCycle(true);
 }
@@ -2566,6 +2614,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (newCity) next.city = newCity;
     if (newSalary) next.salary = newSalary;
     if (newPhone) next.applyUrl = `tel:${newPhone}`;
+    else if (row.applyUrl && /t\.me\/|telegram\.me\/i.test(row.applyUrl)) next.applyUrl = null;
 
     const changed = next.title !== row.title
       || next.requirements !== row.requirements

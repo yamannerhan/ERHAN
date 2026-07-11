@@ -3,9 +3,10 @@ import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable }
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused, kickWhatsAppDeepScan } from "../workers/scraper";
-import { ensureTelegramConnected } from "../services/telegram-client";
+import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
+  hasWhatsAppLocalSession,
 } from "../services/whatsapp-client";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
 
@@ -60,6 +61,9 @@ router.get("/admin/sources", authMiddleware, requireAdmin, async (_req, res): Pr
     })),
     telegramTokenSet: isTelegramTokenSet(),
     telegramGramJsConnected: await ensureTelegramConnected(1),
+    telegramHasSession: await hasTelegramSessionStored(),
+    whatsappHasSession: hasWhatsAppLocalSession(),
+    whatsappReady: isWhatsAppReady(),
     effectiveScanIntervalMinutes: await getEffectiveScanIntervalMinutes(),
     scanPhase: await getScanPhase(),
   });

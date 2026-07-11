@@ -339,6 +339,17 @@ export function getAuthState(): AuthState { return currentState; }
 export function getCurrentPhone(): string | null { return currentPhone; }
 export function isClientConnected(): boolean { return currentState === "connected" && client !== null; }
 
+/** DB'de kayıtlı GramJS oturumu var mı? (deploy sonrası yeniden bağlanmak için) */
+export async function hasTelegramSessionStored(): Promise<boolean> {
+  if (previousSessionString) return true;
+  try {
+    const row = await getSessionRow();
+    return !!(row?.sessionString);
+  } catch {
+    return false;
+  }
+}
+
 export interface ChannelMessage {
   id: string;
   text: string;
