@@ -310,10 +310,12 @@ function bumpScanBackoffOnRateLimit(): void {
   logger.warn({ scanBackoffMinutes }, "scraper: rate limit — tarama aralığı artırıldı");
 }
 
-/** Süre = kaynak sitedeki yayın tarihi + 30 gün (şimdiki zamana +30 eklenmez). */
-function listingExpiryFrom(postedAt?: Date): Date {
-  const base = postedAt ?? new Date();
-  return new Date(base.getTime() + INITIAL_SCAN_MS);
+/**
+ * İlan sitede 30 gün kalsın (kaynak mesaj tarihi değil, siteye giriş zamanı).
+ * Botların eski TG/WA tarihine göre süre biçmesi sayı çökmesine yol açıyordu.
+ */
+function listingExpiryFrom(_postedAt?: Date): Date {
+  return new Date(Date.now() + INITIAL_SCAN_MS);
 }
 
 /** Tekrar görülen ilan: lastSeen güncelle, yayın/bitiş tarihini değiştirme. */
@@ -527,11 +529,11 @@ async function processMessage(
     sourceId: source.id,
     messageId,
     sourceUrl,
+    // publishedAt: kaynak tarihi (bilgi); createdAt/firstSeen: siteye eklenme — 30g buna göre
     publishedAt: postedAt ?? now,
     firstSeenAt: now,
     lastSeenAt: now,
     rawText: text,
-    ...(postedAt ? { createdAt: postedAt } : {}),
   };
 
   if (!shouldAutoPublish(source)) {
@@ -550,7 +552,6 @@ async function processMessage(
       platform: source.platform,
       status: "pending",
       duplicateHash: hash,
-      ...(postedAt ? { createdAt: postedAt } : {}),
     });
     return "skipped";
   }
@@ -1283,7 +1284,6 @@ async function publishElemanJob(
     sourceTag: "eleman",
     applyUrl: `tel:${job.phone}`,
     publishedAt: postedAt,
-    createdAt: postedAt,
     firstSeenAt: now,
     lastSeenAt: now,
     rawText: job.rawText,
@@ -2272,26 +2272,24 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi gerçekten dolan ilanları sil. expiresAt = kaynak yayın tarihi + 30g. */
+/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + 30 gün. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
 
-  // expiresAt yoksa veya yayın tarihine göre tutarsızsa: publishedAt + 30 gün
+  // Eski bot mantığı publishedAt+30 yapıyordu → erken siliniyordu. firstSeenAt+30'a düzelt.
   try {
     await db.execute(sql`
       UPDATE listings
       SET
-        expires_at = COALESCE(published_at, created_at) + INTERVAL '30 days',
+        first_seen_at = COALESCE(first_seen_at, NOW()),
+        expires_at = COALESCE(first_seen_at, NOW()) + INTERVAL '30 days',
         auto_delete_on_expiry = true
-      WHERE source_tag IS NOT NULL
-        AND status = 'active'
+      WHERE status = 'active'
         AND is_active = true
         AND (
           expires_at IS NULL
-          OR (
-            published_at IS NOT NULL
-            AND ABS(EXTRACT(EPOCH FROM (expires_at - (published_at + INTERVAL '30 days')))) > 86400
-          )
+          OR first_seen_at IS NULL
+          OR expires_at < COALESCE(first_seen_at, NOW()) + INTERVAL '29 days'
         )
     `);
   } catch (e) {
@@ -2325,6 +2323,7 @@ export async function purgeExpiredListings(): Promise<number> {
     .where(and(
       isNotNull(listingsTable.expiresAt),
       lt(listingsTable.expiresAt, now),
+      eq(listingsTable.autoDeleteOnExpiry, true),
     ));
 
   if (toDeleteRows.length === 0) return 0;

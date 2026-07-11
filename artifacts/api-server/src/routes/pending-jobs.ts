@@ -105,11 +105,9 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil); numara yoksa link/kaynağa düş
     applyUrl: job.phone ? `tel:${job.phone}` : (job.applicationUrl ?? job.sourceUrl ?? undefined),
     autoDeleteOnExpiry: true,
-    expiresAt: job.createdAt
-      ? new Date(job.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000)
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    // 30 gün = onay/siteye yayın anı (kaynak mesaj tarihi değil)
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     publishedAt: job.createdAt ?? new Date(),
-    ...(job.createdAt ? { createdAt: job.createdAt } : {}),
     lastSeenAt: new Date(),
     firstSeenAt: new Date(),
   }).returning();

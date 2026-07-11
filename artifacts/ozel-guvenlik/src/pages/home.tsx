@@ -723,7 +723,15 @@ export default function Home() {
 
           {/* Pagination */}
           {!isLoading && totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-5">
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 mt-5 flex-wrap">
+              <button
+                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(1); }}
+                disabled={page <= 1}
+                className="og-page-btn"
+                title="İlk sayfa"
+              >
+                « İlk
+              </button>
               <button
                 onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(p => Math.max(1, p - 1)); }}
                 disabled={page <= 1}
@@ -740,6 +748,14 @@ export default function Home() {
                 className="og-page-btn"
               >
                 Sonraki
+              </button>
+              <button
+                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(totalPages); }}
+                disabled={page >= totalPages}
+                className="og-page-btn"
+                title="Son sayfa"
+              >
+                Son »
               </button>
             </div>
           )}

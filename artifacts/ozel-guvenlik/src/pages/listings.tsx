@@ -529,7 +529,16 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
           {/* Pagination */}
           {!isLoading && totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-5 mb-8 relative z-10">
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 mt-5 mb-8 relative z-10 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setPage(1)}
+                disabled={page <= 1 || isFetching}
+                className="og-page-btn"
+                title="İlk sayfa"
+              >
+                « İlk
+              </button>
               <button
                 type="button"
                 onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -548,6 +557,15 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                 className="og-page-btn"
               >
                 {isFetching ? "Yükleniyor…" : "Sonraki"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages || isFetching}
+                className="og-page-btn"
+                title="Son sayfa"
+              >
+                Son »
               </button>
             </div>
           )}
