@@ -43,6 +43,13 @@ function isBotOrFake(msg: ExtMsg): boolean {
   return !isRealHuman(msg);
 }
 
+/** Sadece sistem botları (sahte üye kartları üye stili kalsın) */
+function isSystemBot(msg: ExtMsg): boolean {
+  if (msg.userRole === "bot" || msg.isBot) return true;
+  if (msg.userId === 0 || msg.userId === -999) return true;
+  return false;
+}
+
 /** Yeni üye katılım duyurusu — Üyeler sekmesinde kalsın */
 function isJoinAnnounce(msg: ExtMsg): boolean {
   return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
@@ -51,6 +58,23 @@ function isJoinAnnounce(msg: ExtMsg): boolean {
 /** DB serial id (socket Date.now() id'lerini sayma) */
 function isDbMessageId(id: number): boolean {
   return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
+}
+
+/** Son 100 üye + son 120 diğer mesajı koru (giriş/çıkışta üye mesajları silinmesin) */
+function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
+  const map = new Map<number, ExtMsg>();
+  for (const m of prev) {
+    if (!isSystem(m)) map.set((m as ExtMsg).id, m as ExtMsg);
+  }
+  for (const m of incoming) {
+    if (!isDbMessageId(m.id)) continue;
+    map.set(m.id, m);
+  }
+  const all = [...map.values()].sort((a, b) => a.id - b.id);
+  const humans = all.filter(isRealHuman).slice(-100);
+  const others = all.filter((m) => !isRealHuman(m)).slice(-120);
+  const keep = new Set<number>([...humans, ...others].map((m) => m.id));
+  return all.filter((m) => keep.has(m.id));
 }
 
 const STICKY_SKIP_KEY = "chat_skipped_sticky_id";
@@ -222,8 +246,12 @@ export function ChatBubble() {
       if (!isSystem(msg) && prev.some(m => !isSystem(m) && (m as ExtMsg).id === (msg as ExtMsg).id)) {
         return prev;
       }
-      // Üye mesajları silinmesin diye en az 100 tut
-      const next = [...prev.slice(-199), msg];
+      if (isSystem(msg)) {
+        const next = [...prev, msg].slice(-220);
+        rememberMessageIds(next);
+        return next;
+      }
+      const next = mergePreserveMessages(prev, [msg as ExtMsg]);
       rememberMessageIds(next);
       return next;
     });
@@ -241,26 +269,40 @@ export function ChatBubble() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const url = after > 0 && isDbMessageId(after)
-        ? `/api/chat/messages?limit=100&after=${after}`
-        : "/api/chat/messages?limit=100";
-      const res = await fetch(url, {
-        headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => null) as ExtMsg[] | null;
-      if (!Array.isArray(data)) return;
+      const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
+      const fetchJson = async (url: string) => {
+        const res = await fetch(url, { headers, cache: "no-store" });
+        const data = await res.json().catch(() => null);
+        return Array.isArray(data) ? (data as ExtMsg[]) : [];
+      };
+
+      let incoming: ExtMsg[] = [];
+      if (after > 0 && isDbMessageId(after)) {
+        incoming = await fetchJson(`/api/chat/messages?limit=100&after=${after}`);
+      } else {
+        // İlk yükleme: karışık akış + ayrı son 100 üye (yenilemede üye mesajları kalsın)
+        const [mixed, humans] = await Promise.all([
+          fetchJson("/api/chat/messages?limit=100"),
+          fetchJson("/api/chat/messages?limit=100&humansOnly=1"),
+        ]);
+        const byId = new Map<number, ExtMsg>();
+        for (const m of [...mixed, ...humans]) {
+          if (isDbMessageId(m.id)) byId.set(m.id, m);
+        }
+        incoming = [...byId.values()].sort((a, b) => a.id - b.id);
+      }
+
+      if (incoming.length === 0) return;
       setMessages(prev => {
         const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
-        const incoming = data.filter(m => !existingIds.has(m.id) && isDbMessageId(m.id));
-        if (incoming.length === 0) return prev;
-        const humanIncoming = incoming.filter(isRealHuman);
-        if (!openRef.current && humanIncoming.length > 0) {
+        const fresh = incoming.filter(m => !existingIds.has(m.id) && isDbMessageId(m.id));
+        const humanIncoming = (after > 0 ? fresh : incoming).filter(isRealHuman);
+        if (!openRef.current && fresh.length > 0 && humanIncoming.length > 0 && after > 0) {
           setUnread(n => n + humanIncoming.length);
           setPulse(true);
           setTimeout(() => setPulse(false), 600);
         }
-        const next = [...prev, ...incoming].slice(-200);
+        const next = mergePreserveMessages(prev, incoming);
         rememberMessageIds(next);
         return next;
       });
@@ -600,6 +642,7 @@ export function ChatBubble() {
           canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
           renderContent={renderMessageContent}
           active={activeMsgId === chatMsg.id}
+          memberStyle={!isSystemBot(chatMsg)}
           onActivate={() => setActiveMsgId((id) => (id === chatMsg.id ? null : chatMsg.id))}
           onReply={user ? (m) => startReply(m as ExtMsg) : undefined}
           onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}

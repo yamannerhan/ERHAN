@@ -42,12 +42,32 @@ function isRealHuman(msg: ExtMsg): boolean {
   return true;
 }
 
-function isBotOrFake(msg: ExtMsg): boolean {
-  return !isRealHuman(msg);
+/** Sadece sistem botları (sahte üye kartları üye stili kalsın) */
+function isSystemBot(msg: ExtMsg): boolean {
+  if (msg.userRole === "bot" || msg.isBot) return true;
+  if (msg.userId === 0 || msg.userId === -999) return true;
+  return false;
 }
 
 function isJoinAnnounce(msg: ExtMsg): boolean {
   return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
+}
+
+/** Son 100 üye + son 120 diğer mesajı koru (giriş/çıkışta üye mesajları silinmesin) */
+function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
+  const map = new Map<number, ExtMsg>();
+  for (const m of prev) {
+    if (!isSystem(m)) map.set((m as ExtMsg).id, m as ExtMsg);
+  }
+  for (const m of incoming) {
+    if (!isDbMessageId(m.id)) continue;
+    map.set(m.id, m);
+  }
+  const all = [...map.values()].sort((a, b) => a.id - b.id);
+  const humans = all.filter(isRealHuman).slice(-100);
+  const others = all.filter((m) => !isRealHuman(m)).slice(-120);
+  const keep = new Set<number>([...humans, ...others].map((m) => m.id));
+  return all.filter((m) => keep.has(m.id));
 }
 
 function renderMessageContent(content: string) {
@@ -169,11 +189,24 @@ export default function Chat() {
 
   const { data: initialData, isLoading } = useGetChatMessages({ limit: 100 });
 
+  // Çift mesaj önleme: aynı id'li mesaj zaten varsa ekleme
+  const rememberMessageIds = (items: AnyMsg[]) => {
+    const ids = items.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id);
+    messageIdsRef.current = new Set(ids);
+    const dbIds = ids.filter(isDbMessageId);
+    if (dbIds.length > 0) {
+      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...dbIds);
+    }
+  };
+
   useEffect(() => {
     if (!initialData) return;
     const list = (initialData as ExtMsg[]).filter((m) => isDbMessageId(m.id));
-    setMessages(list);
-    rememberMessageIds(list);
+    setMessages((prev) => {
+      const next = mergePreserveMessages(prev, list);
+      rememberMessageIds(next);
+      return next;
+    });
   }, [initialData]);
 
   const scrollToBottom = useCallback(() => {
@@ -185,16 +218,6 @@ export default function Chat() {
     setTimeout(jump, 60);
     setTimeout(jump, 200);
   }, []);
-
-  // Çift mesaj önleme: aynı id'li mesaj zaten varsa ekleme
-  const rememberMessageIds = (items: AnyMsg[]) => {
-    const ids = items.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id);
-    messageIdsRef.current = new Set(ids);
-    const dbIds = ids.filter(isDbMessageId);
-    if (dbIds.length > 0) {
-      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...dbIds);
-    }
-  };
 
   const addMsg = useCallback((msg: AnyMsg): boolean => {
     if (!isSystem(msg) && messageIdsRef.current.has((msg as ExtMsg).id)) {
@@ -216,7 +239,12 @@ export default function Chat() {
       if (!isSystem(msg) && prev.some(m => !isSystem(m) && (m as ExtMsg).id === (msg as ExtMsg).id)) {
         return prev;
       }
-      const next = [...prev, msg];
+      if (isSystem(msg)) {
+        const next = [...prev, msg].slice(-220);
+        rememberMessageIds(next);
+        return next;
+      }
+      const next = mergePreserveMessages(prev, [msg as ExtMsg]);
       rememberMessageIds(next);
       return next;
     });
@@ -228,20 +256,32 @@ export default function Chat() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const url = after > 0 && isDbMessageId(after)
-        ? `/api/chat/messages?limit=100&after=${after}`
-        : "/api/chat/messages?limit=100";
-      const res = await fetch(url, {
-        headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => null) as ExtMsg[] | null;
-      if (!Array.isArray(data)) return;
+      const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
+      const fetchJson = async (url: string) => {
+        const res = await fetch(url, { headers, cache: "no-store" });
+        const data = await res.json().catch(() => null);
+        return Array.isArray(data) ? (data as ExtMsg[]) : [];
+      };
+
+      let incoming: ExtMsg[] = [];
+      if (after > 0 && isDbMessageId(after)) {
+        incoming = await fetchJson(`/api/chat/messages?limit=100&after=${after}`);
+      } else {
+        // İlk yükleme: karışık akış + ayrı son 100 üye (yenilemede üye mesajları kalsın)
+        const [mixed, humans] = await Promise.all([
+          fetchJson("/api/chat/messages?limit=100"),
+          fetchJson("/api/chat/messages?limit=100&humansOnly=1"),
+        ]);
+        const byId = new Map<number, ExtMsg>();
+        for (const m of [...mixed, ...humans]) {
+          if (isDbMessageId(m.id)) byId.set(m.id, m);
+        }
+        incoming = [...byId.values()].sort((a, b) => a.id - b.id);
+      }
+
+      if (incoming.length === 0) return;
       setMessages(prev => {
-        const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
-        const incoming = data.filter(m => !existingIds.has(m.id) && isDbMessageId(m.id));
-        if (incoming.length === 0) return prev;
-        const next = [...prev, ...incoming].slice(-200);
+        const next = mergePreserveMessages(prev, incoming);
         rememberMessageIds(next);
         return next;
       });
@@ -472,7 +512,7 @@ export default function Chat() {
     }
 
     const chatMsg = msg as ExtMsg;
-    const isBot = isBotOrFake(chatMsg);
+    const isBot = isSystemBot(chatMsg);
     const isMe = !isBot && user?.id === chatMsg.userId;
     const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
     const msgReactions: Reaction[] = chatMsg.reactions ?? [];
@@ -494,6 +534,7 @@ export default function Chat() {
         canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
         renderContent={renderMessageContent}
         active={isActive}
+        memberStyle={!isSystemBot(chatMsg)}
         onActivate={() => setActiveMsg(isActive ? null : chatMsg.id)}
         onReply={user ? (m) => { setReplyTo(m as ExtMsg); setActiveMsg(null); } : undefined}
         onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}

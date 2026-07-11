@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, chatMessagesTable, usersTable, adminSettingsTable, chatReactionsTable, notificationsTable } from "@workspace/db";
-import { eq, desc, and, lt, gt, inArray } from "drizzle-orm";
+import { eq, desc, and, lt, gt, inArray, sql } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { triggerContextualReply } from "../lib/chat-bot";
 import { filterProfanity } from "../lib/profanity";
@@ -99,11 +99,16 @@ async function formatMessage(
 
 router.get("/chat/messages", optionalAuthMiddleware, async (req, res): Promise<void> => {
   try {
-    const limit = Math.min(100, Math.max(1, parseInt(String(req.query["limit"] ?? "100"), 10)));
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query["limit"] ?? "100"), 10)));
     const before = req.query["before"] ? parseInt(String(req.query["before"]), 10) : undefined;
     const after = req.query["after"] ? parseInt(String(req.query["after"]), 10) : undefined;
+    const humansOnly = String(req.query["humansOnly"] ?? "") === "1" || String(req.query["humans"] ?? "") === "1";
 
     const conditions = [eq(chatMessagesTable.isDeleted, false)];
+    if (humansOnly) {
+      // Gerçek üye mesajları (bot / sahte userId <= 0 değil)
+      conditions.push(sql`${chatMessagesTable.userId} > 0`);
+    }
     if (before != null && !isNaN(before)) {
       conditions.push(lt(chatMessagesTable.id, before));
     }

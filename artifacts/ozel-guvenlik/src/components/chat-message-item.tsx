@@ -42,13 +42,6 @@ function isDbMessageId(id: number): boolean {
   return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
 }
 
-function isBotLike(msg: ChatMsgView): boolean {
-  if (msg.isBot || msg.isFake) return true;
-  if (msg.userId <= 0) return true;
-  if (msg.userRole === "bot") return true;
-  return false;
-}
-
 type Props = {
   msg: ChatMsgView;
   isOwn: boolean;
@@ -64,6 +57,8 @@ type Props = {
   /** Mobilde dokununca aksiyonları göster */
   active?: boolean;
   onActivate?: () => void;
+  /** Üye kartı stili (Tümü sekmesinde de aynı renkler) */
+  memberStyle?: boolean;
 };
 
 /**
@@ -83,21 +78,28 @@ export function ChatMessageItem({
   onPollUpdate,
   active,
   onActivate,
+  memberStyle,
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const bot = isBotLike(msg);
+  const systemBot =
+    msg.isBot === true ||
+    msg.userRole === "bot" ||
+    msg.userId === 0 ||
+    msg.userId === -999;
+  const useMemberCard = memberStyle !== false && !systemBot;
+  const bot = !useMemberCard;
   const name = msg.displayName || msg.username;
-  const role = msg.userRole ?? (bot ? "bot" : "user");
+  const role = msg.userRole ?? (systemBot ? "bot" : "user");
   const rank = resolveRankKey({
     role,
     level: msg.level,
     isVip: msg.isVip,
-    isBot: bot,
+    isBot: systemBot,
   });
   const level = Math.max(1, msg.level ?? 1);
   const bubbleStyle =
     msg.chatBubble ||
-    (role === "admin" ? "admin" : role === "moderator" ? "mod" : msg.isVip ? "vip" : bot ? "neon" : null);
+    (role === "admin" ? "admin" : role === "moderator" ? "mod" : msg.isVip ? "vip" : systemBot ? "neon" : null);
 
   const roleClass =
     role === "admin" ? "role-admin" :
@@ -143,7 +145,7 @@ export function ChatMessageItem({
       onClick={() => onActivate?.()}
     >
       <div className="message-avatar">
-        {bot && !msg.isFake ? (
+        {bot ? (
           <div className="message-bot-avatar" aria-hidden>
             <Bot className="w-4 h-4 text-amber-400" />
           </div>
@@ -155,7 +157,7 @@ export function ChatMessageItem({
             isVip={msg.isVip}
             frame={msg.avatarFrame}
             size={32}
-            online={!bot}
+            online
           />
         )}
       </div>
