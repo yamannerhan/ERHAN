@@ -104,10 +104,11 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     companyLogoUrl: createSmartListingImage(job.rawText, title),
     // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil); numara yoksa link/kaynağa düş
     applyUrl: job.phone ? `tel:${job.phone}` : (job.applicationUrl ?? job.sourceUrl ?? undefined),
-    autoDeleteOnExpiry: false,
+    autoDeleteOnExpiry: true,
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     publishedAt: job.createdAt ?? new Date(),
     lastSeenAt: new Date(),
+    firstSeenAt: new Date(),
   }).returning();
   if (listing) {
     await announceNewListing(listing);

@@ -13,9 +13,20 @@ function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
 interface SystemMsg { id: number; type: "join" | "welcome" | "cleared"; text: string; createdAt: string; }
 type Reaction = { emoji: string; userId: number; username: string; displayName: string | null };
-type ExtMsg = ChatMessage & { displayName?: string | null; isFake?: boolean; reactions?: Reaction[] };
+type ExtMsg = ChatMessage & { displayName?: string | null; isFake?: boolean; isBot?: boolean; reactions?: Reaction[] };
 type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
+
+function isRealHuman(msg: ExtMsg): boolean {
+  if (msg.isBot || msg.isFake) return false;
+  if (msg.userId <= 0) return false;
+  if (msg.userRole === "bot") return false;
+  return true;
+}
+
+function isBotOrFake(msg: ExtMsg): boolean {
+  return !isRealHuman(msg);
+}
 
 function renderMessageContent(content: string) {
   return content.split(/(@\w+|\/ilan\/\d+)/g).map((part, i) => {
@@ -180,6 +191,7 @@ export default function Chat() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [, setSocket] = useState<Socket | null>(null);
   const [messages, setMessages] = useState<AnyMsg[]>([]);
+  const [feedMode, setFeedMode] = useState<"all" | "members">("all");
   const [sending, setSending] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
@@ -460,36 +472,38 @@ export default function Chat() {
     }
 
     const chatMsg = msg as ExtMsg;
-    const isBot = (chatMsg as any).isBot || chatMsg.userId === 0;
+    const isBot = isBotOrFake(chatMsg);
     const isMe = !isBot && user?.id === chatMsg.userId;
     const name = chatName(chatMsg);
 
     if (isBot) {
       const isBilgiBot = chatMsg.userId === -999;
-      const botColor = isBilgiBot ? "#22C55E" : "#06B6D4";
-      const botBg   = isBilgiBot ? "rgba(34,197,94,0.10)"  : "rgba(6,182,212,0.10)";
-      const botBdr  = isBilgiBot ? "rgba(34,197,94,0.25)"  : "rgba(6,182,212,0.20)";
-      const botName = (chatMsg as any).displayName ?? (chatMsg as any).username ?? (isBilgiBot ? "BİLGİ BOTU" : "GuvenlikBot");
+      const botColor = chatMsg.isFake ? "#94a3b8" : isBilgiBot ? "#22C55E" : "#F5C518";
+      const botBg   = "rgba(255,255,255,0.04)";
+      const botBdr  = "rgba(255,255,255,0.08)";
+      const botName = chatMsg.displayName ?? chatMsg.username ?? (isBilgiBot ? "BİLGİ BOTU" : "ÖzelGüvenlik Bot");
       const lines   = chatMsg.content.split("\n").filter(l => l.trim() !== "");
       const isInfo  = isBilgiBot && lines[0]?.startsWith("🔎");
       return (
-        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2 group px-2">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-5" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
-            <Bot className="w-4 h-4" style={{ color: botColor }} />
+        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2 group px-2 opacity-90">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-5 overflow-hidden" style={{ background: "linear-gradient(135deg,#2a2410,#1a1608)", border: "1.5px solid rgba(245,197,24,0.45)" }}>
+            {chatMsg.isFake && chatMsg.userAvatarUrl
+              ? <img src={chatMsg.userAvatarUrl} alt="" className="w-full h-full object-cover opacity-80" />
+              : <Bot className="w-4 h-4" style={{ color: botColor }} />}
           </div>
           <div className="flex flex-col items-start max-w-[82%]">
-            <div className="flex items-center gap-1 mb-1 ml-1">
-              <span className="text-[10px] font-bold" style={{ color: botColor }}>{botName}</span>
-              <span className="text-[8px]" style={{ color: `${botColor}60` }}>· Bot</span>
+            <div className="flex items-center gap-1.5 mb-1 ml-1">
+              <span className="text-[11px] font-bold text-white/90">{botName}</span>
+              <span className="inline-flex px-1.5 py-0.5 rounded-md text-[8px] font-black bg-amber-400 text-black">BOT</span>
             </div>
             <div className="px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
               {isInfo ? (
                 <>
-                  <p className="text-[11px] font-bold mb-1.5" style={{ color: botColor }}>{lines[0]}</p>
-                  <p className="break-words text-foreground/90">{renderMessageContent(lines.slice(1).join(" "))}</p>
+                  <p className="text-[11px] font-bold mb-1.5 text-amber-300">{lines[0]}</p>
+                  <p className="break-words text-foreground/80">{renderMessageContent(lines.slice(1).join(" "))}</p>
                 </>
               ) : (
-                <p className="break-words text-foreground/90">{renderMessageContent(chatMsg.content)}</p>
+                <p className="break-words text-foreground/80">{renderMessageContent(chatMsg.content)}</p>
               )}
               <p className="text-[10px] text-muted-foreground mt-1">{new Date(chatMsg.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</p>
             </div>
@@ -691,6 +705,23 @@ export default function Chat() {
             </button>
           </div>
         )}
+        <div className="flex gap-1.5 px-4 py-2 border-b border-white/5 shrink-0">
+          {([
+            { id: "all" as const, label: "Tümü" },
+            { id: "members" as const, label: "Üyeler" },
+          ]).map(t => (
+            <button
+              key={t.id}
+              onClick={() => setFeedMode(t.id)}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold transition-colors ${
+                feedMode === t.id ? "bg-amber-400 text-black" : "bg-white/5 text-white/50 hover:bg-white/10"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+          <span className="ml-auto text-[10px] text-white/30 self-center">Sahte/bot mesajlar BOT rozetli</span>
+        </div>
         {/* min-h-0: flex-1 + overflow-y-auto'nun çalışması için zorunlu */}
         <div ref={msgContainerRef} className="flex-1 min-h-0 overflow-y-auto py-4 space-y-3">
           {isLoading ? (
@@ -700,7 +731,9 @@ export default function Chat() {
           ) : messages.length === 0 ? (
             <div className="text-center py-10 text-muted-foreground">Henüz mesaj yok. İlk mesajı sen gönder!</div>
           ) : (
-            messages.map(msg => renderMsg(msg))
+            messages
+              .filter(m => feedMode === "all" || isSystem(m) || isRealHuman(m as ExtMsg))
+              .map(msg => renderMsg(msg))
           )}
           <div ref={scrollRef} />
         </div>

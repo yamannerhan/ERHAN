@@ -309,12 +309,12 @@ function bumpScanBackoffOnRateLimit(): void {
   logger.warn({ scanBackoffMinutes }, "scraper: rate limit — tarama aralığı artırıldı");
 }
 
-/** Süre her zaman sitede görüldüğü andan itibaren 30 gün — Telegram post tarihi değil. */
+/** Süre = sitede eklendiği/görüldüğü andan itibaren 30 gün (Telegram post tarihi değil). */
 function listingExpiryFrom(_postedAt?: Date): Date {
   return new Date(Date.now() + INITIAL_SCAN_MS);
 }
 
-/** Tekrar görülen bot ilanının süresini uzat (silinmesin). */
+/** Tekrar görülen bot ilanının süresini uzat. */
 async function touchListingSeen(listingId: number): Promise<void> {
   const now = new Date();
   await db.update(listingsTable)
@@ -323,6 +323,7 @@ async function touchListingSeen(listingId: number): Promise<void> {
       expiresAt: listingExpiryFrom(),
       status: "active",
       isActive: true,
+      autoDeleteOnExpiry: true,
     })
     .where(eq(listingsTable.id, listingId));
 }
@@ -563,8 +564,7 @@ async function processMessage(
     requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
     status: "active",
     isActive: true,
-    // Bot ilanları süre dolunca silinmez; pasife alınır (purge). createdAt = eklenme anı.
-    autoDeleteOnExpiry: false,
+    autoDeleteOnExpiry: true,
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
     expiresAt: listingExpiryFrom(),
@@ -1278,7 +1278,7 @@ async function publishElemanJob(
     requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
     status: "active",
     isActive: true,
-    autoDeleteOnExpiry: false,
+    autoDeleteOnExpiry: true,
     sourceId: source.id,
     messageId,
     sourceUrl: job.url,
@@ -2115,113 +2115,65 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi dolan ilanlar: manuel+tikli ise sil; bot/kaynak ilanları yalnızca pasif. */
+/** Süresi gerçekten dolan ilanları sil (pasife alma). expiresAt < now şart. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
-  const cutoff = new Date(now.getTime() - INITIAL_SCAN_MS);
 
-  // Eski bot ilanları: hard-delete bayrağını kapat + son 30 günde görülenleri yeniden aktif et
+  // Erken silmeyi düzelt: süre Telegram post tarihine göre yanlış hesaplanmışsa
+  // sitede ilk görülme + 30 güne çek (yalnızca henüz süresi gelmemiş aktif bot ilanları)
   try {
-    await db.update(listingsTable)
-      .set({ autoDeleteOnExpiry: false })
-      .where(and(
-        isNotNull(listingsTable.sourceTag),
-        eq(listingsTable.autoDeleteOnExpiry, true),
-      ));
+    await db.execute(sql`
+      UPDATE listings
+      SET
+        expires_at = COALESCE(first_seen_at, last_seen_at, NOW()) + INTERVAL '30 days',
+        auto_delete_on_expiry = true
+      WHERE source_tag IS NOT NULL
+        AND status = 'active'
+        AND is_active = true
+        AND first_seen_at IS NOT NULL
+        AND (
+          expires_at IS NULL
+          OR expires_at < first_seen_at + INTERVAL '30 days' - INTERVAL '12 hours'
+        )
+        AND COALESCE(first_seen_at, last_seen_at) > NOW() - INTERVAL '30 days'
+    `);
+  } catch (e) {
+    logger.warn({ err: e }, "scraper: expiresAt düzeltmesi atlandı");
+  }
 
-    const revive = await db.update(listingsTable)
-      .set({
-        status: "active",
-        isActive: true,
-        expiresAt: listingExpiryFrom(),
-        autoDeleteOnExpiry: false,
-      })
-      .where(and(
-        isNotNull(listingsTable.sourceTag),
-        sql`COALESCE(${listingsTable.lastSeenAt}, ${listingsTable.createdAt}) >= ${cutoff}`,
-        sql`(${listingsTable.status} != 'active' OR ${listingsTable.isActive} = false OR ${listingsTable.expiresAt} IS NULL OR ${listingsTable.expiresAt} < ${now})`,
-      ))
-      .returning({ id: listingsTable.id });
-    if (revive.length > 0) {
-      logger.info({ count: revive.length }, "scraper: bot ilanları süre düzeltmesiyle yeniden aktif");
-    }
-
-    // Eleman.net filtre/index çöpü açıklamaları pasife al
-    const junk = await db.update(listingsTable)
-      .set({ status: "inactive", isActive: false })
+  // Eleman çöp açıklamaları — bunlar süre değil, kalite; sil
+  try {
+    const junk = await db.select({ id: listingsTable.id })
+      .from(listingsTable)
       .where(and(
         eq(listingsTable.sourceTag, "eleman"),
-        eq(listingsTable.status, "active"),
         sql`(
           ${listingsTable.description} ILIKE '%Arama Seçimleriniz%'
           OR ${listingsTable.description} ILIKE '%##### Şehir%'
           OR ${listingsTable.description} ILIKE '%Haritada Göster%'
           OR length(${listingsTable.description}) > 8000
         )`,
-      ))
-      .returning({ id: listingsTable.id });
+      ));
     if (junk.length > 0) {
-      logger.info({ count: junk.length }, "scraper: Eleman.net çöp açıklamalı ilanlar pasife alındı");
+      const n = await deleteListingsByIds(junk.map((r) => r.id));
+      logger.info({ count: n }, "scraper: Eleman.net çöp ilanlar silindi");
     }
   } catch (e) {
-    logger.warn({ err: e }, "scraper: bot ilan süre düzeltmesi atlandı");
+    logger.warn({ err: e }, "scraper: eleman çöp temizliği atlandı");
   }
 
-  // Bot ilanlarında süre dolmuş ama son 30 günde tekrar görülmüşse süreyi uzat (yanlış silme önlemi)
-  const recentlySeenExpired = await db.select({ id: listingsTable.id })
-    .from(listingsTable)
-    .where(and(
-      isNotNull(listingsTable.expiresAt),
-      lt(listingsTable.expiresAt, now),
-      isNotNull(listingsTable.sourceTag),
-      isNotNull(listingsTable.lastSeenAt),
-      sql`${listingsTable.lastSeenAt} >= ${cutoff}`,
-    ));
-  for (const row of recentlySeenExpired) {
-    await touchListingSeen(row.id);
-  }
-
-  // Hard delete: sadece manuel ilanlar (sourceTag yok) ve autoDeleteOnExpiry=true
+  // Sadece expiresAt gerçekten geçmiş olanları sil
   const toDeleteRows = await db.select({ id: listingsTable.id })
     .from(listingsTable)
     .where(and(
       isNotNull(listingsTable.expiresAt),
       lt(listingsTable.expiresAt, now),
-      eq(listingsTable.autoDeleteOnExpiry, true),
-      sql`${listingsTable.sourceTag} IS NULL`,
     ));
 
-  // Pasife al: bot ilanları + tiksiz manuel
-  const toDeactivateRows = await db.select({ id: listingsTable.id })
-    .from(listingsTable)
-    .where(and(
-      isNotNull(listingsTable.expiresAt),
-      lt(listingsTable.expiresAt, now),
-      eq(listingsTable.status, "active"),
-      sql`(
-        ${listingsTable.sourceTag} IS NOT NULL
-        OR ${listingsTable.autoDeleteOnExpiry} = false
-      )`,
-    ));
-
-  const deleteIds = toDeleteRows.map((r) => r.id);
-  const deactivateIds = toDeactivateRows.map((r) => r.id).filter((id) => !deleteIds.includes(id));
-
-  let affected = 0;
-  if (deleteIds.length > 0) {
-    const n = await deleteListingsByIds(deleteIds);
-    affected += n;
-    logger.info({ count: n }, "scraper: süresi dolan manuel ilanlar silindi");
-  }
-  if (deactivateIds.length > 0) {
-    const deactivated = await db.update(listingsTable)
-      .set({ status: "inactive", isActive: false })
-      .where(inArray(listingsTable.id, deactivateIds))
-      .returning({ id: listingsTable.id });
-    affected += deactivated.length;
-    logger.info({ count: deactivated.length }, "scraper: süresi dolan ilanlar pasife alındı (silinmedi)");
-  }
-  return affected;
+  if (toDeleteRows.length === 0) return 0;
+  const n = await deleteListingsByIds(toDeleteRows.map((r) => r.id));
+  logger.info({ count: n }, "scraper: süresi dolan ilanlar silindi");
+  return n;
 }
 
 /** @deprecated purgeExpiredListings kullanın */

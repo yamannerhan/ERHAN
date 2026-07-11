@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Maximize2, Bot, Shield, Star, MessageSquareDot, CornerUpLeft, Trash2, Crown } from "lucide-react";
+import { X, Send, Maximize2, Bot, CornerUpLeft, Trash2, Crown, Megaphone, Minus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useLocation } from "wouter";
 import { io, Socket } from "socket.io-client";
@@ -12,123 +12,136 @@ function formatTime(iso: string) {
 }
 
 interface SystemMsg { id: number; type: "join" | "welcome"; text: string; createdAt: string; }
-type AnyMsg = (ChatMessage & { isBot?: boolean }) | SystemMsg;
+type ExtMsg = ChatMessage & { isBot?: boolean; isFake?: boolean; displayName?: string | null };
+type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
+
+/** Gerçek üye mesajı — bot / sahte kullanıcı değil */
+function isRealHuman(msg: ExtMsg): boolean {
+  if (msg.isBot || msg.isFake) return false;
+  if (msg.userId <= 0) return false;
+  if (msg.userRole === "bot") return false;
+  return true;
+}
+
+function isBotOrFake(msg: ExtMsg): boolean {
+  return !isRealHuman(msg);
+}
 
 function renderMessageContent(content: string) {
   const parts = content.split(/(\*\*[^*]+\*\*|@\w+|\/ilan\/\d+)/g);
   return parts.map((part, i) => {
     if (/^\*\*([^*]+)\*\*$/.test(part)) {
-      const text = part.slice(2, -2);
-      return <span key={i} className="font-bold text-foreground">{text}</span>;
+      return <span key={i} className="font-bold text-amber-300 underline underline-offset-2">{part.slice(2, -2)}</span>;
     }
     if (/^\/ilan\/\d+$/.test(part)) {
-      return <a key={i} href={part} className="ml-1 inline-flex rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary hover:bg-primary/30">İlana git</a>;
+      return <a key={i} href={part} className="ml-1 inline-flex rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-400/30">İlana git</a>;
     }
-    if (part.startsWith("@")) return <span key={i} className="text-primary font-semibold">{part}</span>;
+    if (part.startsWith("@")) return <span key={i} className="text-amber-300 font-semibold">{part}</span>;
     return part;
   });
 }
 
-function chatNameClass(msg: ChatMessage & { isBot?: boolean }) {
-  if (msg.isVip) return "name-vip";
-  if (msg.userNameAnimated) return "animate-rainbow";
-  if (msg.userNameColor) return "";
-  if (msg.userRole === "admin") return "name-admin";
-  if (msg.userRole === "moderator") return "name-mod";
-  return "name-user";
-}
-
-function chatNameStyle(msg: ChatMessage & { isBot?: boolean }): React.CSSProperties {
-  if (msg.userNameColor && !msg.userNameAnimated && !msg.isVip) return { color: msg.userNameColor };
-  return {};
-}
-
-function ChatDisplayName({ msg }: { msg: ChatMessage & { isBot?: boolean } }) {
-  const name = (msg as { displayName?: string | null }).displayName || msg.username;
-  return (
-    <>
-      <RoleBadge role={msg.userRole ?? "user"} isVip={msg.isVip} />
-      <span className={`text-[13px] font-extrabold leading-tight tracking-wide ${chatNameClass(msg)}`} style={chatNameStyle(msg)}>
-        {msg.isVip && <Crown className="inline w-3 h-3 mr-0.5 text-amber-300 fill-amber-300" />}
-        {name}
+function RoleBadge({ role, isVip, isBot }: { role: string; isVip?: boolean; isBot?: boolean }) {
+  if (isBot || role === "bot") {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] font-black tracking-wider uppercase bg-amber-400 text-black">
+        BOT
       </span>
-    </>
-  );
+    );
+  }
+  if (role === "admin") return <span className="text-[7px] font-black tracking-widest uppercase text-red-400">YÖNETİCİ</span>;
+  if (role === "moderator") return <span className="text-[7px] font-black tracking-widest uppercase text-blue-400">MODERATÖR</span>;
+  if (isVip) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-[7px] font-black tracking-widest uppercase text-amber-300">
+        <Crown className="w-2.5 h-2.5" /> VIP
+      </span>
+    );
+  }
+  return null;
 }
 
-/* ── Role badge ─────────────────────────────────────────── */
-function RoleBadge({ role, isVip }: { role: string; isVip?: boolean }) {
-  if (role === "admin") return (
-    <span className="badge-admin text-[7px] font-black tracking-widest uppercase">YÖNETİCİ</span>
-  );
-  if (role === "moderator") return (
-    <span className="badge-mod text-[7px] font-black tracking-widest uppercase">MODERATÖR</span>
-  );
-  if (isVip) return (
-    <span className="badge-vip text-[7px] font-black tracking-widest uppercase inline-flex items-center gap-0.5">
-      <Crown className="w-2.5 h-2.5" /> VIP
-    </span>
-  );
-  return (
-    <span className="text-[7px] font-semibold tracking-wider uppercase text-white/70">ÜYE</span>
-  );
-}
-
-/* ── User avatar ─────────────────────────────────────────── */
-function UserAvatar({ src, username, role, isVip }: { src?: string | null; username: string; role: string; isVip?: boolean }) {
+function UserAvatar({ src, username, role, isVip, online }: { src?: string | null; username: string; role: string; isVip?: boolean; online?: boolean }) {
   const [imageFailed, setImageFailed] = useState(false);
-  const ringColor =
+  const showImage = !!src && !imageFailed;
+  const ring =
     role === "admin" ? "rgba(239,68,68,0.9)" :
     role === "moderator" ? "rgba(59,130,246,0.85)" :
     isVip ? "rgba(250,204,21,0.95)" :
-    "rgba(255,255,255,0.12)";
-  const showImage = !!src && !imageFailed;
+    "rgba(255,193,7,0.35)";
 
   return (
-    <div
-      className="w-7 h-7 rounded-full shrink-0 overflow-hidden flex items-center justify-center text-[10px] font-bold text-white"
-      style={{
-        boxShadow: `0 0 0 2px ${ringColor}`,
-        background: showImage ? "transparent" : "linear-gradient(135deg,#4F46E5,#7C3AED)",
-        flexShrink: 0,
-      }}
-    >
-      {showImage ? (
-        <img src={src} alt={username} className="w-full h-full object-cover" onError={() => setImageFailed(true)} />
-      ) : (
-        username.substring(0, 2).toUpperCase()
+    <div className="relative shrink-0">
+      <div
+        className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-[10px] font-bold text-white"
+        style={{ boxShadow: `0 0 0 2px ${ring}`, background: showImage ? "transparent" : "linear-gradient(135deg,#1a1f2e,#2a3348)" }}
+      >
+        {showImage ? (
+          <img src={src} alt={username} className="w-full h-full object-cover" onError={() => setImageFailed(true)} />
+        ) : (
+          username.substring(0, 2).toUpperCase()
+        )}
+      </div>
+      {online && (
+        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#12161f]" style={{ boxShadow: "0 0 6px rgba(52,211,153,0.9)" }} />
       )}
     </div>
   );
 }
 
-/* ── Cool floating button icon ───────────────────────────── */
-function ChatIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
+/** Referans görseldeki cam/neon sohbet balonu FAB */
+function ChatFabIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
   return (
-    <div className="relative flex items-center justify-center w-full h-full">
-      {/* Glow ring */}
-      <motion.div
-        animate={pulse ? { scale: [1, 1.6, 1], opacity: [0.5, 0, 0] } : { scale: 1, opacity: 0 }}
-        transition={{ duration: 0.6 }}
-        className="absolute inset-0 rounded-2xl"
-        style={{ background: "radial-gradient(circle,rgba(79,70,229,0.8),transparent)" }}
-      />
-      {/* Icon layers */}
-      <div className="relative">
-        <MessageSquareDot className="w-6 h-6 text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.6)]" />
-        {/* live indicator dot */}
-        <span
-          className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#4F46E5] bg-green-400"
-          style={{ boxShadow: "0 0 6px rgba(74,222,128,0.8)" }}
-        />
+    <div className="relative w-[58px] h-[58px] flex items-center justify-center">
+      {/* Dış altın halka + cam gövde */}
+      <div
+        className="absolute inset-0 rounded-[22px]"
+        style={{
+          background: "linear-gradient(145deg, rgba(255,200,60,0.95) 0%, rgba(180,120,20,0.85) 40%, rgba(40,180,255,0.55) 100%)",
+          padding: "2.5px",
+          boxShadow: pulse
+            ? "0 0 28px rgba(255,193,7,0.75), 0 0 48px rgba(56,189,248,0.35)"
+            : "0 8px 28px rgba(0,0,0,0.55), 0 0 18px rgba(255,193,7,0.45), 0 0 10px rgba(56,189,248,0.25)",
+        }}
+      >
+        <div
+          className="w-full h-full rounded-[19px] relative overflow-hidden"
+          style={{
+            background: "radial-gradient(circle at 30% 25%, #3a455c 0%, #151a24 55%, #0a0d14 100%)",
+          }}
+        >
+          {/* Parlama */}
+          <div className="absolute inset-x-2 top-1 h-3 rounded-full opacity-40" style={{ background: "linear-gradient(180deg,rgba(255,255,255,0.55),transparent)" }} />
+          {/* İç ikon: balon + 3 nokta */}
+          <svg viewBox="0 0 48 48" className="absolute inset-0 m-auto w-7 h-7" fill="none">
+            <path
+              d="M10 14c0-3.3 2.7-6 6-6h16c3.3 0 6 2.7 6 6v10c0 3.3-2.7 6-6 6H22l-7 6v-6h-1c-3.3 0-6-2.7-6-6V14z"
+              stroke="#F5C518"
+              strokeWidth="2.4"
+              strokeLinejoin="round"
+              style={{ filter: "drop-shadow(0 0 4px rgba(245,197,24,0.85))" }}
+            />
+            <circle cx="20" cy="19" r="1.7" fill="#F5C518" />
+            <circle cx="24" cy="19" r="1.7" fill="#F5C518" />
+            <circle cx="28" cy="19" r="1.7" fill="#F5C518" />
+          </svg>
+        </div>
       </div>
-      {/* Unread badge */}
+
+      {/* Yeşil online */}
+      <span
+        className="absolute bottom-1 right-1 w-3 h-3 rounded-full bg-emerald-400 border-[2.5px] border-[#0a0d14] z-10"
+        style={{ boxShadow: "0 0 8px rgba(52,211,153,1)" }}
+      />
+
+      {/* Kırmızı 9+ — sadece gerçek insan */}
       {unread > 0 && (
         <motion.span
-          initial={{ scale: 0 }} animate={{ scale: 1 }}
-          className="absolute -top-2 -right-2 min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center px-1 border-2 border-[#4F46E5]"
-          style={{ boxShadow: "0 0 8px rgba(239,68,68,0.7)" }}
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1 rounded-[7px] bg-gradient-to-b from-red-400 to-red-600 text-white text-[10px] font-black flex items-center justify-center z-10 border border-red-300/40"
+          style={{ boxShadow: "0 0 10px rgba(239,68,68,0.85)" }}
         >
           {unread > 9 ? "9+" : unread}
         </motion.span>
@@ -143,7 +156,7 @@ export function ChatBubble() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<AnyMsg[]>([]);
   const [content, setContent] = useState("");
-  const [replyTo, setReplyTo] = useState<(ChatMessage & { isBot?: boolean }) | null>(null);
+  const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [unread, setUnread] = useState(0);
@@ -151,6 +164,8 @@ export function ChatBubble() {
   const [pulse, setPulse] = useState(false);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [sendError, setSendError] = useState("");
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [feedMode, setFeedMode] = useState<"all" | "members">("all");
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendErrorRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -160,19 +175,13 @@ export function ChatBubble() {
   const messageIdsRef = useRef<Set<number>>(new Set());
   const systemKeysRef = useRef<Set<string>>(new Set());
   const lastSeenMessageIdRef = useRef(0);
-  // Kullanıcı en altta mı (scroll event'iyle güncellenir) — resize/yeni mesajda zorla indirip indirmemeyi belirler
   const pinnedRef = useRef(true);
   const openRef = useRef(open);
   const isOnChatPage = location === "/sohbet";
 
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
+  useEffect(() => { openRef.current = open; }, [open]);
 
   const scrollToBottom = useCallback(() => {
-    // Kapsayıcının kendi scrollTop'unu ayarla — popup zaten kendi overflow container'ı.
-    // scrollIntoView KULLANMA: üst kapsayıcıları (canvas iframe/sayfa) da kaydırıp
-    // scrollbar bozulmasına ve en sona inememeye yol açıyordu.
     pinnedRef.current = true;
     const jump = () => {
       const el = msgContainerRef.current;
@@ -185,35 +194,45 @@ export function ChatBubble() {
   }, []);
 
   const rememberMessageIds = (items: AnyMsg[]) => {
-    const ids = items.filter(m => !isSystem(m)).map(m => (m as ChatMessage).id);
+    const ids = items.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id);
     messageIdsRef.current = new Set(ids);
     lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...ids, 0);
   };
 
-  const addMsg = useCallback((msg: AnyMsg): boolean => {
-    if (!isSystem(msg) && messageIdsRef.current.has((msg as ChatMessage).id)) {
-      return false;
+  const bumpUnreadIfHuman = (msg: ExtMsg) => {
+    if (!openRef.current && isRealHuman(msg)) {
+      setUnread(n => n + 1);
+      setPulse(true);
+      setTimeout(() => setPulse(false), 600);
     }
+  };
+
+  const addMsg = useCallback((msg: AnyMsg): boolean => {
+    if (!isSystem(msg) && messageIdsRef.current.has((msg as ExtMsg).id)) return false;
     if (isSystem(msg)) {
       const key = `${msg.type}:${msg.text}`;
       if (systemKeysRef.current.has(key)) return false;
       systemKeysRef.current.add(key);
     } else {
-      const id = (msg as ChatMessage).id;
+      const id = (msg as ExtMsg).id;
       messageIdsRef.current.add(id);
       lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, id);
     }
 
     setMessages(prev => {
-      if (!isSystem(msg) && prev.some(m => !isSystem(m) && (m as ChatMessage).id === (msg as ChatMessage).id)) {
+      if (!isSystem(msg) && prev.some(m => !isSystem(m) && (m as ExtMsg).id === (msg as ExtMsg).id)) {
         return prev;
       }
-      const next = [...prev.slice(-59), msg];
+      const next = [...prev.slice(-79), msg];
       rememberMessageIds(next);
       return next;
     });
-    setPulse(true);
-    setTimeout(() => setPulse(false), 600);
+
+    if (!isSystem(msg)) bumpUnreadIfHuman(msg as ExtMsg);
+    else {
+      setPulse(true);
+      setTimeout(() => setPulse(false), 600);
+    }
     return true;
   }, []);
 
@@ -227,21 +246,24 @@ export function ChatBubble() {
         headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
         cache: "no-store",
       });
-      const data = await res.json().catch(() => null) as ChatMessage[] | null;
+      const data = await res.json().catch(() => null) as ExtMsg[] | null;
       if (!Array.isArray(data)) return;
       setMessages(prev => {
-        const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ChatMessage).id));
+        const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
         const incoming = data.filter(m => !existingIds.has(m.id));
         if (incoming.length === 0) return prev;
-        if (!openRef.current) setUnread(n => n + incoming.length);
-        setPulse(true);
-        setTimeout(() => setPulse(false), 600);
+        const humanIncoming = incoming.filter(isRealHuman);
+        if (!openRef.current && humanIncoming.length > 0) {
+          setUnread(n => n + humanIncoming.length);
+          setPulse(true);
+          setTimeout(() => setPulse(false), 600);
+        }
         const next = [...prev, ...incoming].slice(-100);
         rememberMessageIds(next);
         return next;
       });
     } catch {
-      // ignore transient network errors
+      // ignore
     } finally {
       syncInFlightRef.current = false;
     }
@@ -274,22 +296,19 @@ export function ChatBubble() {
     };
 
     s.on("connect", authenticate);
-
-    s.on("chat:message", (msg: ChatMessage) => {
-      const added = addMsg(msg);
-      if (added && !openRef.current) setUnread(n => n + 1);
-    });
+    s.on("chat:message", (msg: ExtMsg) => { addMsg(msg); });
     s.on("chat:delete", ({ id }: { id: number }) => {
-      setMessages(prev => prev.filter(m => !isSystem(m) && (m as ChatMessage).id !== id));
+      setMessages(prev => prev.filter(m => !isSystem(m) && (m as ExtMsg).id !== id));
     });
-    s.on("chat:cleared", () => {
-      setMessages([]);
-    });
+    s.on("chat:cleared", () => setMessages([]));
     s.on("chat:join", ({ username }: { username: string }) => {
       addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
     });
     s.on("chat:welcome", ({ message }: { message: string }) => {
       addMsg({ id: Date.now() + 1, type: "welcome", text: message, createdAt: new Date().toISOString() });
+    });
+    s.on("online_count", ({ count }: { count: number }) => {
+      if (typeof count === "number") setOnlineCount(count);
     });
     if (s.connected) authenticate();
     return () => {
@@ -305,27 +324,53 @@ export function ChatBubble() {
     }
   }, [open, scrollToBottom]);
 
-  // Yeni mesajda en alta kaydır. messages.length 60'ta SABİTLENİR (slice(-59)) → uzunluğa
-  // bağlanırsak yeni mesajlar tetiklemez. Son mesajın id'si değiştiğinde tetikle.
-  // Kullanıcı geçmişi okumak için yukarı kaydırdıysa (pinnedRef false) zorla indirme.
-  const lastMsg = messages[messages.length - 1] as { id?: number | string; createdAt?: string } | undefined;
+  // Son gerçek insan mesajı — altına bot yağsa bile sticky kalır
+  const stickyHuman = useMemo(() => {
+    const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
+    let lastHuman: ExtMsg | null = null;
+    for (let i = chatMsgs.length - 1; i >= 0; i--) {
+      if (isRealHuman(chatMsgs[i]!)) {
+        lastHuman = chatMsgs[i]!;
+        break;
+      }
+    }
+    if (!lastHuman) return null;
+    const after = chatMsgs.filter(m => m.id > lastHuman!.id);
+    const hasHumanAfter = after.some(isRealHuman);
+    if (hasHumanAfter) return null;
+    // Altında yalnızca bot/sahte varsa sticky göster
+    if (after.length === 0) return null; // zaten en altta
+    if (after.every(isBotOrFake)) return lastHuman;
+    return null;
+  }, [messages]);
+
+  const visibleMessages = useMemo(() => {
+    if (feedMode === "members") {
+      return messages.filter(m => isSystem(m) || isRealHuman(m as ExtMsg));
+    }
+    return messages;
+  }, [messages, feedMode]);
+
+  const lastMsg = visibleMessages[visibleMessages.length - 1] as { id?: number | string; createdAt?: string } | undefined;
   const lastMsgKey = lastMsg ? `${lastMsg.id ?? ""}|${lastMsg.createdAt ?? ""}` : "";
   useLayoutEffect(() => {
+    // Bot mesajında sticky human varken zorla en alta inme — insan mesajı görünür kalsın
+    if (stickyHuman && lastMsg && !isSystem(lastMsg as AnyMsg) && isBotOrFake(lastMsg as ExtMsg)) {
+      return;
+    }
     if (pinnedRef.current) scrollToBottom();
-  }, [lastMsgKey, scrollToBottom]);
+  }, [lastMsgKey, scrollToBottom, stickyHuman]);
 
-  // İçerik sonradan büyüse (çok satırlı mesaj, yanıt önizleme, animasyon) ve kullanıcı
-  // resize ÖNCESİ en alttaysa (pinnedRef), otomatik en altta kal — "altta kalmasını" engeller.
   useEffect(() => {
     const inner = msgInnerRef.current;
     const cont = msgContainerRef.current;
     if (!inner || !cont) return;
     const ro = new ResizeObserver(() => {
-      if (pinnedRef.current) cont.scrollTop = cont.scrollHeight;
+      if (pinnedRef.current && !stickyHuman) cont.scrollTop = cont.scrollHeight;
     });
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [open]);
+  }, [open, stickyHuman]);
 
   const startCooldown = (seconds: number) => {
     setCooldownLeft(seconds);
@@ -359,13 +404,13 @@ export function ChatBubble() {
         return;
       }
       if (r.ok) {
-        const sent = await r.json().catch(() => null) as ChatMessage | null;
-        if (sent) addMsg(sent); // anında ekle — soketten gelince çift olmaz (id kontrolü var)
+        const sent = await r.json().catch(() => null) as ExtMsg | null;
+        if (sent) addMsg(sent);
         setContent("");
         setReplyTo(null);
+        scrollToBottom();
         return;
       }
-      // 403 (kilitli/susturulmuş), 400, 500 vb. — sebebi kullanıcıya göster
       const data = await r.json().catch(() => ({})) as { error?: string };
       showSendError(data.error ?? "Mesaj gönderilemedi. Lütfen tekrar deneyin.");
     } catch {
@@ -380,16 +425,15 @@ export function ChatBubble() {
         method: "DELETE",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-    } catch {}
+    } catch { /* ignore */ }
   };
 
-  const startReply = (msg: ChatMessage & { isBot?: boolean }) => {
+  const startReply = (msg: ExtMsg) => {
     setReplyTo(msg);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  const replyName = (msg: ChatMessage & { isBot?: boolean }) =>
-    (msg as any).displayName || msg.username;
+  const replyName = (msg: ExtMsg) => msg.displayName || msg.username;
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
@@ -397,108 +441,138 @@ export function ChatBubble() {
 
   if (isOnChatPage) return null;
 
+  const renderChatRow = (msg: AnyMsg) => {
+    if (isSystem(msg)) {
+      return (
+        <motion.div key={msg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center">
+          {msg.type === "join" ? (
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {msg.text}
+            </div>
+          ) : (
+            <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed" style={{ background: "rgba(255,193,7,0.08)", border: "1px solid rgba(255,193,7,0.2)" }}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <Bot className="w-3 h-3 text-amber-400" />
+                <span className="text-[10px] font-bold text-amber-400">ÖzelGüvenlik Bot</span>
+                <span className="inline-flex px-1.5 py-0.5 rounded-md text-[8px] font-black bg-amber-400 text-black">BOT</span>
+              </div>
+              {msg.text}
+            </div>
+          )}
+        </motion.div>
+      );
+    }
+
+    const chatMsg = msg;
+    const isMe = user?.id === chatMsg.userId;
+    const botLike = isBotOrFake(chatMsg);
+    const name = chatMsg.displayName || chatMsg.username;
+    const isBilgi = chatMsg.userId === -999;
+    const botLabel = isBilgi ? "BİLGİ BOTU" : chatMsg.isFake ? name : (chatMsg.displayName || chatMsg.username || "ÖzelGüvenlik Bot");
+
+    if (botLike) {
+      return (
+        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2 opacity-90">
+          <div className="relative shrink-0">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg,#2a2410,#1a1608)", border: "1.5px solid rgba(245,197,24,0.55)" }}>
+              {chatMsg.isFake && chatMsg.userAvatarUrl ? (
+                <img src={chatMsg.userAvatarUrl} alt="" className="w-full h-full rounded-full object-cover opacity-80" />
+              ) : (
+                <Bot className="w-4 h-4 text-amber-400" />
+              )}
+            </div>
+            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#12161f]" />
+          </div>
+          <div className="max-w-[82%] rounded-2xl rounded-tl-sm px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+              <span className="text-[11px] font-bold text-white/90">{botLabel}</span>
+              <RoleBadge role="bot" isBot />
+              <span className="text-[9px] text-white/30 ml-auto">{formatTime(chatMsg.createdAt)}</span>
+            </div>
+            <p className="break-words text-white/75 leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+          </div>
+        </motion.div>
+      );
+    }
+
+    return (
+      <motion.div
+        key={chatMsg.id}
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : "flex-row"}`}
+      >
+        <UserAvatar src={chatMsg.userAvatarUrl} username={chatMsg.username} role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} online />
+        <div className={`flex flex-col max-w-[78%] ${isMe ? "items-end" : "items-start"}`}>
+          <div className="flex items-center gap-1.5 mb-1 px-0.5">
+            <span className={`text-[12px] font-extrabold ${isMe ? "text-white" : "text-amber-300"}`}>{name}</span>
+            <RoleBadge role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} />
+            <span className="text-[9px] text-white/30">{formatTime(chatMsg.createdAt)}</span>
+          </div>
+          <div
+            className={`rounded-2xl px-3 py-2 text-xs text-white ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
+            style={
+              isMe
+                ? { background: "rgba(18,22,31,0.95)", border: "1.5px solid rgba(245,197,24,0.75)", boxShadow: "0 0 12px rgba(245,197,24,0.15)" }
+                : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }
+            }
+          >
+            {chatMsg.replyToId && (chatMsg.replyToUsername || chatMsg.replyToContent) && (
+              <div className="mb-1.5 pl-2 border-l-2 border-amber-400 text-[10px] rounded-r-md py-0.5 pr-2 bg-black/20">
+                <div className="font-semibold text-amber-300 mb-0.5">
+                  {chatMsg.replyToUsername === user?.username ? "Sen" : chatMsg.replyToUsername}
+                </div>
+                <div className="line-clamp-1 opacity-70">{chatMsg.replyToContent}</div>
+              </div>
+            )}
+            <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+          </div>
+          {user && (
+            <button
+              onClick={() => startReply(chatMsg)}
+              className={`flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-amber-400/80 hover:bg-amber-400/10 ${isMe ? "self-end" : "self-start"}`}
+            >
+              <CornerUpLeft className="w-2.5 h-2.5" /> Yanıtla
+            </button>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <>
-      <style>{`
-        @keyframes bubble-glow {
-          0%, 100% { box-shadow: 0 8px 32px rgba(79,70,229,0.5), 0 0 0 1px rgba(255,255,255,0.1); }
-          50% { box-shadow: 0 8px 40px rgba(124,58,237,0.7), 0 0 0 1px rgba(255,255,255,0.15), 0 0 0 4px rgba(79,70,229,0.15); }
-        }
-        @keyframes shimmer-blue {
-          0%   { background-position: -250% 0; }
-          100% { background-position: 250% 0; }
-        }
-        @keyframes shimmer-red {
-          0%   { background-position: -250% 0; }
-          100% { background-position: 250% 0; }
-        }
-        @keyframes smoke-yellow {
-          0%   { background-position: 0% 50%; }
-          50%  { background-position: 220% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-        @keyframes smoke-mod {
-          0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 3px rgba(159,18,57,0.3)); }
-          25%  { background-position: 80% 50%;  filter: drop-shadow(0 0 12px rgba(225,29,72,0.85)); }
-          55%  { background-position: 200% 50%; filter: drop-shadow(0 0 18px rgba(253,164,175,0.9)); }
-          80%  { background-position: 300% 50%; filter: drop-shadow(0 0 9px rgba(190,24,93,0.6));  }
-          100% { background-position: 0% 50%;   filter: drop-shadow(0 0 3px rgba(159,18,57,0.3)); }
-        }
-        .badge-admin {
-          background: linear-gradient(90deg,
-            #7f1d1d 0%, #ef4444 20%, #fecaca 45%, #fca5a5 55%, #ef4444 80%, #7f1d1d 100%);
-          background-size: 250% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: shimmer-red 2.8s linear infinite;
-          filter: drop-shadow(0 0 5px rgba(239,68,68,0.8));
-        }
-        .badge-mod {
-          background: linear-gradient(90deg,
-            #1e3a8a 0%, #3b82f6 25%, #bfdbfe 50%, #93c5fd 65%, #3b82f6 80%, #1e3a8a 100%);
-          background-size: 250% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: shimmer-blue 2.8s linear infinite;
-          filter: drop-shadow(0 0 5px rgba(59,130,246,0.75));
-        }
-        .name-admin {
-          background: linear-gradient(90deg,
-            #111 0%, #111 30%, #f59e0b 50%, #111 70%, #111 100%);
-          background-size: 250% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: smoke-yellow 3.5s ease-in-out infinite;
-          filter: drop-shadow(0 0 6px rgba(245,158,11,0.55));
-        }
-        .name-mod {
-          background: linear-gradient(90deg,
-            #4c0519 0%, #9f1239 15%, #be185d 30%, #fb7185 50%, #fda4af 58%, #e11d48 73%, #9f1239 88%, #4c0519 100%);
-          background-size: 350% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: smoke-mod 5s ease-in-out infinite;
-        }
-        .name-user {
-          color: #e2e8f0;
-          text-shadow: 0 0 8px rgba(148,163,184,0.3);
-        }
-      `}</style>
-
-      {/* Floating button */}
+      {/* FAB */}
       <motion.button
         onClick={() => setOpen(o => !o)}
-        whileHover={{ scale: 1.08, rotate: open ? 0 : 5 }}
-        whileTap={{ scale: 0.92 }}
-        animate={pulse && !open ? { scale: [1, 1.18, 1] } : {}}
-        transition={{ duration: 0.3 }}
-        className="fixed bottom-24 right-4 z-50 w-14 h-14 rounded-2xl flex items-center justify-center"
-        style={{
-          background: open
-            ? "linear-gradient(135deg,#1E293B,#334155)"
-            : "linear-gradient(135deg,#4F46E5,#7C3AED,#4F46E5)",
-          backgroundSize: "200% 200%",
-          animation: open ? "none" : "bubble-glow 3s ease-in-out infinite",
-        }}
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.94 }}
+        animate={pulse && !open ? { scale: [1, 1.12, 1] } : {}}
+        transition={{ duration: 0.28 }}
+        className="fixed bottom-24 right-4 z-50 flex items-center justify-center bg-transparent border-0 p-0"
+        aria-label="Topluluk sohbeti"
       >
         <AnimatePresence mode="wait">
           {open ? (
-            <motion.div key="x" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.18 }}>
+            <motion.div
+              key="x"
+              initial={{ rotate: -90, opacity: 0 }}
+              animate={{ rotate: 0, opacity: 1 }}
+              exit={{ rotate: 90, opacity: 0 }}
+              className="w-14 h-14 rounded-2xl flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg,#1E293B,#334155)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}
+            >
               <X className="w-5 h-5 text-white" />
             </motion.div>
           ) : (
-            <motion.div key="chat" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }} transition={{ duration: 0.18 }}>
-              <ChatIcon unread={unread} pulse={pulse} />
+            <motion.div key="chat" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }}>
+              <ChatFabIcon unread={unread} pulse={pulse} />
             </motion.div>
           )}
         </AnimatePresence>
       </motion.button>
 
-      {/* Panel */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -506,50 +580,69 @@ export function ChatBubble() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 24, scale: 0.92 }}
             transition={{ type: "spring", stiffness: 320, damping: 28 }}
-            className="fixed right-4 z-50 w-[22rem] flex flex-col rounded-3xl overflow-hidden"
+            className="fixed right-4 z-50 w-[22rem] flex flex-col rounded-[18px] overflow-hidden"
             style={{
               bottom: "calc(6rem + 56px)",
-              background: "rgba(15,23,42,0.97)",
-              backdropFilter: "blur(20px)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 32px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(79,70,229,0.2)",
-              // SABİT yükseklik (definite height): mesaj alanının min-h-full + justify-end'i güvenilir
-              // çalışsın, en yeni mesaj daima input'un hemen üstünde dursun. dvh klavye/viewport'a uyar.
-              height: "min(500px, calc(100dvh - 11rem))",
+              background: "#12161f",
+              border: "1px solid rgba(245,197,24,0.28)",
+              boxShadow: "0 28px 64px rgba(0,0,0,0.65), 0 0 0 1px rgba(245,197,24,0.08)",
+              height: "min(520px, calc(100dvh - 11rem))",
             }}
           >
             {/* Header */}
-            <div
-              className="flex items-center gap-3 px-4 py-3.5 shrink-0"
-              style={{ background: "linear-gradient(135deg,rgba(79,70,229,0.9),rgba(124,58,237,0.9))", borderBottom: "1px solid rgba(255,255,255,0.08)" }}
-            >
-              <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                <MessageSquareDot className="w-4 h-4 text-white" />
+            <div className="flex items-center gap-2.5 px-3.5 py-3 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#F5C518,#B8860B)", boxShadow: "0 0 12px rgba(245,197,24,0.35)" }}>
+                <svg viewBox="0 0 24 24" className="w-5 h-5 text-black" fill="currentColor">
+                  <path d="M12 2l7 3v6c0 5-3.5 9.4-7 11-3.5-1.6-7-6-7-11V5l7-3zm0 2.2L7 6.1v4.8c0 3.7 2.4 7.1 5 8.6 2.6-1.5 5-4.9 5-8.6V6.1l-5-1.9z" />
+                  <path d="M12 8.5l1.2 2.4 2.6.4-1.9 1.8.5 2.6L12 14.5l-2.4 1.2.5-2.6-1.9-1.8 2.6-.4L12 8.5z" />
+                </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-white font-bold text-sm leading-tight">Topluluk Sohbeti</p>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  <p className="text-white/60 text-[10px]">Canlı</p>
-                </div>
+                <p className="text-white font-bold text-[15px] leading-tight">Topluluk Sohbeti</p>
+                <p className="text-[11px] text-emerald-400 font-medium mt-0.5">
+                  ● {onlineCount > 0 ? onlineCount : "—"} kişi çevrimiçi
+                </p>
               </div>
               {(user?.role === "admin" || user?.role === "moderator") && (
-                <button
-                  onClick={handleClearChat}
-                  className="w-7 h-7 rounded-lg bg-red-500/20 hover:bg-red-500/40 flex items-center justify-center transition-colors mr-1"
-                  title="Sohbeti Temizle"
-                >
+                <button onClick={handleClearChat} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Sohbeti Temizle">
                   <Trash2 className="w-3.5 h-3.5 text-red-300" />
                 </button>
               )}
-              <Link href="/sohbet" onClick={() => setOpen(false)}
-                className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors mr-1" title="Tam ekranda aç">
-                <Maximize2 className="w-3 h-3 text-white/70" />
+              <Link href="/sohbet" onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Tam ekran">
+                <Maximize2 className="w-3.5 h-3.5 text-white/50" />
               </Link>
-              <button onClick={() => setOpen(false)}
-                className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-                <X className="w-3.5 h-3.5 text-white/70" />
+              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Küçült">
+                <Minus className="w-3.5 h-3.5 text-white/50" />
               </button>
+              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center">
+                <X className="w-3.5 h-3.5 text-white/50" />
+              </button>
+            </div>
+
+            {/* Duyuru */}
+            <div className="flex items-center gap-2 px-3 py-2 shrink-0 text-[11px] font-medium text-black" style={{ background: "linear-gradient(90deg,#E8B923,#F5C518)" }}>
+              <Megaphone className="w-3.5 h-3.5 shrink-0" />
+              <span className="flex-1 truncate italic">Küfür, hakaret, reklam ve yanıltıcı ilan yasaktır.</span>
+              <span className="opacity-60">›</span>
+            </div>
+
+            {/* Üye / Tümü */}
+            <div className="flex gap-1 px-3 py-2 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              {([
+                { id: "all" as const, label: "Tümü" },
+                { id: "members" as const, label: "Üyeler" },
+              ]).map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setFeedMode(t.id)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-colors ${
+                    feedMode === t.id ? "bg-amber-400 text-black" : "bg-white/5 text-white/50 hover:bg-white/10"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+              <span className="ml-auto text-[9px] text-white/30 self-center">Botlar rozetle ayrılır</span>
             </div>
 
             {/* Messages */}
@@ -562,139 +655,48 @@ export function ChatBubble() {
               className="flex-1 overflow-y-auto min-h-0"
             >
               <div ref={msgInnerRef} className="flex flex-col justify-end min-h-full p-3 space-y-2.5">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-24 gap-2">
-                  <MessageSquareDot className="w-8 h-8 text-white/10" />
-                  <p className="text-xs text-muted-foreground">Henüz mesaj yok.</p>
+                <div className="flex justify-center py-1">
+                  <span className="text-[10px] text-white/35 bg-white/5 px-3 py-0.5 rounded-full">Bugün</span>
                 </div>
-              ) : (
-                messages.map(msg => {
-                  /* ─── System messages ─── */
-                  if (isSystem(msg)) {
-                    return (
-                      <motion.div key={msg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center">
-                        {msg.type === "join" ? (
-                          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            {msg.text}
-                          </div>
-                        ) : (
-                          <div className="w-full bg-primary/10 border border-primary/20 rounded-2xl p-3 text-xs text-foreground/80 whitespace-pre-wrap leading-relaxed">
-                            <div className="flex items-center gap-1.5 mb-1.5">
-                              <Bot className="w-3 h-3 text-primary" />
-                              <span className="text-[10px] font-bold text-primary">GuvenlikBot · Hoş Geldiniz</span>
-                            </div>
-                            {msg.text}
-                          </div>
-                        )}
-                      </motion.div>
-                    );
-                  }
-
-                  const chatMsg = msg as ChatMessage & { isBot?: boolean };
-                  const isMe = user?.id === chatMsg.userId;
-                  const isBot = chatMsg.isBot || chatMsg.userId === 0;
-
-                  /* ─── Bot message ─── */
-                  if (isBot) {
-                    const isBilgiBot = chatMsg.userId === -999;
-                    const botColor = isBilgiBot ? "#22C55E" : "#06B6D4";
-                    const botBg    = isBilgiBot ? "rgba(34,197,94,0.10)"  : "rgba(6,182,212,0.10)";
-                    const botBdr   = isBilgiBot ? "rgba(34,197,94,0.25)"  : "rgba(6,182,212,0.20)";
-                    const botName  = (chatMsg as any).displayName ?? (chatMsg as any).username ?? (isBilgiBot ? "BİLGİ BOTU" : "GuvenlikBot");
-                    const lines    = chatMsg.content.split("\n").filter((l: string) => l.trim() !== "");
-                    const isInfo   = isBilgiBot && lines[0]?.startsWith("🔎");
-                    return (
-                      <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2">
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
-                          <Bot className="w-3.5 h-3.5" style={{ color: botColor }} />
-                        </div>
-                        <div className="max-w-[82%] rounded-2xl rounded-tl-sm px-3 py-2 text-xs" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
-                          <div className="flex items-center gap-1 mb-0.5">
-                            <span className="text-[9px] font-bold" style={{ color: botColor }}>{botName}</span>
-                            <span className="text-[8px]" style={{ color: `${botColor}60` }}>· Bot</span>
-                          </div>
-                          {isInfo ? (
-                            <>
-                              <p className="text-[10px] font-bold mb-1" style={{ color: botColor }}>{lines[0]}</p>
-                              <p className="break-words text-foreground/90 leading-relaxed">{renderMessageContent(lines.slice(1).join(" "))}</p>
-                            </>
-                          ) : (
-                            <p className="break-words text-foreground/90 leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
-                          )}
-                          <p className="text-[9px] text-white/25 mt-0.5">{formatTime(chatMsg.createdAt)}</p>
-                        </div>
-                      </motion.div>
-                    );
-                  }
-
-                  /* ─── Regular user message ─── */
-                  return (
-                    <motion.div
-                      key={chatMsg.id}
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : "flex-row"}`}
-                    >
-                      <UserAvatar
-                        src={chatMsg.userAvatarUrl}
-                        username={chatMsg.username}
-                        role={chatMsg.userRole ?? "user"}
-                        isVip={chatMsg.isVip}
-                      />
-                      <div className={`flex flex-col max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
-                        <div className="flex flex-col mb-1 px-1">
-                          <ChatDisplayName msg={chatMsg} />
-                        </div>
-                        <div
-                          className={`rounded-2xl px-3 py-2 text-xs backdrop-blur-md ${isMe ? "rounded-br-sm text-white" : "rounded-bl-sm"}`}
-                          style={
-                            isMe
-                              ? { background: "linear-gradient(135deg,#4F46E5,#7C3AED)" }
-                              : chatMsg.userRole === "admin"
-                                ? { background: "linear-gradient(135deg,rgba(110,8,8,0.6),rgba(35,4,4,0.75))", border: "1px solid rgba(239,68,68,0.45)", boxShadow: "0 0 18px rgba(239,68,68,0.22), inset 0 1px 0 rgba(239,68,68,0.1)" }
-                                : chatMsg.userRole === "moderator"
-                                  ? { background: "linear-gradient(135deg,rgba(10,38,115,0.6),rgba(4,14,55,0.75))", border: "1px solid rgba(59,130,246,0.45)", boxShadow: "0 0 18px rgba(59,130,246,0.22), inset 0 1px 0 rgba(59,130,246,0.1)" }
-                                  : chatMsg.isVip
-                                    ? { background: "linear-gradient(135deg,rgba(146,64,14,0.78),rgba(8,47,73,0.72))", border: "1px solid rgba(250,204,21,0.55)", boxShadow: "0 0 22px rgba(250,204,21,0.28), 0 0 18px rgba(34,211,238,0.14), inset 0 1px 0 rgba(255,255,255,0.14)" }
-                                  : { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.06)" }
-                          }
-                        >
-                          {chatMsg.replyToId && (chatMsg.replyToUsername || chatMsg.replyToContent) && (
-                            <div className="mb-1.5 pl-2 border-l-2 border-blue-400 text-[10px] rounded-r-md py-0.5 pr-2 bg-white/5">
-                              <div className="font-semibold text-blue-400 mb-0.5">
-                                {chatMsg.replyToUsername === user?.username ? "Sen" : chatMsg.replyToUsername}
-                              </div>
-                              <div className="line-clamp-1 opacity-70">{chatMsg.replyToContent}</div>
-                            </div>
-                          )}
-                          <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
-                          <p className={`text-[9px] mt-0.5 ${isMe ? "text-white/40" : "text-white/25"}`}>{formatTime(chatMsg.createdAt)}</p>
-                        </div>
-                        {user && (
-                          <button
-                            onClick={() => startReply(chatMsg)}
-                            className={`flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-blue-400 hover:bg-blue-400/10 active:scale-95 transition-all ${isMe ? "self-end" : "self-start"}`}
-                          >
-                            <CornerUpLeft className="w-2.5 h-2.5" /> Yanıtla
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
+                {visibleMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-24 gap-2">
+                    <p className="text-xs text-white/40">Henüz mesaj yok.</p>
+                  </div>
+                ) : (
+                  visibleMessages.map(renderChatRow)
+                )}
+                <div ref={messagesEndRef} />
               </div>
             </div>
+
+            {/* Sticky gerçek üye mesajı — botlar üstüne yazınca kaybolmasın */}
+            {stickyHuman && feedMode === "all" && (
+              <div className="shrink-0 px-3 py-2" style={{ borderTop: "1px solid rgba(245,197,24,0.25)", background: "rgba(245,197,24,0.07)" }}>
+                <div className="text-[9px] font-bold text-amber-400 mb-1 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
+                <div className="flex items-start gap-2">
+                  <UserAvatar src={stickyHuman.userAvatarUrl} username={stickyHuman.username} role={stickyHuman.userRole ?? "user"} isVip={stickyHuman.isVip} online />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-bold text-amber-300">{stickyHuman.displayName || stickyHuman.username}</div>
+                    <div className="text-[11px] text-white/80 line-clamp-2">{stickyHuman.content}</div>
+                  </div>
+                  {user && (
+                    <button onClick={() => startReply(stickyHuman)} className="text-[10px] font-bold text-amber-400 shrink-0">
+                      Yanıtla
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Input */}
             <div className="p-3 shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
               {!user ? (
-                <Link href="/giris" onClick={() => setOpen(false)}
-                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold text-white"
-                  style={{ background: "linear-gradient(135deg,#4F46E5,#7C3AED)" }}>
-                  <MessageSquareDot className="w-3.5 h-3.5" />
+                <Link
+                  href="/giris"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold text-black"
+                  style={{ background: "linear-gradient(135deg,#F5C518,#E8B923)" }}
+                >
                   Giriş yap ve mesaj gönder
                 </Link>
               ) : (
@@ -702,12 +704,14 @@ export function ChatBubble() {
                   <AnimatePresence>
                     {replyTo && (
                       <motion.div
-                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 8 }}
                         className="flex items-start justify-between gap-2 px-2.5 py-1.5 rounded-lg"
-                        style={{ background: "rgba(255,255,255,0.05)", borderLeft: "2px solid #60a5fa" }}
+                        style={{ background: "rgba(245,197,24,0.08)", borderLeft: "2px solid #F5C518" }}
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] font-semibold text-blue-400">{replyName(replyTo)}'e yanıt</div>
+                          <div className="text-[10px] font-semibold text-amber-300">{replyName(replyTo)}'e yanıt</div>
                           <div className="text-[10px] text-white/50 line-clamp-1">{replyTo.content}</div>
                         </div>
                         <button onClick={() => setReplyTo(null)} className="shrink-0 p-0.5 text-white/40 hover:text-white/80">
@@ -717,19 +721,14 @@ export function ChatBubble() {
                     )}
                   </AnimatePresence>
                   {sendError && (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 mb-1 rounded-lg bg-red-500/15 border border-red-500/30">
-                      <span className="text-[11px] text-red-300 leading-snug">{sendError}</span>
+                    <div className="px-2.5 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30">
+                      <span className="text-[11px] text-red-300">{sendError}</span>
                     </div>
                   )}
                   {cooldownLeft > 0 && (
                     <div className="flex items-center gap-1.5 px-1">
                       <div className="h-0.5 flex-1 bg-white/10 rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full bg-amber-400"
-                          initial={{ width: "100%" }}
-                          animate={{ width: "0%" }}
-                          transition={{ duration: cooldownLeft, ease: "linear" }}
-                        />
+                        <motion.div className="h-full bg-amber-400" initial={{ width: "100%" }} animate={{ width: "0%" }} transition={{ duration: cooldownLeft, ease: "linear" }} />
                       </div>
                       <span className="text-[10px] text-amber-400 font-bold shrink-0">{cooldownLeft}s</span>
                     </div>
@@ -740,20 +739,20 @@ export function ChatBubble() {
                       value={content}
                       onChange={e => setContent(e.target.value)}
                       onKeyDown={handleKey}
-                      placeholder={cooldownLeft > 0 ? `${cooldownLeft}s bekle...` : replyTo ? `${replyName(replyTo)}'e yanıtla...` : "Bir şeyler yaz..."}
+                      placeholder={cooldownLeft > 0 ? `${cooldownLeft}s bekle...` : replyTo ? `${replyName(replyTo)}'e yanıtla...` : "Mesajınızı yazın..."}
                       disabled={cooldownLeft > 0}
                       maxLength={500}
-                      className="flex-1 rounded-xl px-3 py-2.5 text-xs text-foreground placeholder:text-white/30 focus:outline-none disabled:opacity-50"
-                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                      className="flex-1 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-white/30 focus:outline-none disabled:opacity-50"
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
                     />
                     <motion.button
                       onClick={sendMsg}
                       disabled={!content.trim() || sending || cooldownLeft > 0}
                       whileTap={{ scale: 0.9 }}
-                      className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-30 shrink-0 transition-opacity"
-                      style={{ background: "linear-gradient(135deg,#4F46E5,#7C3AED)" }}
+                      className="w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shrink-0"
+                      style={{ background: "linear-gradient(135deg,#F5C518,#E8B923)", boxShadow: "0 0 14px rgba(245,197,24,0.4)" }}
                     >
-                      <Send className="w-3.5 h-3.5 text-white" />
+                      <Send className="w-4 h-4 text-black" />
                     </motion.button>
                   </div>
                 </div>

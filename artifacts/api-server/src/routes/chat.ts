@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { db, chatMessagesTable, usersTable, adminSettingsTable, chatReactionsTable } from "@workspace/db";
+import { db, chatMessagesTable, usersTable, adminSettingsTable, chatReactionsTable, notificationsTable } from "@workspace/db";
 import { eq, desc, and, lt, gt, inArray } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { triggerContextualReply } from "../lib/chat-bot";
 import { filterProfanity } from "../lib/profanity";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
+import { emitRealtime } from "../lib/realtime";
 
 const router = Router();
 
@@ -164,6 +165,36 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
   const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
   if (io) {
     io.emit("chat:message", formatted);
+  }
+
+  // Yanıt bildirimi — gerçek kullanıcıya
+  if (replyToId) {
+    try {
+      const [orig] = await db.select().from(chatMessagesTable).where(eq(chatMessagesTable.id, replyToId)).limit(1);
+      if (orig && orig.userId > 0 && orig.userId !== req.user!.id) {
+        const preview = filteredContent.length > 100 ? `${filteredContent.slice(0, 100)}…` : filteredContent;
+        const title = "Sohbete yanıt geldi";
+        const message = `${req.user!.username}: ${preview}`;
+        await db.insert(notificationsTable).values({
+          userId: orig.userId,
+          type: "message",
+          title,
+          message,
+          relatedId: msg.id,
+          linkUrl: "/sohbet",
+          isRead: false,
+        });
+        emitRealtime("notification:new", {
+          type: "message",
+          title,
+          message,
+          relatedId: msg.id,
+          linkUrl: "/sohbet",
+          userId: orig.userId,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch { /* bildirim hatası mesajı engellemesin */ }
   }
 
   // GuvenlikBot — kullanıcı mesajına anahtar kelime bazlı akıllı yanıt
