@@ -29,6 +29,9 @@ function userJson(u: typeof usersTable.$inferSelect) {
     vipUntil: u.vipUntil?.toISOString() ?? null,
     xp: u.xp ?? 0,
     level: u.level ?? 1,
+    avatarFrame: u.avatarFrame ?? "none",
+    chatBubble: u.chatBubble ?? "default",
+    chatBubbleExpiresAt: u.chatBubbleExpiresAt?.toISOString() ?? null,
     isBanned: u.isBanned,
     banReason: u.banReason,
     banExpiresAt: u.banExpiresAt?.toISOString() ?? null,
@@ -57,10 +60,11 @@ router.post("/users/avatar", authMiddleware, upload.single("avatar"), async (req
       res.status(403).json({ error: "Hareketli GIF yükleme sadece yönetici ve moderatörlere özeldir." });
       return;
     }
-    if (req.file.buffer.length > 3 * 1024 * 1024) {
-      res.status(400).json({ error: "Kalıcı GIF profil resmi en fazla 3 MB olabilir." });
+    if (req.file.buffer.length > 5 * 1024 * 1024) {
+      res.status(400).json({ error: "Hareketli GIF en fazla 5 MB olabilir." });
       return;
     }
+    // GIF’i olduğu gibi sakla (animasyon korunsun)
     const avatarUrl = `data:image/gif;base64,${req.file.buffer.toString("base64")}`;
     const [updated] = await db.update(usersTable).set({ avatarUrl }).where(eq(usersTable.id, req.user!.id)).returning();
     res.json(userJson(updated));
@@ -149,6 +153,11 @@ router.get("/users/profile/:username", async (req, res): Promise<void> => {
     xp,
     xpProgress: xpProgress(xp, level),
     badges,
+    avatarFrame: user.avatarFrame ?? "none",
+    chatBubble: (() => {
+      if (user.chatBubbleExpiresAt && user.chatBubbleExpiresAt < new Date()) return "default";
+      return user.chatBubble ?? "default";
+    })(),
     listingCount: countResult?.count ?? 0,
     createdAt: user.createdAt.toISOString(),
   });

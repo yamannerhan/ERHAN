@@ -24,6 +24,8 @@ function userJson(user: any) {
     vipUntil: user.vipUntil?.toISOString() ?? null,
     xp: user.xp ?? 0,
     level: user.level ?? 1,
+    avatarFrame: user.avatarFrame ?? "none",
+    chatBubble: user.chatBubble ?? "default",
     isBanned: user.isBanned,
     banReason: user.banReason,
     banExpiresAt: user.banExpiresAt?.toISOString() ?? null,

@@ -128,6 +128,9 @@ function adminUserJson(u: typeof usersTable.$inferSelect) {
     vipUntil: u.vipUntil?.toISOString() ?? null,
     xp: u.xp ?? 0,
     level: u.level ?? 1,
+    avatarFrame: u.avatarFrame ?? "none",
+    chatBubble: u.chatBubble ?? "default",
+    chatBubbleExpiresAt: u.chatBubbleExpiresAt?.toISOString() ?? null,
     isBanned: u.isBanned,
     banReason: u.banReason,
     banExpiresAt: u.banExpiresAt?.toISOString() ?? null,
@@ -489,7 +492,20 @@ router.patch("/admin/users/:id/level", authMiddleware, requireAdminOrModerator, 
   if (typeof level === "number" && Number.isFinite(level)) {
     const result = await setUserLevel(id, level);
     if (!result) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
-    res.json({ success: true, ...result });
+    // Level ayarlanınca çerçeve/balon hediyesi uygula
+    const { frameGiftForLevel, bubbleGiftForLevel } = await import("../lib/chat-cosmetics");
+    const frame = frameGiftForLevel(result.level);
+    const bubble = bubbleGiftForLevel(result.level);
+    const cosUpdates: Partial<typeof usersTable.$inferInsert> = {};
+    if (frame) cosUpdates.avatarFrame = frame;
+    if (bubble) {
+      cosUpdates.chatBubble = bubble;
+      cosUpdates.chatBubbleExpiresAt = null;
+    }
+    if (Object.keys(cosUpdates).length > 0) {
+      await db.update(usersTable).set(cosUpdates).where(eq(usersTable.id, id));
+    }
+    res.json({ success: true, ...result, avatarFrame: frame, chatBubble: bubble });
     return;
   }
   if (typeof xpDelta === "number" && Number.isFinite(xpDelta) && xpDelta !== 0) {
@@ -499,6 +515,51 @@ router.patch("/admin/users/:id/level", authMiddleware, requireAdminOrModerator, 
     return;
   }
   res.status(400).json({ error: "level veya xpDelta gerekli" });
+});
+
+/** Çerçeve + mesaj balonu ver / kaldır */
+router.patch("/admin/users/:id/cosmetics", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const { avatarFrame, chatBubble, bubbleHours } = req.body as {
+    avatarFrame?: string | null;
+    chatBubble?: string | null;
+    bubbleHours?: number | null;
+  };
+  const { isValidFrameKey, isValidBubbleKey } = await import("../lib/chat-cosmetics");
+  const updates: Partial<typeof usersTable.$inferInsert> = { updatedAt: new Date() };
+
+  if (avatarFrame !== undefined) {
+    const key = avatarFrame || "none";
+    if (!isValidFrameKey(key)) { res.status(400).json({ error: "Geçersiz çerçeve" }); return; }
+    updates.avatarFrame = key;
+  }
+  if (chatBubble !== undefined) {
+    const key = chatBubble || "default";
+    if (!isValidBubbleKey(key)) { res.status(400).json({ error: "Geçersiz balon" }); return; }
+    updates.chatBubble = key;
+    if (bubbleHours && bubbleHours > 0) {
+      updates.chatBubbleExpiresAt = new Date(Date.now() + bubbleHours * 3600 * 1000);
+    } else {
+      updates.chatBubbleExpiresAt = null; // kalıcı
+    }
+  }
+  if (Object.keys(updates).length <= 1) {
+    res.status(400).json({ error: "avatarFrame veya chatBubble gerekli" }); return;
+  }
+  await db.update(usersTable).set(updates).where(eq(usersTable.id, id));
+  const [u] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+  res.json({
+    success: true,
+    avatarFrame: u?.avatarFrame ?? "none",
+    chatBubble: u?.chatBubble ?? "default",
+    chatBubbleExpiresAt: u?.chatBubbleExpiresAt?.toISOString() ?? null,
+  });
+});
+
+router.get("/admin/cosmetics/catalog", authMiddleware, requireAdminOrModerator, async (_req, res): Promise<void> => {
+  const { AVATAR_FRAMES, CHAT_BUBBLES } = await import("../lib/chat-cosmetics");
+  res.json({ frames: AVATAR_FRAMES, bubbles: CHAT_BUBBLES });
 });
 
 // ── Rozet kataloğu ────────────────────────────────────────────────

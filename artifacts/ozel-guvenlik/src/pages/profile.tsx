@@ -414,7 +414,11 @@ export default function Profile() {
             </button>
           )}
 
-          <div className="og-profile-avatar-wrap">
+          <div className={`og-profile-avatar-wrap ${
+            (profile as { avatarFrame?: string }).avatarFrame && (profile as { avatarFrame?: string }).avatarFrame !== "none"
+              ? `og-frame-${(profile as { avatarFrame?: string }).avatarFrame}`
+              : ""
+          }`}>
             <div className="og-profile-avatar-inner">
               {displayAvatar ? (
                 <img src={displayAvatar} alt={profile.username} className="w-full h-full object-cover" />
@@ -439,13 +443,18 @@ export default function Profile() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                   className="og-profile-cam-btn"
-                  title="Profil resmi değiştir"
+                  title={user?.role === "admin" || user?.role === "moderator" ? "Profil / hareketli GIF" : "Profil resmi değiştir"}
                 >
                   {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
                 </button>
               </>
             )}
           </div>
+          {isMe && (user?.role === "admin" || user?.role === "moderator") && (
+            <p className="text-[10px] text-center og-text-muted -mt-2 mb-2">
+              Yönetici / moderatör: hareketli GIF yükleyebilirsiniz (max 5 MB).
+            </p>
+          )}
 
           {/* Display name + edit pencil */}
           <div className="text-center">

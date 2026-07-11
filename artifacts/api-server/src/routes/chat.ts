@@ -7,8 +7,9 @@ import { filterProfanity } from "../lib/profanity";
 import { getExtraBannedWords } from "../lib/banned-words-cache";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
 import { emitRealtimeToUser } from "../lib/realtime";
-import { awardChatXp, levelNameColor } from "../lib/levels";
+import { awardChatXp, levelNameColor, maybeGrantDailyBubble } from "../lib/levels";
 import { getBadgesForUsers, type PublicBadge } from "../lib/user-badges";
+import { resolveChatCosmetics } from "../lib/resolve-cosmetics";
 
 const router = Router();
 
@@ -58,12 +59,12 @@ async function formatMessage(
   const xp = user?.xp ?? 0;
   const role = vUser?.role ?? user?.role ?? "user";
   const isVip = user ? (user.isVip && (!user.vipUntil || user.vipUntil > new Date())) : false;
-  // Admin/mod/VIP özel renkleri koru; normal üyede level rengi
   const levelColor = levelNameColor(level);
   const userNameColor =
     vUser?.nameColor ??
     user?.nameColor ??
     (role === "user" && !isVip ? levelColor : null);
+  const cosmetics = resolveChatCosmetics(user);
 
   return {
     id: msg.id,
@@ -82,6 +83,8 @@ async function formatMessage(
     level,
     xp,
     badges:          badgesMap?.get(msg.userId) ?? [],
+    avatarFrame:     cosmetics.avatarFrame,
+    chatBubble:      cosmetics.chatBubble,
     isBot:           vUser?.isBot           ?? false,
     isFake:          vUser?.isFake          ?? false,
     replyToId: msg.replyToId,
@@ -193,8 +196,10 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     isDeleted: false,
   }).returning();
 
-  // Sohbet XP (await — formatMessage güncel level görsün)
+  // Sohbet XP + level hediyesi
   await awardChatXp(req.user!.id).catch(() => null);
+  // Günlük animasyonlu balon (24s) — günde ilk mesajlarda
+  await maybeGrantDailyBubble(req.user!.id).catch(() => null);
 
   const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
   const allUsers = await db.select().from(usersTable);

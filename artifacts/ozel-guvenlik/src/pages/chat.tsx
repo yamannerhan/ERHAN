@@ -13,6 +13,7 @@ import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatPollCard } from "@/components/chat-poll-card";
 import { ChatModActions } from "@/components/chat-mod-actions";
 import { ChatUserIdentity } from "@/components/chat-user-identity";
+import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -31,6 +32,8 @@ type ExtMsg = ChatMessage & {
   reactions?: Reaction[]; poll?: PollData | null;
   level?: number; xp?: number;
   badges?: Array<{ id: number; name: string; slug: string; emoji: string; color: string; description?: string | null }>;
+  avatarFrame?: string | null;
+  chatBubble?: string | null;
 };
 type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
@@ -66,22 +69,10 @@ function ChatDisplayName({ msg, name, align = "start" }: { msg: ExtMsg; name: st
   return <ChatUserIdentity msg={msg} name={name} align={align} showMemberLabel />;
 }
 
-function UserAvatar({ src, name, role, isVip }: { src?: string | null; name: string; role: string; isVip?: boolean }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const showImage = !!src && !imageFailed;
-
-  return (
-    <div className="w-8 h-8 rounded-full shrink-0 overflow-hidden flex items-center justify-center text-[10px] font-bold text-white"
-      style={{
-        boxShadow: role === "admin" ? "0 0 0 2px rgba(239,68,68,0.7)" : role === "moderator" ? "0 0 0 2px rgba(59,130,246,0.7)" : isVip ? "0 0 0 2px rgba(250,204,21,0.9), 0 0 18px rgba(250,204,21,0.35)" : "0 0 0 2px rgba(255,255,255,0.1)",
-        background: showImage ? "transparent" : "linear-gradient(135deg,#4F46E5,#7C3AED)",
-        flexShrink: 0,
-      }}>
-      {showImage
-        ? <img src={src} alt={name} className="w-full h-full object-cover" onError={() => setImageFailed(true)} />
-        : name.substring(0, 2).toUpperCase()}
-    </div>
-  );
+function UserAvatar({ src, name, role, isVip, frame }: {
+  src?: string | null; name: string; role: string; isVip?: boolean; frame?: string | null;
+}) {
+  return <FramedAvatar src={src} name={name} role={role} isVip={isVip} frame={frame} size={32} />;
 }
 
 /* ── Swipeable row ────────────────────────────────────────────── */
@@ -537,28 +528,27 @@ export default function Chat() {
           onClick={() => setActiveMsg(isActive ? null : chatMsg.id)}>
           <div className={`flex max-w-[85%] ${isMe ? "flex-row-reverse" : "flex-row"} items-end gap-2`}>
             {/* Avatar */}
-            <UserAvatar src={chatMsg.userAvatarUrl} name={name} role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} />
+            <UserAvatar
+              src={chatMsg.userAvatarUrl}
+              name={name}
+              role={chatMsg.userRole ?? "user"}
+              isVip={chatMsg.isVip}
+              frame={chatMsg.avatarFrame}
+            />
 
             <div className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-              {/* Name + badge */}
               <div className={`flex flex-col mb-1 px-1 ${isMe ? "items-end" : "items-start"}`}>
                 <ChatDisplayName msg={chatMsg} name={name} align={isMe ? "end" : "start"} />
               </div>
 
-              {/* Bubble */}
               <div
-                className={`relative rounded-2xl px-4 py-2.5 text-sm shadow-sm backdrop-blur-md ${isMe ? "text-white rounded-br-sm" : "rounded-bl-sm"}`}
-                style={
-                  isMe
-                    ? { background: "linear-gradient(135deg,#4F46E5,#7C3AED)" }
-                    : chatMsg.userRole === "admin"
-                      ? { background: "linear-gradient(135deg,rgba(110,8,8,0.6),rgba(35,4,4,0.75))", border: "1px solid rgba(239,68,68,0.45)", boxShadow: "0 0 18px rgba(239,68,68,0.22), inset 0 1px 0 rgba(239,68,68,0.1)" }
-                      : chatMsg.userRole === "moderator"
-                        ? { background: "linear-gradient(135deg,rgba(10,38,115,0.6),rgba(4,14,55,0.75))", border: "1px solid rgba(59,130,246,0.45)", boxShadow: "0 0 18px rgba(59,130,246,0.22), inset 0 1px 0 rgba(59,130,246,0.1)" }
-                        : chatMsg.isVip
-                          ? { background: "linear-gradient(135deg,rgba(146,64,14,0.78),rgba(8,47,73,0.72))", border: "1px solid rgba(250,204,21,0.55)", boxShadow: "0 0 22px rgba(250,204,21,0.28), 0 0 18px rgba(34,211,238,0.14), inset 0 1px 0 rgba(255,255,255,0.14)" }
-                        : { background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.06)" }
-                }>
+                className={`${chatBubbleClass(
+                  chatMsg.chatBubble
+                    || (chatMsg.userRole === "admin" ? "admin" : chatMsg.isVip ? "vip" : chatMsg.userRole === "moderator" ? "neon" : null),
+                  isMe,
+                )} text-sm ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
+                style={{ fontSize: "0.875rem", padding: "0.625rem 1rem" }}
+              >
                 {chatMsg.replyToId && (() => {
                   const repliedToMe = chatMsg.replyToUsername === user?.username;
                   return (

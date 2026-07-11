@@ -33,6 +33,12 @@ export const usersTable = pgTable("users", {
   /** Sohbet / sitede vakit — seviye sistemi */
   xp: integer("xp").notNull().default(0),
   level: integer("level").notNull().default(1),
+  /** Avatar çerçevesi (chat-cosmetics key) */
+  avatarFrame: text("avatar_frame").notNull().default("none"),
+  /** Mesaj balonu stili */
+  chatBubble: text("chat_bubble").notNull().default("default"),
+  /** Geçici balon (günlük hediye) bitiş */
+  chatBubbleExpiresAt: timestamp("chat_bubble_expires_at", { withTimezone: true }),
   /** Kullanıcı bildirim tercihleri (push + site) */
   notifListings: boolean("notif_listings").notNull().default(true),
   notifJoin: boolean("notif_join").notNull().default(true),

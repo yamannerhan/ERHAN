@@ -1054,6 +1054,7 @@ interface AdminUser {
   mutedUntil: string | null; lastKnownIp: string | null; lastDeviceId: string | null;
   isVip?: boolean; vipUntil?: string | null;
   xp?: number; level?: number;
+  avatarFrame?: string; chatBubble?: string; chatBubbleExpiresAt?: string | null;
 }
 
 interface BanEntry {
@@ -1095,6 +1096,7 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
   const [badgeCatalog, setBadgeCatalog] = useState<{ id: number; name: string; emoji: string; color: string }[]>([]);
   const [userBadges, setUserBadges] = useState<Record<number, { id: number; name: string; emoji: string; color: string }[]>>({});
   const [badgeBusy, setBadgeBusy] = useState<string | null>(null);
+  const [cosmoBusy, setCosmoBusy] = useState<number | null>(null);
 
   const searchUsers = async () => {
     setLoading(true);
@@ -1181,6 +1183,26 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
       toast({ title: "Hata", description: e.message, variant: "destructive" });
     } finally {
       setBadgeBusy(null);
+    }
+  };
+
+  const setCosmetics = async (userId: number, patch: { avatarFrame?: string; chatBubble?: string; bubbleHours?: number | null }) => {
+    setCosmoBusy(userId);
+    try {
+      const res = await apiCall(`/admin/users/${userId}/cosmetics`, "PATCH", patch) as {
+        avatarFrame: string; chatBubble: string; chatBubbleExpiresAt: string | null;
+      };
+      setUsers(prev => prev.map(u => u.id === userId ? {
+        ...u,
+        avatarFrame: res.avatarFrame,
+        chatBubble: res.chatBubble,
+        chatBubbleExpiresAt: res.chatBubbleExpiresAt,
+      } : u));
+      toast({ title: "Çerçeve / balon güncellendi" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setCosmoBusy(null);
     }
   };
 
@@ -1589,6 +1611,58 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                         + {b.emoji} {b.name}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* Çerçeve + balon */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[9px] text-muted-foreground block mb-1">Avatar çerçevesi</span>
+                    <select
+                      value={u.avatarFrame ?? "none"}
+                      disabled={cosmoBusy === u.id}
+                      onChange={(e) => void setCosmetics(u.id, { avatarFrame: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-foreground"
+                    >
+                      {[
+                        ["none", "Yok"], ["bronze", "Bronz"], ["silver", "Gümüş"], ["gold", "Altın"],
+                        ["emerald", "Zümrüt"], ["neon", "Neon"], ["fire", "Alev"], ["rainbow", "Gökkuşağı"],
+                        ["diamond", "Elmas"], ["royal", "Kraliyet"], ["pulse", "Nabız"], ["galaxy", "Galaksi"],
+                      ].map(([k, n]) => <option key={k} value={k!}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-muted-foreground block mb-1">Mesaj balonu</span>
+                    <select
+                      value={u.chatBubble ?? "default"}
+                      disabled={cosmoBusy === u.id}
+                      onChange={(e) => void setCosmetics(u.id, { chatBubble: e.target.value, bubbleHours: null })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-foreground"
+                    >
+                      {[
+                        ["default", "Varsayılan"], ["gold", "Altın"], ["glass", "Cam"], ["aurora", "Aurora"],
+                        ["neon", "Neon"], ["fire", "Alev"], ["ocean", "Okyanus"], ["spark", "Kıvılcım"],
+                        ["vip", "VIP"], ["admin", "Yönetici"], ["holo", "Hologram"],
+                      ].map(([k, n]) => <option key={k} value={k!}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2 flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { chatBubble: "spark", bubbleHours: 24 })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 disabled:opacity-50"
+                    >
+                      24s günlük balon hediye
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "none", chatBubble: "default", bubbleHours: null })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-white/10 text-muted-foreground hover:bg-white/15 disabled:opacity-50"
+                    >
+                      Kozmetikleri sıfırla
+                    </button>
                   </div>
                 </div>
 
