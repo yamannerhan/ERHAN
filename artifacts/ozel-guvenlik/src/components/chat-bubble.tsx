@@ -9,6 +9,7 @@ import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatPollCard } from "@/components/chat-poll-card";
 import { ChatModActions } from "@/components/chat-mod-actions";
+import { ChatUserIdentity } from "@/components/chat-user-identity";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 function formatTime(iso: string) {
@@ -20,7 +21,15 @@ type PollData = {
   id: number; question: string; options: string[]; counts: number[];
   totalVotes: number; myVote: number | null; isClosed: boolean;
 };
-type ExtMsg = ChatMessage & { isBot?: boolean; isFake?: boolean; displayName?: string | null; poll?: PollData | null };
+type ExtMsg = ChatMessage & {
+  isBot?: boolean;
+  isFake?: boolean;
+  displayName?: string | null;
+  poll?: PollData | null;
+  level?: number;
+  xp?: number;
+  badges?: Array<{ id: number; name: string; slug: string; emoji: string; color: string; description?: string | null }>;
+};
 type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
 
@@ -62,52 +71,8 @@ function renderMessageContent(content: string) {
   });
 }
 
-function RoleBadge({ role, isVip }: { role: string; isVip?: boolean }) {
-  if (role === "bot") return null;
-  if (role === "admin") {
-    return <span className="badge-admin text-[7px] font-black tracking-widest uppercase">YÖNETİCİ</span>;
-  }
-  if (role === "moderator") {
-    return <span className="badge-mod text-[7px] font-black tracking-widest uppercase">MODERATÖR</span>;
-  }
-  if (isVip) {
-    return (
-      <span className="badge-vip text-[7px] font-black tracking-widest uppercase inline-flex items-center gap-0.5">
-        <Crown className="w-2.5 h-2.5" /> VIP
-      </span>
-    );
-  }
-  return null;
-}
-
-function chatNameClass(msg: ExtMsg): string {
-  // Rol animasyonu öncelikli — admin/mod isimleri her zaman efektli
-  if (msg.userRole === "admin") return "name-admin";
-  if (msg.userRole === "moderator") return "name-mod";
-  if (msg.isVip) return "name-vip";
-  if (msg.userNameAnimated) return "animate-rainbow";
-  if (msg.userNameColor) return "";
-  return "name-user";
-}
-
-function chatNameStyle(msg: ExtMsg): React.CSSProperties {
-  if (msg.userRole === "admin" || msg.userRole === "moderator") return {};
-  if (msg.userNameColor && !msg.userNameAnimated && !msg.isVip) return { color: msg.userNameColor };
-  return {};
-}
-
-function ChatDisplayName({ msg, name }: { msg: ExtMsg; name: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 flex-wrap">
-      <RoleBadge role={msg.userRole ?? "user"} isVip={msg.isVip} />
-      <span className={`text-[12px] font-extrabold leading-tight tracking-wide ${chatNameClass(msg)}`} style={chatNameStyle(msg)}>
-        {msg.isVip && msg.userRole !== "admin" && msg.userRole !== "moderator" && (
-          <Crown className="inline w-3 h-3 mr-0.5 text-amber-300 fill-amber-300" />
-        )}
-        {name}
-      </span>
-    </span>
-  );
+function ChatDisplayName({ msg, name, align = "start" }: { msg: ExtMsg; name: string; align?: "start" | "end" }) {
+  return <ChatUserIdentity msg={msg} name={name} align={align} />;
 }
 
 function UserAvatar({ src, username, role, isVip, online }: { src?: string | null; username: string; role: string; isVip?: boolean; online?: boolean }) {
@@ -359,6 +324,9 @@ export function ChatBubble() {
   }, [open]);
 
   useEffect(() => {
+    // Tam ekran /sohbet sayfasındayken bubble socket bağlanmasın (çift mesaj)
+    if (isOnChatPage) return;
+
     const s = io(window.location.origin, {
       path: "/ws",
       transports: ["polling", "websocket"],
@@ -408,8 +376,9 @@ export function ChatBubble() {
     return () => {
       s.off("connect", authenticate);
       s.disconnect();
+      setSocket(null);
     };
-  }, [user?.id, addMsg]);
+  }, [user?.id, addMsg, isOnChatPage]);
 
   useEffect(() => {
     if (open) {
@@ -536,11 +505,14 @@ export function ChatBubble() {
       }
       if (r.ok) {
         const sent = await r.json().catch(() => null) as ExtMsg | null;
-        if (sent) addMsg(sent);
         setContent("");
         setReplyTo(null);
         setMentionQuery(null);
         setSuggestions([]);
+        // Socket zaten ekler — HTTP ile çift ekleme yapma; 800ms sonra yoksa ekle
+        if (sent?.id) {
+          window.setTimeout(() => { addMsg(sent); }, 800);
+        }
         scrollToBottom();
         return;
       }
@@ -680,9 +652,9 @@ export function ChatBubble() {
       >
         <UserAvatar src={chatMsg.userAvatarUrl} username={chatMsg.username} role={chatMsg.userRole ?? "user"} isVip={chatMsg.isVip} online />
         <div className={`flex flex-col max-w-[78%] ${isMe ? "items-end" : "items-start"}`}>
-          <div className="flex items-center gap-1.5 mb-1 px-0.5">
-            <ChatDisplayName msg={chatMsg} name={name} />
-            <span className="text-[9px] text-white/30">{formatTime(chatMsg.createdAt)}</span>
+          <div className={`flex items-center gap-1.5 mb-1 px-0.5 ${isMe ? "justify-end" : "justify-start"}`}>
+            <ChatDisplayName msg={chatMsg} name={name} align={isMe ? "end" : "start"} />
+            <span className="text-[9px] text-white/30 self-end pb-0.5">{formatTime(chatMsg.createdAt)}</span>
           </div>
           <div
             className={`rounded-2xl px-3 py-2 text-xs text-white ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}

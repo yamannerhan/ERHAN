@@ -7,6 +7,8 @@ import { filterProfanity } from "../lib/profanity";
 import { getExtraBannedWords } from "../lib/banned-words-cache";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
 import { emitRealtimeToUser } from "../lib/realtime";
+import { awardChatXp, levelNameColor } from "../lib/levels";
+import { getBadgesForUsers, type PublicBadge } from "../lib/user-badges";
 
 const router = Router();
 
@@ -29,6 +31,7 @@ async function formatMessage(
   userMap: Map<number, typeof usersTable.$inferSelect>,
   reactionsMap?: Map<number, Array<{ emoji: string; userId: number; username: string; displayName: string | null }>>,
   pollMap?: Map<number, Awaited<ReturnType<typeof import("../lib/chat-polls").getPollPayload>>>,
+  badgesMap?: Map<number, PublicBadge[]>,
 ) {
   const vUser = VIRTUAL_USERS[msg.userId];
   const user = userMap.get(msg.userId);
@@ -51,6 +54,17 @@ async function formatMessage(
   const pollId = parsePollIdFromContent(msg.content);
   const poll = pollId && pollMap ? pollMap.get(pollId) ?? null : null;
 
+  const level = user?.level ?? 1;
+  const xp = user?.xp ?? 0;
+  const role = vUser?.role ?? user?.role ?? "user";
+  const isVip = user ? (user.isVip && (!user.vipUntil || user.vipUntil > new Date())) : false;
+  // Admin/mod/VIP özel renkleri koru; normal üyede level rengi
+  const levelColor = levelNameColor(level);
+  const userNameColor =
+    vUser?.nameColor ??
+    user?.nameColor ??
+    (role === "user" && !isVip ? levelColor : null);
+
   return {
     id: msg.id,
     content: poll ? `📊 ${poll.question}` : msg.content,
@@ -60,11 +74,14 @@ async function formatMessage(
     username:        vUser?.username        ?? user?.username        ?? "Silindi",
     displayName:     vUser?.displayName     ?? user?.displayName     ?? null,
     userAvatarUrl:   vUser?.avatarUrl       ?? user?.avatarUrl       ?? null,
-    userNameColor:   vUser?.nameColor       ?? user?.nameColor       ?? null,
+    userNameColor,
     userNameAnimated:vUser?.nameAnimated    ?? user?.nameAnimated    ?? false,
-    userRole:        vUser?.role            ?? user?.role            ?? "user",
-    isVip:           user ? (user.isVip && (!user.vipUntil || user.vipUntil > new Date())) : false,
+    userRole:        role,
+    isVip,
     vipUntil:        user?.vipUntil?.toISOString() ?? null,
+    level,
+    xp,
+    badges:          badgesMap?.get(msg.userId) ?? [],
     isBot:           vUser?.isBot           ?? false,
     isFake:          vUser?.isFake          ?? false,
     replyToId: msg.replyToId,
@@ -118,7 +135,8 @@ router.get("/chat/messages", optionalAuthMiddleware, async (req, res): Promise<v
       req.user?.id ?? null,
     );
 
-    const formatted = await Promise.all(messages.map(m => formatMessage(m, userMap, reactionsMap, pollMap)));
+    const badgesMap = await getBadgesForUsers(messages.map((m) => m.userId));
+    const formatted = await Promise.all(messages.map(m => formatMessage(m, userMap, reactionsMap, pollMap, badgesMap)));
     res.json(formatted);
   } catch (error) {
     req.app.get("logger")?.error?.({ error }, "chat/messages failed");
@@ -175,9 +193,16 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     isDeleted: false,
   }).returning();
 
+  // Sohbet XP (await — formatMessage güncel level görsün)
+  await awardChatXp(req.user!.id).catch(() => null);
+
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
   const allUsers = await db.select().from(usersTable);
   const userMap = new Map(allUsers.map(u => [u.id, u]));
-  const formatted = await formatMessage(msg, userMap);
+  if (freshUser) userMap.set(freshUser.id, freshUser);
+
+  const badgesMap = await getBadgesForUsers([req.user!.id]);
+  const formatted = await formatMessage(msg, userMap, undefined, undefined, badgesMap);
 
   const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
   if (io) {

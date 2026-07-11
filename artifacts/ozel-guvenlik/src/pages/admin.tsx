@@ -14,7 +14,7 @@ import {
   Link, Globe, Radio, AlertCircle, Edit2, ExternalLink, Filter, Zap,
   Cpu, TrendingUp, ShieldCheck, Activity, ArrowUpRight, Bell, BarChart3, PieChart as PieChartIcon, Server, Database, Bot, MessageCircle, Wrench, Terminal, Wifi,
   ChevronRight, Menu, Sun, Moon, FileText, CreditCard, ShieldAlert, LogOut, Globe2, FilePlus, UserCheck, Award,
-  Home, CheckCheck, Heart, MessageCircle, Info, X, Power, Play, Square, Ban
+  Home, CheckCheck, Heart, MessageCircle, Info, X, Power, Play, Square, Ban, Award
 } from "lucide-react";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -874,8 +874,86 @@ function ChatManagementSection({ apiCall, toast }: {
 
         {/* Yasaklı küfür / kelimeler */}
         <BannedWordsBlock apiCall={apiCall} toast={toast} />
+        <BadgeCatalogBlock apiCall={apiCall} toast={toast} />
       </div>
     </Section>
+  );
+}
+
+function BadgeCatalogBlock({ apiCall, toast }: {
+  apiCall: (path: string, method: string, body?: unknown) => Promise<unknown>;
+  toast: ReturnType<typeof useToast>["toast"];
+}) {
+  const [badges, setBadges] = useState<{ id: number; name: string; emoji: string; color: string; description: string | null }[]>([]);
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("🏅");
+  const [color, setColor] = useState("#F5C518");
+  const [adding, setAdding] = useState(false);
+
+  const load = async () => {
+    try {
+      const d = await apiCall("/admin/badges", "GET") as typeof badges;
+      setBadges(d ?? []);
+    } catch { /* mods ok; create is admin */ }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const add = async () => {
+    if (!name.trim()) return;
+    setAdding(true);
+    try {
+      await apiCall("/admin/badges", "POST", { name: name.trim(), emoji, color });
+      setName("");
+      toast({ title: "Rozet oluşturuldu" });
+      await load();
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    if (!confirm("Rozet silinsin mi? Kullanıcılardan da kalkar.")) return;
+    try {
+      await apiCall(`/admin/badges/${id}`, "DELETE");
+      setBadges(prev => prev.filter(b => b.id !== id));
+      toast({ title: "Rozet silindi" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="bg-white/5 rounded-xl p-3 space-y-3 border border-amber-400/20">
+      <p className="text-xs font-semibold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+        <Award className="w-3.5 h-3.5" /> Özel Rozetler
+      </p>
+      <p className="text-[10px] text-muted-foreground">
+        Onaylı, İşveren vb. rozet oluştur. Kullanıcılar sekmesinden ver / al.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Rozet adı"
+          className="flex-1 min-w-[120px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs" />
+        <input value={emoji} onChange={e => setEmoji(e.target.value)} placeholder="Emoji" maxLength={4}
+          className="w-14 bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-xs text-center" />
+        <input type="color" value={color} onChange={e => setColor(e.target.value)}
+          className="w-10 h-9 rounded-lg bg-transparent border border-white/10 cursor-pointer" />
+        <button type="button" onClick={() => void add()} disabled={adding}
+          className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 disabled:opacity-50">
+          {adding ? "..." : "Oluştur"}
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {badges.map(b => (
+          <span key={b.id} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] border"
+            style={{ color: b.color, borderColor: `${b.color}55`, background: `${b.color}18` }}>
+            {b.emoji} {b.name}
+            <button type="button" onClick={() => void remove(b.id)} className="opacity-70 hover:opacity-100">×</button>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -975,6 +1053,7 @@ interface AdminUser {
   isBanned: boolean; createdAt: string; avatarUrl: string | null;
   mutedUntil: string | null; lastKnownIp: string | null; lastDeviceId: string | null;
   isVip?: boolean; vipUntil?: string | null;
+  xp?: number; level?: number;
 }
 
 interface BanEntry {
@@ -1011,6 +1090,11 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
   const [deviceBans, setDeviceBans] = useState<BanEntry[]>([]);
   const [banListLoading, setBanListLoading] = useState(false);
   const [removingBan, setRemovingBan] = useState<string | null>(null);
+  const [levelLoading, setLevelLoading] = useState<number | null>(null);
+  const [levelDraft, setLevelDraft] = useState<Record<number, string>>({});
+  const [badgeCatalog, setBadgeCatalog] = useState<{ id: number; name: string; emoji: string; color: string }[]>([]);
+  const [userBadges, setUserBadges] = useState<Record<number, { id: number; name: string; emoji: string; color: string }[]>>({});
+  const [badgeBusy, setBadgeBusy] = useState<string | null>(null);
 
   const searchUsers = async () => {
     setLoading(true);
@@ -1038,7 +1122,67 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
     }
   };
 
-  useEffect(() => { searchUsers(); fetchBanLists(); }, [viewerIsAdmin]);
+  useEffect(() => {
+    searchUsers();
+    fetchBanLists();
+    void (async () => {
+      try {
+        const d = await apiCall("/admin/badges", "GET") as { id: number; name: string; emoji: string; color: string }[];
+        setBadgeCatalog(d ?? []);
+      } catch { /* ignore */ }
+    })();
+  }, [viewerIsAdmin]);
+
+  const setLevel = async (id: number, level: number) => {
+    setLevelLoading(id);
+    try {
+      const res = await apiCall(`/admin/users/${id}/level`, "PATCH", { level }) as { level: number; xp: number };
+      setUsers(prev => prev.map(u => u.id === id ? { ...u, level: res.level, xp: res.xp } : u));
+      toast({ title: `Seviye ${res.level} ayarlandı` });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setLevelLoading(null);
+    }
+  };
+
+  const loadUserBadges = async (userId: number) => {
+    try {
+      const d = await apiCall(`/admin/users/${userId}/badges`, "GET") as { id: number; name: string; emoji: string; color: string }[];
+      setUserBadges(prev => ({ ...prev, [userId]: d ?? [] }));
+    } catch { /* ignore */ }
+  };
+
+  const grantBadge = async (userId: number, badgeId: number) => {
+    const key = `${userId}-${badgeId}`;
+    setBadgeBusy(key);
+    try {
+      await apiCall(`/admin/users/${userId}/badges`, "POST", { badgeId });
+      await loadUserBadges(userId);
+      toast({ title: "Rozet verildi" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setBadgeBusy(null);
+    }
+  };
+
+  const revokeBadge = async (userId: number, badgeId: number) => {
+    const key = `rm-${userId}-${badgeId}`;
+    setBadgeBusy(key);
+    try {
+      await apiCall(`/admin/users/${userId}/badges/${badgeId}`, "DELETE");
+      setUserBadges(prev => ({
+        ...prev,
+        [userId]: (prev[userId] ?? []).filter(b => b.id !== badgeId),
+      }));
+      toast({ title: "Rozet alındı" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setBadgeBusy(null);
+    }
+  };
 
   const changeRole = async (id: number, role: string) => {
     try {
@@ -1290,8 +1434,11 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                       )}
                       {u.isBanned && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive">Yasaklı</span>}
                       {isMuted && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400">Susturulmuş</span>}
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-400/30">
+                        Lv.{u.level ?? 1}
+                      </span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate">{u.email}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{u.email} · XP {u.xp ?? 0}</p>
                     {u.lastKnownIp && viewerIsAdmin && (
                       <p className="text-[9px] text-muted-foreground/60 truncate">IP: {u.lastKnownIp}</p>
                     )}
@@ -1362,6 +1509,88 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                     )}
                   </div>
                 )}
+
+                {/* Level kontrol */}
+                <div className="flex gap-1.5 flex-wrap items-center">
+                  <span className="text-[9px] text-muted-foreground">Seviye:</span>
+                  <button
+                    type="button"
+                    disabled={levelLoading === u.id || (u.level ?? 1) <= 1}
+                    onClick={() => void setLevel(u.id, Math.max(1, (u.level ?? 1) - 1))}
+                    className="text-[10px] px-2 py-1 bg-white/10 rounded-lg hover:bg-white/15 disabled:opacity-40"
+                  >
+                    −1
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={levelDraft[u.id] ?? String(u.level ?? 1)}
+                    onChange={(e) => setLevelDraft(prev => ({ ...prev, [u.id]: e.target.value }))}
+                    className="w-14 bg-white/5 border border-white/10 rounded-lg px-1.5 py-1 text-[10px] text-center"
+                  />
+                  <button
+                    type="button"
+                    disabled={levelLoading === u.id}
+                    onClick={() => {
+                      const n = parseInt(levelDraft[u.id] ?? String(u.level ?? 1), 10);
+                      if (Number.isFinite(n)) void setLevel(u.id, n);
+                    }}
+                    className="text-[10px] px-2 py-1 bg-amber-500/20 text-amber-300 rounded-lg hover:bg-amber-500/30 disabled:opacity-50"
+                  >
+                    Ayarla
+                  </button>
+                  <button
+                    type="button"
+                    disabled={levelLoading === u.id}
+                    onClick={() => void setLevel(u.id, (u.level ?? 1) + 1)}
+                    className="text-[10px] px-2 py-1 bg-white/10 rounded-lg hover:bg-white/15 disabled:opacity-40"
+                  >
+                    +1
+                  </button>
+                </div>
+
+                {/* Rozet ver / al */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">Rozetler</span>
+                    <button
+                      type="button"
+                      className="text-[9px] text-primary hover:underline"
+                      onClick={() => void loadUserBadges(u.id)}
+                    >
+                      Yükle
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(userBadges[u.id] ?? []).map(b => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        title="Rozeti kaldır"
+                        disabled={badgeBusy === `rm-${u.id}-${b.id}`}
+                        onClick={() => void revokeBadge(u.id, b.id)}
+                        className="text-[10px] px-2 py-0.5 rounded-full border"
+                        style={{ color: b.color, borderColor: `${b.color}66`, background: `${b.color}18` }}
+                      >
+                        {b.emoji} {b.name} ×
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {badgeCatalog.map(b => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        disabled={badgeBusy === `${u.id}-${b.id}` || (userBadges[u.id] ?? []).some(x => x.id === b.id)}
+                        onClick={() => void grantBadge(u.id, b.id)}
+                        className="text-[10px] px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40"
+                      >
+                        + {b.emoji} {b.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 {/* Role + ban + IP/device ban buttons */}
                 {u.role !== "admin" && (

@@ -27,6 +27,8 @@ function userJson(u: typeof usersTable.$inferSelect) {
     nameAnimated: u.nameAnimated,
     isVip: u.isVip && (!u.vipUntil || u.vipUntil > new Date()),
     vipUntil: u.vipUntil?.toISOString() ?? null,
+    xp: u.xp ?? 0,
+    level: u.level ?? 1,
     isBanned: u.isBanned,
     banReason: u.banReason,
     banExpiresAt: u.banExpiresAt?.toISOString() ?? null,
@@ -126,6 +128,11 @@ router.get("/users/profile/:username", async (req, res): Promise<void> => {
   if (!user) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
 
   const [countResult] = await db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(eq(listingsTable.authorId, user.id));
+  const { getBadgesForUser } = await import("../lib/user-badges");
+  const { levelNameColor, xpProgress } = await import("../lib/levels");
+  const badges = await getBadgesForUser(user.id);
+  const level = user.level ?? 1;
+  const xp = user.xp ?? 0;
 
   res.json({
     id: user.id,
@@ -134,12 +141,33 @@ router.get("/users/profile/:username", async (req, res): Promise<void> => {
     role: user.role,
     avatarUrl: user.avatarUrl,
     bio: user.bio,
-    nameColor: user.nameColor,
+    nameColor: user.nameColor ?? (user.role === "user" ? levelNameColor(level) : null),
     nameAnimated: user.nameAnimated,
     isVip: user.isVip && (!user.vipUntil || user.vipUntil > new Date()),
     vipUntil: user.vipUntil?.toISOString() ?? null,
+    level,
+    xp,
+    xpProgress: xpProgress(xp, level),
+    badges,
     listingCount: countResult?.count ?? 0,
     createdAt: user.createdAt.toISOString(),
+  });
+});
+
+/** Sitede açık kalma — XP heartbeat (~2 dk) */
+router.post("/users/presence", authMiddleware, async (req, res): Promise<void> => {
+  const { awardPresenceXp, xpProgress } = await import("../lib/levels");
+  const result = await awardPresenceXp(req.user!.id);
+  if (!result) {
+    res.json({ ok: true, awarded: false });
+    return;
+  }
+  res.json({
+    ok: true,
+    awarded: true,
+    xp: result.xp,
+    level: result.level,
+    xpProgress: xpProgress(result.xp, result.level),
   });
 });
 

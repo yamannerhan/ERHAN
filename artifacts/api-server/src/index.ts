@@ -1050,6 +1050,9 @@ async function bootstrapWorkers(): Promise<void> {
 httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
   logger.info({ port, host: "0.0.0.0" }, "Server listening");
+  void import("./lib/levels").then((m) => m.ensureGamificationSchema())
+    .then(() => logger.info("Gamification schema ready"))
+    .catch((e) => logger.warn({ err: e }, "Gamification schema ensure failed"));
   setTimeout(() => { void bootstrapWorkers(); }, 1500);
 });
 

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable } from "@workspace/db";
+import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable, badgesTable, userBadgesTable } from "@workspace/db";
 import { eq, desc, ilike, and, sql, asc, or, isNull, gt, inArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { onlineSockets } from "./chat";
@@ -126,6 +126,8 @@ function adminUserJson(u: typeof usersTable.$inferSelect) {
     nameAnimated: u.nameAnimated,
     isVip: u.isVip && (!u.vipUntil || u.vipUntil > new Date()),
     vipUntil: u.vipUntil?.toISOString() ?? null,
+    xp: u.xp ?? 0,
+    level: u.level ?? 1,
     isBanned: u.isBanned,
     banReason: u.banReason,
     banExpiresAt: u.banExpiresAt?.toISOString() ?? null,
@@ -475,6 +477,123 @@ router.patch("/admin/users/:id/vip", authMiddleware, requireAdmin, async (req, r
     nameAnimated: active,
   }).where(eq(usersTable.id, id));
   res.json({ success: true, isVip: active, vipUntil: vipUntil?.toISOString() ?? null });
+});
+
+// ── Level / XP ────────────────────────────────────────────────────
+router.patch("/admin/users/:id/level", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const { level, xpDelta } = req.body as { level?: number; xpDelta?: number };
+  const { setUserLevel, adjustUserXp } = await import("../lib/levels");
+
+  if (typeof level === "number" && Number.isFinite(level)) {
+    const result = await setUserLevel(id, level);
+    if (!result) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
+    res.json({ success: true, ...result });
+    return;
+  }
+  if (typeof xpDelta === "number" && Number.isFinite(xpDelta) && xpDelta !== 0) {
+    const result = await adjustUserXp(id, xpDelta);
+    if (!result) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
+    res.json({ success: true, ...result });
+    return;
+  }
+  res.status(400).json({ error: "level veya xpDelta gerekli" });
+});
+
+// ── Rozet kataloğu ────────────────────────────────────────────────
+router.get("/admin/badges", authMiddleware, requireAdminOrModerator, async (_req, res): Promise<void> => {
+  const rows = await db.select().from(badgesTable).orderBy(asc(badgesTable.sortOrder), asc(badgesTable.id));
+  res.json(rows.map((b) => ({
+    id: b.id, name: b.name, slug: b.slug, emoji: b.emoji, color: b.color,
+    description: b.description, isActive: b.isActive, sortOrder: b.sortOrder,
+    createdAt: b.createdAt.toISOString(),
+  })));
+});
+
+router.post("/admin/badges", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  const { name, emoji, color, description, sortOrder } = req.body as Record<string, unknown>;
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "Rozet adı zorunlu" }); return;
+  }
+  const slugBase = name.trim().toLocaleLowerCase("tr-TR")
+    .replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s")
+    .replace(/ı/g, "i").replace(/ö/g, "o").replace(/ç/g, "c")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `rozet-${Date.now()}`;
+  const [created] = await db.insert(badgesTable).values({
+    name: name.trim(),
+    slug: `${slugBase}-${Date.now().toString(36).slice(-4)}`,
+    emoji: typeof emoji === "string" && emoji.trim() ? emoji.trim().slice(0, 8) : "🏅",
+    color: typeof color === "string" && color.trim() ? color.trim() : "#F5C518",
+    description: typeof description === "string" ? description.trim() || null : null,
+    sortOrder: typeof sortOrder === "number" ? sortOrder : 0,
+    isActive: true,
+  }).returning();
+  res.status(201).json({
+    id: created!.id, name: created!.name, slug: created!.slug, emoji: created!.emoji,
+    color: created!.color, description: created!.description, isActive: created!.isActive,
+  });
+});
+
+router.patch("/admin/badges/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const { name, emoji, color, description, isActive, sortOrder } = req.body as Record<string, unknown>;
+  const updates: Partial<typeof badgesTable.$inferInsert> = {};
+  if (typeof name === "string" && name.trim()) updates.name = name.trim();
+  if (typeof emoji === "string" && emoji.trim()) updates.emoji = emoji.trim().slice(0, 8);
+  if (typeof color === "string" && color.trim()) updates.color = color.trim();
+  if (description !== undefined) updates.description = typeof description === "string" ? description.trim() || null : null;
+  if (isActive !== undefined) updates.isActive = Boolean(isActive);
+  if (typeof sortOrder === "number") updates.sortOrder = sortOrder;
+  if (Object.keys(updates).length === 0) { res.status(400).json({ error: "Güncellenecek alan yok" }); return; }
+  await db.update(badgesTable).set(updates).where(eq(badgesTable.id, id));
+  res.json({ success: true });
+});
+
+router.delete("/admin/badges/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  await db.delete(userBadgesTable).where(eq(userBadgesTable.badgeId, id));
+  await db.delete(badgesTable).where(eq(badgesTable.id, id));
+  res.sendStatus(204);
+});
+
+router.get("/admin/users/:id/badges", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const { getBadgesForUser } = await import("../lib/user-badges");
+  res.json(await getBadgesForUser(id));
+});
+
+router.post("/admin/users/:id/badges", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const badgeId = Number((req.body as { badgeId?: number }).badgeId);
+  if (!Number.isFinite(badgeId) || badgeId <= 0) { res.status(400).json({ error: "badgeId gerekli" }); return; }
+  const [badge] = await db.select().from(badgesTable).where(eq(badgesTable.id, badgeId)).limit(1);
+  if (!badge) { res.status(404).json({ error: "Rozet bulunamadı" }); return; }
+  try {
+    await db.insert(userBadgesTable).values({
+      userId: id,
+      badgeId,
+      grantedBy: req.user!.id,
+    });
+  } catch {
+    res.status(400).json({ error: "Rozet zaten verilmiş" }); return;
+  }
+  res.status(201).json({ success: true });
+});
+
+router.delete("/admin/users/:id/badges/:badgeId", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  const badgeId = safeId(req.params["badgeId"]);
+  if (!id || !badgeId) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  await db.delete(userBadgesTable).where(and(
+    eq(userBadgesTable.userId, id),
+    eq(userBadgesTable.badgeId, badgeId),
+  ));
+  res.sendStatus(204);
 });
 
 function settingsJson(s: typeof adminSettingsTable.$inferSelect) {

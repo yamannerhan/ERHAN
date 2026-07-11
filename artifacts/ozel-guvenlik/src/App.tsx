@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { usePresenceXp } from "./hooks/use-presence-xp";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import ListingDetail from "@/pages/listing-detail";
@@ -56,10 +57,16 @@ function Router() {
   );
 }
 
+function AppPresence() {
+  usePresenceXp(true);
+  return null;
+}
+
 function App() {
   return (
     <AuthProvider>
       <TooltipProvider>
+        <AppPresence />
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <Router />
         </WouterRouter>

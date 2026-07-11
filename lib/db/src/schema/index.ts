@@ -15,3 +15,4 @@ export * from "./telegram-sessions";
 export * from "./location-filter-terms";
 export * from "./push";
 export * from "./chat-polls";
+export * from "./badges";

@@ -30,6 +30,9 @@ export const usersTable = pgTable("users", {
   lastDeviceId: text("last_device_id"),
   /** Kullanılan ücretsiz öne çıkarma hakkı (max 3) */
   freeFeatureUsed: integer("free_feature_used").notNull().default(0),
+  /** Sohbet / sitede vakit — seviye sistemi */
+  xp: integer("xp").notNull().default(0),
+  level: integer("level").notNull().default(1),
   /** Kullanıcı bildirim tercihleri (push + site) */
   notifListings: boolean("notif_listings").notNull().default(true),
   notifJoin: boolean("notif_join").notNull().default(true),

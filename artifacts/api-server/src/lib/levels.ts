@@ -1,0 +1,169 @@
+import { db, usersTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
+
+/** Level N için gereken toplam XP (kümülatif). Level 1 = 0 XP. */
+export function xpRequiredForLevel(level: number): number {
+  const lv = Math.max(1, Math.floor(level));
+  if (lv <= 1) return 0;
+  // L2=100, L3=250, L4=450 … artan eğri
+  let total = 0;
+  for (let i = 2; i <= lv; i++) {
+    total += 50 + (i - 1) * 50; // 100, 150, 200, 250…
+  }
+  return total;
+}
+
+export function levelFromXp(xp: number): number {
+  const safe = Math.max(0, Math.floor(xp));
+  let level = 1;
+  while (level < 100 && xpRequiredForLevel(level + 1) <= safe) {
+    level += 1;
+  }
+  return level;
+}
+
+export function xpProgress(xp: number, level: number): { current: number; next: number; pct: number } {
+  const curFloor = xpRequiredForLevel(level);
+  const nextFloor = xpRequiredForLevel(level + 1);
+  const span = Math.max(1, nextFloor - curFloor);
+  const into = Math.max(0, xp - curFloor);
+  return { current: into, next: span, pct: Math.min(100, Math.round((into / span) * 100)) };
+}
+
+/** Level’e göre isim rengi (efektsiz, düz renk) */
+export function levelNameColor(level: number): string {
+  const lv = Math.max(1, level);
+  if (lv >= 40) return "#F5C518"; // altın
+  if (lv >= 30) return "#F97316"; // turuncu
+  if (lv >= 22) return "#A855F7"; // mor
+  if (lv >= 15) return "#3B82F6"; // mavi
+  if (lv >= 10) return "#22C55E"; // yeşil
+  if (lv >= 5) return "#2DD4BF"; // teal
+  return "#94A3B8"; // slate
+}
+
+export function levelBadgeMeta(level: number): { label: string; color: string; bg: string } {
+  const color = levelNameColor(level);
+  return {
+    label: `Lv.${level}`,
+    color,
+    bg: `${color}22`,
+  };
+}
+
+const chatXpCooldown = new Map<number, number>();
+const presenceXpCooldown = new Map<number, number>();
+
+export async function awardChatXp(userId: number, amount = 8): Promise<{ xp: number; level: number; leveledUp: boolean } | null> {
+  if (userId <= 0) return null;
+  const now = Date.now();
+  const last = chatXpCooldown.get(userId) ?? 0;
+  if (now - last < 12_000) return null; // spam koruması: 12 sn’de bir
+  chatXpCooldown.set(userId, now);
+
+  const [row] = await db.select({ xp: usersTable.xp, level: usersTable.level })
+    .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!row) return null;
+
+  const newXp = (row.xp ?? 0) + amount;
+  const newLevel = levelFromXp(newXp);
+  const leveledUp = newLevel > (row.level ?? 1);
+
+  await db.update(usersTable)
+    .set({ xp: newXp, level: newLevel, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId));
+
+  return { xp: newXp, level: newLevel, leveledUp };
+}
+
+/** Sitede açık kalma — ~2 dk’da bir küçük XP */
+export async function awardPresenceXp(userId: number, amount = 3): Promise<{ xp: number; level: number } | null> {
+  if (userId <= 0) return null;
+  const now = Date.now();
+  const last = presenceXpCooldown.get(userId) ?? 0;
+  if (now - last < 110_000) return null;
+  presenceXpCooldown.set(userId, now);
+
+  const [row] = await db.select({ xp: usersTable.xp, level: usersTable.level })
+    .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!row) return null;
+
+  const newXp = (row.xp ?? 0) + amount;
+  const newLevel = levelFromXp(newXp);
+
+  await db.update(usersTable)
+    .set({ xp: newXp, level: newLevel, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId));
+
+  return { xp: newXp, level: newLevel };
+}
+
+export async function setUserLevel(userId: number, level: number): Promise<{ xp: number; level: number } | null> {
+  const lv = Math.max(1, Math.min(100, Math.floor(level)));
+  const xp = xpRequiredForLevel(lv);
+  const [updated] = await db.update(usersTable)
+    .set({ level: lv, xp, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId))
+    .returning({ xp: usersTable.xp, level: usersTable.level });
+  return updated ?? null;
+}
+
+export async function adjustUserXp(userId: number, delta: number): Promise<{ xp: number; level: number } | null> {
+  const [row] = await db.select({ xp: usersTable.xp }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!row) return null;
+  const newXp = Math.max(0, (row.xp ?? 0) + delta);
+  const newLevel = levelFromXp(newXp);
+  const [updated] = await db.update(usersTable)
+    .set({ xp: newXp, level: newLevel, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId))
+    .returning({ xp: usersTable.xp, level: usersTable.level });
+  return updated ?? null;
+}
+
+/** Railway’de drizzle push olmadan kolon/tablo oluştur */
+export async function ensureGamificationSchema(): Promise<void> {
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS xp integer NOT NULL DEFAULT 0;
+  `);
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS level integer NOT NULL DEFAULT 1;
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS badges (
+      id serial PRIMARY KEY,
+      name text NOT NULL,
+      slug text NOT NULL UNIQUE,
+      emoji text NOT NULL DEFAULT '🏅',
+      color text NOT NULL DEFAULT '#F5C518',
+      description text,
+      is_active boolean NOT NULL DEFAULT true,
+      sort_order integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS user_badges (
+      id serial PRIMARY KEY,
+      user_id integer NOT NULL,
+      badge_id integer NOT NULL,
+      granted_by integer,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS user_badges_user_badge_uidx ON user_badges (user_id, badge_id);
+  `);
+
+  // Varsayılan rozetler (tablo boşsa)
+  await db.execute(sql`
+    INSERT INTO badges (name, slug, emoji, color, description, sort_order)
+    SELECT v.name, v.slug, v.emoji, v.color, v.description, v.sort_order
+    FROM (
+      VALUES
+        ('Onaylı', 'onayli', '✅', '#22C55E', 'Hesabı doğrulanmış üye', 1),
+        ('İşveren', 'isveren', '🏢', '#3B82F6', 'İlan veren / işveren', 2),
+        ('İlan Veren', 'ilan-veren', '📋', '#A855F7', 'Aktif ilan paylaşan üye', 3)
+    ) AS v(name, slug, emoji, color, description, sort_order)
+    WHERE NOT EXISTS (SELECT 1 FROM badges LIMIT 1)
+  `);
+}

@@ -19,6 +19,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { displayCompany } from "@/lib/utils";
 import { getListingImage } from "@/lib/listing-image";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
+import { ProfileBadgesRow } from "@/components/chat-user-identity";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -479,22 +480,33 @@ export default function Profile() {
             )}
             <p className="text-xs og-text-muted mt-0.5">@{profile.username}</p>
 
-            {/* Pills row */}
+            <ProfileBadgesRow
+              role={profile.role}
+              isVip={(profile as { isVip?: boolean }).isVip}
+              level={(profile as { level?: number }).level}
+              badges={(profile as { badges?: Array<{ id: number; name: string; slug: string; emoji: string; color: string; description?: string | null }> }).badges}
+            />
+
+            {(profile as { xpProgress?: { current: number; next: number; pct: number }; xp?: number }).xp != null && (
+              <div className="mt-3 mx-auto max-w-[220px]">
+                <div className="flex justify-between text-[10px] og-text-muted mb-1">
+                  <span>XP {(profile as { xp?: number }).xp ?? 0}</span>
+                  <span>
+                    {(profile as { xpProgress?: { current: number; next: number } }).xpProgress?.current ?? 0}
+                    /
+                    {(profile as { xpProgress?: { current: number; next: number } }).xpProgress?.next ?? 100}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-amber-400/80 transition-all"
+                    style={{ width: `${(profile as { xpProgress?: { pct: number } }).xpProgress?.pct ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-center gap-2 flex-wrap mt-3">
-              {profile.role === "admin" ? (
-                <span className="og-profile-pill og-profile-pill-gold">
-                  <Crown className="w-3 h-3 fill-current" /> Yönetici
-                </span>
-              ) : profile.role === "moderator" ? (
-                <span className="og-profile-pill og-profile-pill-gold">
-                  <ShieldCheck className="w-3 h-3" /> Moderatör
-                </span>
-              ) : null}
-              {(profile as any).isVip && (
-                <span className="og-profile-pill og-profile-pill-gold">
-                  <Crown className="w-3 h-3 fill-current" /> VIP
-                </span>
-              )}
               <span className="og-profile-pill">
                 <Calendar className="w-3 h-3" /> Katılım: {joinDate}
               </span>
