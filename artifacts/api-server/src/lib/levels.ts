@@ -89,20 +89,20 @@ export async function awardChatXp(userId: number, amount = 8): Promise<{
   let giftedBubble: string | null = null;
 
   if (leveledUp) {
-    const { frameGiftForLevel, bubbleGiftForLevel } = await import("./chat-cosmetics");
-    const frame = frameGiftForLevel(newLevel);
-    const bubble = bubbleGiftForLevel(newLevel);
-    // Daha iyi çerçeveyi otomatik tak
-    if (frame) {
-      updates.avatarFrame = frame;
-      giftedFrame = frame;
-    }
-    if (bubble) {
-      // Kalıcı level balonu — süre yok
-      updates.chatBubble = bubble;
-      updates.chatBubbleExpiresAt = null;
-      giftedBubble = bubble;
-    }
+    const {
+      dailyFrameKey, dailyBubbleKey, giftDurationMs,
+    } = await import("./chat-cosmetics");
+    const duration = giftDurationMs(newLevel);
+    const expires = new Date(Date.now() + duration);
+    // Level atlayınca rastgele süreli çerçeve + balon
+    const frame = dailyFrameKey(new Date(), newLevel);
+    const bubble = dailyBubbleKey(new Date(), newLevel);
+    updates.avatarFrame = frame;
+    updates.avatarFrameExpiresAt = expires;
+    updates.chatBubble = bubble;
+    updates.chatBubbleExpiresAt = expires;
+    giftedFrame = frame;
+    giftedBubble = bubble;
   }
 
   await db.update(usersTable).set(updates).where(eq(usersTable.id, userId));
@@ -110,32 +110,70 @@ export async function awardChatXp(userId: number, amount = 8): Promise<{
   return { xp: newXp, level: newLevel, leveledUp, giftedFrame, giftedBubble };
 }
 
-/** İlk sohbet mesajında günlük animasyonlu balon (24 saat) — kalıcı/admin balonu ezmez */
-export async function maybeGrantDailyBubble(userId: number): Promise<string | null> {
+/** Günlük / süreli çerçeve + balon hediyesi (sohbet yazınca) */
+export async function maybeGrantDailyCosmetics(userId: number): Promise<{ frame?: string; bubble?: string } | null> {
   if (userId <= 0) return null;
   const [row] = await db.select({
+    level: usersTable.level,
+    role: usersTable.role,
+    isVip: usersTable.isVip,
+    vipUntil: usersTable.vipUntil,
+    avatarFrame: usersTable.avatarFrame,
+    avatarFrameExpiresAt: usersTable.avatarFrameExpiresAt,
     chatBubble: usersTable.chatBubble,
     chatBubbleExpiresAt: usersTable.chatBubbleExpiresAt,
   }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!row) return null;
+  if (row.role === "admin" || row.role === "moderator") return null;
 
   const now = new Date();
-  if (row.chatBubbleExpiresAt && row.chatBubbleExpiresAt > now) return null;
+  const vipActive = !!(row.isVip && (!row.vipUntil || row.vipUntil > now));
+  if (vipActive) return null; // VIP çerçevesi VIP bitene kadar
 
-  const { dailyBubbleKey, CHAT_BUBBLES } = await import("./chat-cosmetics");
-  const current = CHAT_BUBBLES.find((b) => b.key === row.chatBubble);
-  if (current?.adminOnly) return null;
-  // Kalıcı level hediyesi (expires yok, default değil) — günlük ezmesin
-  if (row.chatBubble && row.chatBubble !== "default" && !row.chatBubbleExpiresAt) return null;
+  const { dailyFrameKey, dailyBubbleKey, giftDurationMs, CHAT_BUBBLES, AVATAR_FRAMES } = await import("./chat-cosmetics");
+  const level = row.level ?? 1;
+  const out: { frame?: string; bubble?: string } = {};
+  const updates: Partial<typeof usersTable.$inferInsert> = { updatedAt: now };
+  const duration = giftDurationMs(level);
+  const expires = new Date(now.getTime() + duration);
 
-  const key = dailyBubbleKey(now);
-  const expires = new Date(now.getTime() + 24 * 3600 * 1000);
-  await db.update(usersTable).set({
-    chatBubble: key,
-    chatBubbleExpiresAt: expires,
-    updatedAt: now,
-  }).where(eq(usersTable.id, userId));
-  return key;
+  const frameExpired = !row.avatarFrameExpiresAt || row.avatarFrameExpiresAt <= now;
+  const frameDef = AVATAR_FRAMES.find((f) => f.key === row.avatarFrame);
+  const canGiftFrame =
+    frameExpired &&
+    (row.avatarFrame === "none" || !row.avatarFrame || !!row.avatarFrameExpiresAt) &&
+    !frameDef?.roleAuto;
+
+  if (canGiftFrame) {
+    const key = dailyFrameKey(now, level);
+    updates.avatarFrame = key;
+    updates.avatarFrameExpiresAt = expires;
+    out.frame = key;
+  }
+
+  const bubbleExpired = !row.chatBubbleExpiresAt || row.chatBubbleExpiresAt <= now;
+  const bubbleDef = CHAT_BUBBLES.find((b) => b.key === row.chatBubble);
+  const canGiftBubble =
+    bubbleExpired &&
+    !bubbleDef?.adminOnly &&
+    (row.chatBubble === "default" || !row.chatBubble || !!row.chatBubbleExpiresAt);
+
+  if (canGiftBubble) {
+    const key = dailyBubbleKey(now, level);
+    updates.chatBubble = key;
+    updates.chatBubbleExpiresAt = expires;
+    out.bubble = key;
+  }
+
+  if (!out.frame && !out.bubble) return null;
+  await db.update(usersTable).set(updates).where(eq(usersTable.id, userId));
+  return out;
+}
+
+/** @deprecated use maybeGrantDailyCosmetics */
+export async function maybeGrantDailyBubble(userId: number): Promise<string | null> {
+  const r = await maybeGrantDailyCosmetics(userId);
+  return r?.bubble ?? null;
 }
 
 /** Sitede açık kalma — ~2 dk’da bir küçük XP */
@@ -192,6 +230,9 @@ export async function ensureGamificationSchema(): Promise<void> {
   `);
   await db.execute(sql`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_frame text NOT NULL DEFAULT 'none';
+  `);
+  await db.execute(sql`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_frame_expires_at timestamptz;
   `);
   await db.execute(sql`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_bubble text NOT NULL DEFAULT 'default';

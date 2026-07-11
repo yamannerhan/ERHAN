@@ -335,7 +335,12 @@ export function ChatBubble() {
       }
     });
     s.on("chat:delete", ({ id }: { id: number }) => {
-      setMessages(prev => prev.filter(m => !isSystem(m) && (m as ExtMsg).id !== id));
+      setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id));
+    });
+    s.on("chat:pin", ({ id, isPinned }: { id: number; isPinned: boolean }) => {
+      setMessages(prev => prev.map(m =>
+        !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned } : m
+      ));
     });
     s.on("chat:cleared", () => setMessages([]));
     s.on("chat:join", ({ username }: { username: string }) => {
@@ -649,7 +654,7 @@ export function ChatBubble() {
           <div
             className={`${chatBubbleClass(
               chatMsg.chatBubble
-                || (chatMsg.userRole === "admin" ? "admin" : chatMsg.userRole === "moderator" ? "neon" : null),
+                || (chatMsg.userRole === "admin" ? "admin" : chatMsg.userRole === "moderator" ? "mod" : null),
               isMe,
             )} ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
           >
@@ -689,6 +694,11 @@ export function ChatBubble() {
                   isOwn={isMe}
                   align={isMe ? "end" : "start"}
                   compact
+                  canPin={user.role === "admin"}
+                  isPinned={!!chatMsg.isPinned}
+                  onPinned={(id, pinned) => setMessages(prev => prev.map(m =>
+                    !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
+                  ))}
                   onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
                 />
               )}
@@ -806,6 +816,23 @@ export function ChatBubble() {
                 📌 {chatPinned}
               </div>
             )}
+            {(() => {
+              const pinnedMsgs = messages.filter(m => !isSystem(m) && (m as ExtMsg).isPinned) as ExtMsg[];
+              if (pinnedMsgs.length === 0) return null;
+              return (
+                <div className="shrink-0 border-b border-sky-400/20 bg-sky-500/10 px-3 py-1.5 space-y-1 max-h-24 overflow-y-auto">
+                  {pinnedMsgs.map((pm) => (
+                    <div key={`bpin-${pm.id}`} className="flex items-start gap-1.5 text-[10px]">
+                      <span className="text-sky-300 shrink-0">📌</span>
+                      <div className="min-w-0">
+                        <span className="font-bold text-sky-200">{pm.displayName || pm.username}: </span>
+                        <span className="text-white/70 line-clamp-2">{pm.content}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             {showNotifSettings && user && (
               <div className="shrink-0 px-3 py-2 max-h-48 overflow-y-auto border-b border-white/10 bg-black/40">

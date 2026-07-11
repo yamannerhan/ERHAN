@@ -1186,7 +1186,9 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
     }
   };
 
-  const setCosmetics = async (userId: number, patch: { avatarFrame?: string; chatBubble?: string; bubbleHours?: number | null }) => {
+  const setCosmetics = async (userId: number, patch: {
+    avatarFrame?: string; chatBubble?: string; bubbleHours?: number | null; frameHours?: number | null;
+  }) => {
     setCosmoBusy(userId);
     try {
       const res = await apiCall(`/admin/users/${userId}/cosmetics`, "PATCH", patch) as {
@@ -1626,8 +1628,10 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                     >
                       {[
                         ["none", "Yok"], ["bronze", "Bronz"], ["silver", "Gümüş"], ["gold", "Altın"],
-                        ["emerald", "Zümrüt"], ["neon", "Neon"], ["fire", "Alev"], ["rainbow", "Gökkuşağı"],
-                        ["diamond", "Elmas"], ["royal", "Kraliyet"], ["pulse", "Nabız"], ["galaxy", "Galaksi"],
+                        ["emerald", "Zümrüt"], ["neon", "Neon"], ["fire", "Alev"], ["ocean", "Okyanus"],
+                        ["rainbow", "Gökkuşağı"], ["diamond", "Elmas"], ["royal", "Kraliyet"],
+                        ["pulse", "Nabız"], ["galaxy", "Galaksi"], ["vip", "VIP"], ["employer", "İşveren"],
+                        ["admin", "Yönetici"], ["moderator", "Moderatör"],
                       ].map(([k, n]) => <option key={k} value={k!}>{n}</option>)}
                     </select>
                   </div>
@@ -1642,7 +1646,7 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                       {[
                         ["default", "Varsayılan"], ["gold", "Altın"], ["glass", "Cam"], ["aurora", "Aurora"],
                         ["neon", "Neon"], ["fire", "Alev"], ["ocean", "Okyanus"], ["spark", "Kıvılcım"],
-                        ["vip", "VIP"], ["admin", "Yönetici"], ["holo", "Hologram"],
+                        ["vip", "VIP"], ["admin", "Yönetici"], ["mod", "Moderatör"], ["holo", "Hologram"],
                       ].map(([k, n]) => <option key={k} value={k!}>{n}</option>)}
                     </select>
                   </div>
@@ -1653,12 +1657,44 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                       onClick={() => void setCosmetics(u.id, { chatBubble: "spark", bubbleHours: 24 })}
                       className="text-[10px] px-2 py-1 rounded-lg bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 disabled:opacity-50"
                     >
-                      24s günlük balon hediye
+                      24s balon
                     </button>
                     <button
                       type="button"
                       disabled={cosmoBusy === u.id}
-                      onClick={() => void setCosmetics(u.id, { avatarFrame: "none", chatBubble: "default", bubbleHours: null })}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "gold", frameHours: 24 })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50"
+                    >
+                      1g çerçeve
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "neon", frameHours: 168 })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-50"
+                    >
+                      1h çerçeve
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "diamond", frameHours: 720 })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-violet-500/15 text-violet-300 hover:bg-violet-500/25 disabled:opacity-50"
+                    >
+                      1ay çerçeve
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "employer", frameHours: null })}
+                      className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+                    >
+                      İşveren çerçevesi
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cosmoBusy === u.id}
+                      onClick={() => void setCosmetics(u.id, { avatarFrame: "none", chatBubble: "default", bubbleHours: null, frameHours: null })}
                       className="text-[10px] px-2 py-1 rounded-lg bg-white/10 text-muted-foreground hover:bg-white/15 disabled:opacity-50"
                     >
                       Kozmetikleri sıfırla

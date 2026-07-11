@@ -7,7 +7,7 @@ import { filterProfanity } from "../lib/profanity";
 import { getExtraBannedWords } from "../lib/banned-words-cache";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
 import { emitRealtimeToUser } from "../lib/realtime";
-import { awardChatXp, levelNameColor, maybeGrantDailyBubble } from "../lib/levels";
+import { awardChatXp, levelNameColor, maybeGrantDailyCosmetics } from "../lib/levels";
 import { getBadgesForUsers, type PublicBadge } from "../lib/user-badges";
 import { resolveChatCosmetics } from "../lib/resolve-cosmetics";
 
@@ -196,10 +196,9 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     isDeleted: false,
   }).returning();
 
-  // Sohbet XP + level hediyesi
+  // Sohbet XP + level hediyesi (süreli çerçeve + balon)
   await awardChatXp(req.user!.id).catch(() => null);
-  // Günlük animasyonlu balon (24s) — günde ilk mesajlarda
-  await maybeGrantDailyBubble(req.user!.id).catch(() => null);
+  await maybeGrantDailyCosmetics(req.user!.id).catch(() => null);
 
   const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
   const allUsers = await db.select().from(usersTable);
@@ -371,8 +370,15 @@ router.post("/chat/messages/:id/pin", authMiddleware, requireAdmin, async (req, 
   const [msg] = await db.select({ isPinned: chatMessagesTable.isPinned }).from(chatMessagesTable).where(eq(chatMessagesTable.id, id));
   if (!msg) { res.status(404).json({ error: "Mesaj bulunamadı" }); return; }
 
-  await db.update(chatMessagesTable).set({ isPinned: !msg.isPinned }).where(eq(chatMessagesTable.id, id));
-  res.json({ success: true, message: msg.isPinned ? "Sabitleme kaldırıldı" : "Mesaj sabitlendi" });
+  const nextPinned = !msg.isPinned;
+  await db.update(chatMessagesTable).set({ isPinned: nextPinned }).where(eq(chatMessagesTable.id, id));
+
+  const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
+  if (io) {
+    io.emit("chat:pin", { id, isPinned: nextPinned });
+  }
+
+  res.json({ success: true, isPinned: nextPinned, message: nextPinned ? "Mesaj sabitlendi" : "Sabitleme kaldırıldı" });
 });
 
 router.get("/chat/online", async (_req, res): Promise<void> => {

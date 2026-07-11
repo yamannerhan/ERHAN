@@ -28,45 +28,57 @@ setRealtimeServer(io);
 app.set("io", io);
 setBotIo(io);
 
-export async function saveChatMessage(userId: number, content: string): Promise<void> {
+export async function saveChatMessage(userId: number, content: string): Promise<{ id: number; createdAt: Date } | null> {
   try {
-    await db.insert(chatMessagesTable).values({ userId, content, isPinned: false });
+    const [row] = await db.insert(chatMessagesTable).values({
+      userId,
+      content,
+      isPinned: false,
+      isDeleted: false,
+    }).returning({ id: chatMessagesTable.id, createdAt: chatMessagesTable.createdAt });
+    return row ?? null;
   } catch (e) {
     logger.error(e, "saveChatMessage error");
+    return null;
   }
 }
 
 async function trimChatHistory(): Promise<void> {
   try {
-    // Üye mesajları (gerçek userId > 0): son 100 korunur — Üyeler sekmesi için
-    // Bot/sahte (userId <= 0): son 80 korunur — Tümü sekmesi ayrı kalır
+    // Sadece görünür (silinmemiş) mesajları say — soft-delete trim penceresini kirletmesin
     const realKept = await db
       .select({ id: chatMessagesTable.id })
       .from(chatMessagesTable)
-      .where(sql`${chatMessagesTable.userId} > 0`)
+      .where(and(sql`${chatMessagesTable.userId} > 0`, eq(chatMessagesTable.isDeleted, false)))
       .orderBy(desc(chatMessagesTable.createdAt))
-      .limit(100);
+      .limit(200);
 
     const botKept = await db
       .select({ id: chatMessagesTable.id })
       .from(chatMessagesTable)
-      .where(sql`${chatMessagesTable.userId} <= 0`)
+      .where(and(sql`${chatMessagesTable.userId} <= 0`, eq(chatMessagesTable.isDeleted, false)))
       .orderBy(desc(chatMessagesTable.createdAt))
-      .limit(80);
+      .limit(120);
 
-    if (realKept.length >= 100) {
+    if (realKept.length >= 200) {
       const minRealId = Math.min(...realKept.map((r) => r.id));
       await db
         .delete(chatMessagesTable)
         .where(and(sql`${chatMessagesTable.userId} > 0`, lt(chatMessagesTable.id, minRealId)));
     }
 
-    if (botKept.length >= 80) {
+    if (botKept.length >= 120) {
       const minBotId = Math.min(...botKept.map((r) => r.id));
       await db
         .delete(chatMessagesTable)
         .where(and(sql`${chatMessagesTable.userId} <= 0`, lt(chatMessagesTable.id, minBotId)));
     }
+
+    // Soft-deleted eski kayıtları temizle
+    await db.delete(chatMessagesTable).where(and(
+      eq(chatMessagesTable.isDeleted, true),
+      lt(chatMessagesTable.createdAt, new Date(Date.now() - 2 * 24 * 3600 * 1000)),
+    ));
   } catch (e) {
     logger.error(e, "trimChatHistory error");
   }
@@ -79,10 +91,15 @@ export const BOT_USER = {
   userNameColor: "#06B6D4", userNameAnimated: false, isBot: true,
 };
 
-export function makeBotMsg(content: string, replyToUsername?: string | null) {
+export function makeBotMsg(
+  content: string,
+  replyToUsername?: string | null,
+  id?: number,
+  createdAt?: string,
+) {
   return {
     ...BOT_USER,
-    id: Date.now() + Math.random(),
+    id: id ?? Date.now(),
     content,
     replyToId: null,
     replyToUsername: replyToUsername ?? null,
@@ -90,8 +107,23 @@ export function makeBotMsg(content: string, replyToUsername?: string | null) {
     isPinned: false,
     mentions: [],
     reactions: [],
-    createdAt: new Date().toISOString(),
+    level: 1,
+    badges: [],
+    avatarFrame: "none",
+    chatBubble: "default",
+    createdAt: createdAt ?? new Date().toISOString(),
   };
+}
+
+/** DB’ye yazıp aynı id ile yayınla — çift mesajı önler */
+async function saveAndEmit(
+  userId: number,
+  content: string,
+  build: (id: number, createdAt: string) => object,
+): Promise<void> {
+  const saved = await saveChatMessage(userId, content);
+  if (!saved) return;
+  io.emit("chat:message", build(saved.id, saved.createdAt.toISOString()));
 }
 
 // ── Dinamik ilan verisi ───────────────────────────────────────────
@@ -153,15 +185,13 @@ function scheduleHourlyReminder() {
     void (async () => {
       if (await isGuvenlikBotEnabled()) {
         const hourlyMsg = getHourlyMsg(turkeyHour());
-        void saveChatMessage(0, hourlyMsg);
-        io.emit("chat:message", makeBotMsg(hourlyMsg));
+        await saveAndEmit(0, hourlyMsg, (id, at) => makeBotMsg(hourlyMsg, null, id, at));
       }
     })();
     setInterval(async () => {
       if (!(await isGuvenlikBotEnabled())) return;
       const m = getHourlyMsg(turkeyHour());
-      void saveChatMessage(0, m);
-      io.emit("chat:message", makeBotMsg(m));
+      await saveAndEmit(0, m, (id, at) => makeBotMsg(m, null, id, at));
     }, 60 * 60 * 1000);
   }, msUntilNextHour);
 }
@@ -211,8 +241,7 @@ function scheduleBotMessage() {
     try {
       if (await isGuvenlikBotEnabled()) {
         const msg = await getDynamicBotMsg();
-        void saveChatMessage(0, msg);
-        io.emit("chat:message", makeBotMsg(msg));
+        await saveAndEmit(0, msg, (id, at) => makeBotMsg(msg, null, id, at));
         logger.info("[BOT] GuvenlikBot mesaj gönderdi");
       }
     } catch(e) { logger.error({ err: e }, "[BOT] GuvenlikBot hata"); }
@@ -657,10 +686,16 @@ function getNextStandalone(): string {
   return STANDALONE_MSGS[idx]!;
 }
 
-function makeFakeMsg(user: typeof FAKE_USERS[0], content: string, replyToUsername?: string): object {
+function makeFakeMsg(
+  user: typeof FAKE_USERS[0],
+  content: string,
+  replyToUsername?: string,
+  id?: number,
+  createdAt?: string,
+): object {
   const fullContent = replyToUsername ? `@${replyToUsername} ${content}` : content;
   return {
-    id: Date.now() + Math.random(),
+    id: id ?? Date.now(),
     content: fullContent,
     userId: user.id,
     username: user.username,
@@ -675,7 +710,11 @@ function makeFakeMsg(user: typeof FAKE_USERS[0], content: string, replyToUsernam
     isPinned: false,
     mentions: replyToUsername ? [replyToUsername] : [],
     reactions: [],
-    createdAt: new Date().toISOString(),
+    level: 1,
+    badges: [],
+    avatarFrame: "none",
+    chatBubble: "default",
+    createdAt: createdAt ?? new Date().toISOString(),
     isFake: true,
   };
 }
@@ -703,8 +742,7 @@ async function maybeBotReply(question: string, askerUsername: string) {
   setTimeout(() => {
     void (async () => {
       if (!(await isGuvenlikBotEnabled())) return;
-      void saveChatMessage(0, content);
-      io.emit("chat:message", { ...makeBotMsg(content, askerUsername), content });
+      await saveAndEmit(0, content, (id, at) => makeBotMsg(content, askerUsername, id, at));
     })();
   }, 8000 + Math.random() * 12000);
 }
@@ -721,16 +759,14 @@ function scheduleFakeConversation() {
       if (roll < 0.35) {
         const user = getRandomUser();
         const standaloneContent = getNextStandalone();
-        void saveChatMessage(user.id, standaloneContent);
-        io.emit("chat:message", makeFakeMsg(user, standaloneContent));
+        await saveAndEmit(user.id, standaloneContent, (id, at) => makeFakeMsg(user, standaloneContent, undefined, id, at));
       } else {
         const pair = getNextConvPair();
         const stats = await getListingStats();
         const userA = getRandomUser();
         const userB = getRandomUser(userA);
 
-        void saveChatMessage(userA.id, pair.a);
-        io.emit("chat:message", makeFakeMsg(userA, pair.a));
+        await saveAndEmit(userA.id, pair.a, (id, at) => makeFakeMsg(userA, pair.a, undefined, id, at));
 
         await maybeBotReply(pair.a, userA.username);
 
@@ -739,8 +775,7 @@ function scheduleFakeConversation() {
             if (!(await isFakeBotEnabled())) return;
             const answer = pair.bTemplate(stats);
             const fullAnswer = `@${userA.username} ${answer}`;
-            void saveChatMessage(userB.id, fullAnswer);
-            io.emit("chat:message", makeFakeMsg(userB, answer, userA.username));
+            await saveAndEmit(userB.id, fullAnswer, (id, at) => makeFakeMsg(userB, answer, userA.username, id, at));
           })();
         }, pair.delay);
       }
@@ -851,14 +886,15 @@ const INFO_BOT = {
   userNameColor: "#22C55E", userNameAnimated: false, isBot: true,
 };
 
-function makeInfoMsg(content: string) {
+function makeInfoMsg(content: string, id?: number, createdAt?: string) {
   return {
     ...INFO_BOT,
-    id: Date.now() + Math.random(),
+    id: id ?? Date.now(),
     content,
     replyToId: null, replyToUsername: null, replyToContent: null,
     isPinned: false, mentions: [], reactions: [],
-    createdAt: new Date().toISOString(),
+    level: 1, badges: [], avatarFrame: "none", chatBubble: "default",
+    createdAt: createdAt ?? new Date().toISOString(),
   };
 }
 function wrapInfoContent(raw: string): string {
@@ -971,8 +1007,7 @@ function scheduleInfoBot() {
     try {
       if (await isBilgiBotEnabled()) {
         const wrapped = wrapInfoContent(getNextInfoMsg());
-        void saveChatMessage(-999, wrapped);
-        io.emit("chat:message", makeInfoMsg(wrapped));
+        await saveAndEmit(-999, wrapped, (id, at) => makeInfoMsg(wrapped, id, at));
         logger.info("[BOT] Bilgi botu mesaj gönderdi");
       }
     } catch (e) { logger.error({ err: e }, "[BOT] Bilgi botu hata"); }
@@ -1016,8 +1051,7 @@ setTimeout(() => {
   void (async () => {
     if (await isBilgiBotEnabled()) {
       const firstWrapped = wrapInfoContent(getNextInfoMsg());
-      void saveChatMessage(-999, firstWrapped);
-      io.emit("chat:message", makeInfoMsg(firstWrapped));
+      await saveAndEmit(-999, firstWrapped, (id, at) => makeInfoMsg(firstWrapped, id, at));
     }
     scheduleInfoBot();
   })();

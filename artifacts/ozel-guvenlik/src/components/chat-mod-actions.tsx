@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Ban, Trash2, ShieldOff } from "lucide-react";
+import { Ban, Trash2, ShieldOff, Pin, PinOff } from "lucide-react";
 
 function getToken() {
   return localStorage.getItem("auth_token") ?? "";
@@ -22,12 +22,16 @@ type Props = {
   onDeleted?: (messageId: number) => void;
   onMuted?: (userId: number) => void;
   onUnmuted?: (userId: number) => void;
+  /** Admin mesaj sabitleme */
+  canPin?: boolean;
+  isPinned?: boolean;
+  onPinned?: (messageId: number, isPinned: boolean) => void;
   compact?: boolean;
 };
 
 /**
  * Admin / moderatör: tek mesaj sil + sohbet yasağı (mute) / kaldırma.
- * Hesap banı değil — sadece sohbet yazma yasağı (mutedUntil).
+ * Admin: mesaj sabitleme.
  */
 export function ChatModActions({
   messageId,
@@ -38,6 +42,9 @@ export function ChatModActions({
   onDeleted,
   onMuted,
   onUnmuted,
+  canPin,
+  isPinned,
+  onPinned,
   compact,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -66,6 +73,28 @@ export function ChatModActions({
       }
       onDeleted?.(messageId);
       setOpen(false);
+    } catch {
+      setErr("Bağlantı hatası");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const togglePin = async () => {
+    if (!canPin) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/chat/messages/${messageId}/pin`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string; isPinned?: boolean };
+      if (!r.ok) {
+        setErr(d.error ?? "Sabitlenemedi");
+        return;
+      }
+      onPinned?.(messageId, !!d.isPinned);
     } catch {
       setErr("Bağlantı hatası");
     } finally {
@@ -133,6 +162,22 @@ export function ChatModActions({
   return (
     <div className={`relative flex flex-col gap-0.5 ${align === "end" ? "items-end" : "items-start"}`}>
       <div className={`flex items-center gap-1 flex-wrap ${align === "end" ? "justify-end" : "justify-start"}`}>
+        {canPin && (
+          <button
+            type="button"
+            onClick={() => void togglePin()}
+            disabled={busy}
+            className={`flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-semibold disabled:opacity-50 ${
+              isPinned
+                ? "text-amber-300 hover:bg-amber-500/15"
+                : "text-sky-300/90 hover:bg-sky-500/15"
+            } ${compact ? "text-[9px]" : "text-[10px]"}`}
+            title={isPinned ? "Sabitlemeyi kaldır" : "Mesajı sabitle"}
+          >
+            {isPinned ? <PinOff className={compact ? "w-2.5 h-2.5" : "w-3 h-3"} /> : <Pin className={compact ? "w-2.5 h-2.5" : "w-3 h-3"} />}
+            {isPinned ? "Kaldır" : "Sabitle"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void deleteMessage()}

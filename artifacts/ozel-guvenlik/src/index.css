@@ -2058,8 +2058,58 @@ html:not(.dark) .og-pt-row {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
+  position: relative;
 }
 .og-avatar-frame-inner { position: relative; z-index: 1; }
+.og-frame-none {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+}
+.og-frame-role-label {
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  transform: translateX(-50%);
+  z-index: 2;
+  font-size: 6.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: #0a0d14;
+  background: linear-gradient(90deg, #facc15, #f59e0b);
+  box-shadow: 0 0 8px rgba(250,204,21,0.55);
+  pointer-events: none;
+  animation: og-label-pulse 2.2s ease-in-out infinite;
+}
+.og-frame-admin .og-frame-role-label {
+  background: linear-gradient(90deg, #facc15, #ef4444, #facc15);
+  background-size: 200% 100%;
+  animation: og-rainbow-border 2.4s linear infinite, og-label-pulse 2.2s ease-in-out infinite;
+  color: #1a0a00;
+}
+.og-frame-moderator .og-frame-role-label {
+  background: linear-gradient(90deg, #60a5fa, #93c5fd);
+  color: #0b1220;
+}
+.og-frame-vip .og-frame-role-label {
+  background: linear-gradient(90deg, #fde68a, #f59e0b, #fde68a);
+  background-size: 200% 100%;
+  animation: og-rainbow-border 3s linear infinite, og-label-pulse 2s ease-in-out infinite;
+}
+.og-frame-employer .og-frame-role-label {
+  background: linear-gradient(90deg, #34d399, #a7f3d0);
+  color: #052e1a;
+}
+@keyframes og-label-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); opacity: 0.95; }
+  50% { transform: translateX(-50%) scale(1.06); opacity: 1; }
+}
 @keyframes og-pulse-ring {
   0%, 100% { box-shadow: 0 0 0 2px rgba(250,204,21,0.5), 0 0 12px rgba(250,204,21,0.35); }
   50% { box-shadow: 0 0 0 4px rgba(250,204,21,0.85), 0 0 22px rgba(250,204,21,0.55); }
@@ -2072,30 +2122,68 @@ html:not(.dark) .og-pt-row {
   0% { background-position: 0% 50%; }
   100% { background-position: 200% 50%; }
 }
-.og-frame-bronze { background: linear-gradient(135deg,#cd7f32,#8b5a2b); padding: 2px; box-shadow: 0 0 10px rgba(205,127,50,0.45); border-radius: 999px; }
-.og-frame-silver { background: linear-gradient(135deg,#e2e8f0,#94a3b8); padding: 2px; box-shadow: 0 0 10px rgba(148,163,184,0.5); border-radius: 999px; }
-.og-frame-gold { background: linear-gradient(135deg,#facc15,#f59e0b,#facc15); padding: 2px; box-shadow: 0 0 14px rgba(250,204,21,0.55); border-radius: 999px; }
-.og-frame-emerald { background: linear-gradient(135deg,#34d399,#059669); padding: 2px; box-shadow: 0 0 12px rgba(16,185,129,0.5); border-radius: 999px; }
-.og-frame-neon { background: linear-gradient(135deg,#22d3ee,#a855f7,#ec4899); padding: 2px; box-shadow: 0 0 16px rgba(34,211,238,0.55); border-radius: 999px; }
-.og-frame-fire { background: linear-gradient(135deg,#f97316,#ef4444,#fbbf24); padding: 2px; animation: og-fire-glow 1.6s ease-in-out infinite; border-radius: 999px; }
+@keyframes og-frame-spin-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(250,204,21,0.45)); }
+  50% { filter: drop-shadow(0 0 14px rgba(250,204,21,0.85)); }
+}
+@keyframes og-frame-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+.og-frame-bronze { background: linear-gradient(135deg,#cd7f32,#8b5a2b,#e8a85a); background-size: 200% 200%; padding: 2px; box-shadow: 0 0 10px rgba(205,127,50,0.45); border-radius: 999px; animation: og-rainbow-border 4s linear infinite, og-frame-breathe 3s ease-in-out infinite; }
+.og-frame-silver { background: linear-gradient(135deg,#e2e8f0,#94a3b8,#f8fafc); background-size: 200% 200%; padding: 2px; box-shadow: 0 0 10px rgba(148,163,184,0.5); border-radius: 999px; animation: og-rainbow-border 3.5s linear infinite, og-frame-breathe 3.2s ease-in-out infinite; }
+.og-frame-gold { background: linear-gradient(135deg,#facc15,#f59e0b,#fde68a,#facc15); background-size: 200% 100%; padding: 2px; box-shadow: 0 0 14px rgba(250,204,21,0.55); border-radius: 999px; animation: og-rainbow-border 2.8s linear infinite, og-frame-spin-glow 2s ease-in-out infinite; }
+.og-frame-emerald { background: linear-gradient(135deg,#34d399,#059669,#6ee7b7); background-size: 200% 200%; padding: 2px; box-shadow: 0 0 12px rgba(16,185,129,0.5); border-radius: 999px; animation: og-rainbow-border 3.2s linear infinite, og-frame-breathe 2.8s ease-in-out infinite; }
+.og-frame-neon { background: linear-gradient(135deg,#22d3ee,#a855f7,#ec4899,#22d3ee); background-size: 220% 100%; padding: 2px; box-shadow: 0 0 16px rgba(34,211,238,0.55); border-radius: 999px; animation: og-rainbow-border 2.2s linear infinite; }
+.og-frame-fire { background: linear-gradient(135deg,#f97316,#ef4444,#fbbf24,#f97316); background-size: 200% 100%; padding: 2px; animation: og-fire-glow 1.6s ease-in-out infinite, og-rainbow-border 2.4s linear infinite; border-radius: 999px; }
+.og-frame-ocean { background: linear-gradient(135deg,#0ea5e9,#0369a1,#22d3ee,#0ea5e9); background-size: 200% 100%; padding: 2px; box-shadow: 0 0 14px rgba(14,165,233,0.5); border-radius: 999px; animation: og-rainbow-border 3s linear infinite, og-frame-breathe 2.6s ease-in-out infinite; }
 .og-frame-rainbow { background: linear-gradient(90deg,#ef4444,#f59e0b,#22c55e,#3b82f6,#a855f7,#ef4444); background-size: 200% 100%; padding: 2px; animation: og-rainbow-border 2.8s linear infinite; border-radius: 999px; }
-.og-frame-diamond { background: linear-gradient(135deg,#e0f2fe,#67e8f9,#c4b5fd,#e0f2fe); padding: 2.5px; box-shadow: 0 0 18px rgba(103,232,249,0.55); border-radius: 999px; }
-.og-frame-royal { background: linear-gradient(135deg,#facc15,#7c3aed,#facc15); padding: 2.5px; box-shadow: 0 0 20px rgba(250,204,21,0.5); border-radius: 999px; }
+.og-frame-diamond { background: linear-gradient(135deg,#e0f2fe,#67e8f9,#c4b5fd,#e0f2fe); background-size: 200% 200%; padding: 2.5px; box-shadow: 0 0 18px rgba(103,232,249,0.55); border-radius: 999px; animation: og-rainbow-border 3.5s linear infinite, og-frame-spin-glow 2.4s ease-in-out infinite; }
+.og-frame-royal { background: linear-gradient(135deg,#facc15,#7c3aed,#facc15,#a855f7); background-size: 200% 100%; padding: 2.5px; box-shadow: 0 0 20px rgba(250,204,21,0.5); border-radius: 999px; animation: og-rainbow-border 3s linear infinite; }
 .og-frame-pulse { background: #facc15; padding: 2px; animation: og-pulse-ring 1.4s ease-in-out infinite; border-radius: 999px; }
 .og-frame-galaxy { background: linear-gradient(135deg,#312e81,#7c3aed,#06b6d4,#312e81); background-size: 200% 200%; padding: 2.5px; animation: og-rainbow-border 4s linear infinite; border-radius: 999px; }
+.og-frame-vip { background: linear-gradient(135deg,#facc15,#b45309,#fde68a,#f59e0b,#facc15); background-size: 220% 100%; padding: 2.5px; border-radius: 999px; box-shadow: 0 0 18px rgba(250,204,21,0.65); animation: og-rainbow-border 2.5s linear infinite, og-frame-spin-glow 1.8s ease-in-out infinite; }
+.og-frame-employer { background: linear-gradient(135deg,#10b981,#047857,#6ee7b7,#10b981); background-size: 200% 100%; padding: 2.5px; border-radius: 999px; box-shadow: 0 0 16px rgba(16,185,129,0.55); animation: og-rainbow-border 3s linear infinite, og-frame-breathe 2.4s ease-in-out infinite; }
+.og-frame-admin { background: linear-gradient(135deg,#facc15,#ef4444,#f59e0b,#dc2626,#facc15); background-size: 240% 100%; padding: 3px; border-radius: 999px; box-shadow: 0 0 20px rgba(239,68,68,0.45), 0 0 10px rgba(250,204,21,0.5); animation: og-rainbow-border 2s linear infinite, og-pulse-ring 1.8s ease-in-out infinite; }
+.og-frame-moderator { background: linear-gradient(135deg,#3b82f6,#1d4ed8,#60a5fa,#2563eb); background-size: 200% 100%; padding: 2.5px; border-radius: 999px; box-shadow: 0 0 16px rgba(59,130,246,0.55); animation: og-rainbow-border 2.8s linear infinite, og-frame-breathe 2.5s ease-in-out infinite; }
 
-/* ── Chat bubbles ──────────────────────────────────────────── */
-.og-chat-bubble { position: relative; border-radius: 1rem; padding: 0.55rem 0.85rem; font-size: 0.75rem; color: #fff; overflow: hidden; }
-.og-bubble-default { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
-.og-bubble-me.og-bubble-default { background: rgba(18,22,31,0.95); border: 1.5px solid rgba(245,197,24,0.75); box-shadow: 0 0 12px rgba(245,197,24,0.15); }
-.og-bubble-gold { background: linear-gradient(145deg, rgba(250,204,21,0.28), rgba(180,83,9,0.35)); border: 1px solid rgba(250,204,21,0.55); box-shadow: 0 0 16px rgba(250,204,21,0.25); }
-.og-bubble-glass { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.28); backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.25); }
-.og-bubble-aurora { background: linear-gradient(120deg, rgba(56,189,248,0.35), rgba(168,85,247,0.35), rgba(236,72,153,0.3)); background-size: 200% 200%; border: 1px solid rgba(167,139,250,0.5); animation: og-rainbow-border 5s ease infinite; }
-.og-bubble-neon { background: rgba(15,23,42,0.85); border: 1px solid rgba(34,211,238,0.7); box-shadow: 0 0 14px rgba(34,211,238,0.45), inset 0 0 12px rgba(34,211,238,0.12); }
-.og-bubble-fire { background: linear-gradient(145deg, rgba(239,68,68,0.45), rgba(249,115,22,0.4)); border: 1px solid rgba(251,146,60,0.65); box-shadow: 0 0 16px rgba(239,68,68,0.35); animation: og-fire-glow 2s ease-in-out infinite; }
-.og-bubble-ocean { background: linear-gradient(145deg, rgba(14,165,233,0.4), rgba(6,78,59,0.45)); border: 1px solid rgba(56,189,248,0.5); box-shadow: 0 0 14px rgba(14,165,233,0.3); }
-.og-bubble-spark { background: linear-gradient(145deg, rgba(250,204,21,0.2), rgba(244,114,182,0.25)); border: 1px solid rgba(251,191,36,0.55); box-shadow: 0 0 18px rgba(251,191,36,0.35); }
-.og-bubble-vip { background: linear-gradient(145deg, rgba(146,64,14,0.75), rgba(8,47,73,0.7)); border: 1px solid rgba(250,204,21,0.6); box-shadow: 0 0 20px rgba(250,204,21,0.3); }
-.og-bubble-admin { background: linear-gradient(145deg, rgba(120,20,10,0.75), rgba(90,45,5,0.7)); border: 1px solid rgba(250,204,21,0.55); box-shadow: 0 0 20px rgba(239,68,68,0.28), 0 0 8px rgba(250,204,21,0.2); }
-.og-bubble-holo { background: linear-gradient(120deg, rgba(255,255,255,0.15), rgba(96,165,250,0.25), rgba(244,114,182,0.2), rgba(255,255,255,0.12)); background-size: 300% 300%; border: 1px solid rgba(255,255,255,0.35); animation: og-rainbow-border 3.5s linear infinite; }
+/* ── Chat bubbles — ince, animasyonlu ──────────────────────── */
+.og-chat-bubble {
+  position: relative;
+  border-radius: 0.85rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #fff;
+  overflow: hidden;
+  border-width: 1px;
+  border-style: solid;
+}
+.og-chat-bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.08) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: og-bubble-sheen 4.5s ease-in-out infinite;
+  opacity: 0.55;
+}
+@keyframes og-bubble-sheen {
+  0% { background-position: 120% 0; }
+  100% { background-position: -40% 0; }
+}
+.og-bubble-default { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+.og-bubble-me.og-bubble-default { background: rgba(18,22,31,0.92); border-color: rgba(245,197,24,0.55); box-shadow: 0 0 10px rgba(245,197,24,0.12); }
+.og-bubble-gold { background: linear-gradient(145deg, rgba(250,204,21,0.22), rgba(180,83,9,0.28)); border-color: rgba(250,204,21,0.5); box-shadow: 0 0 12px rgba(250,204,21,0.2); animation: og-frame-spin-glow 2.8s ease-in-out infinite; }
+.og-bubble-glass { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.22); }
+.og-bubble-aurora { background: linear-gradient(120deg, rgba(56,189,248,0.3), rgba(168,85,247,0.28), rgba(236,72,153,0.25)); background-size: 200% 200%; border-color: rgba(167,139,250,0.45); animation: og-rainbow-border 5s ease infinite; }
+.og-bubble-neon { background: rgba(15,23,42,0.8); border-color: rgba(34,211,238,0.6); box-shadow: 0 0 12px rgba(34,211,238,0.35), inset 0 0 10px rgba(34,211,238,0.1); animation: og-frame-spin-glow 2.4s ease-in-out infinite; }
+.og-bubble-fire { background: linear-gradient(145deg, rgba(239,68,68,0.38), rgba(249,115,22,0.32)); border-color: rgba(251,146,60,0.55); box-shadow: 0 0 12px rgba(239,68,68,0.28); animation: og-fire-glow 2s ease-in-out infinite; }
+.og-bubble-ocean { background: linear-gradient(145deg, rgba(14,165,233,0.32), rgba(6,78,59,0.35)); border-color: rgba(56,189,248,0.45); box-shadow: 0 0 12px rgba(14,165,233,0.25); animation: og-frame-breathe 3s ease-in-out infinite; }
+.og-bubble-spark { background: linear-gradient(145deg, rgba(250,204,21,0.16), rgba(244,114,182,0.2)); border-color: rgba(251,191,36,0.45); box-shadow: 0 0 14px rgba(251,191,36,0.28); animation: og-frame-spin-glow 2.2s ease-in-out infinite; }
+.og-bubble-vip { background: linear-gradient(145deg, rgba(146,64,14,0.65), rgba(8,47,73,0.6)); border-color: rgba(250,204,21,0.55); box-shadow: 0 0 16px rgba(250,204,21,0.28); animation: og-frame-spin-glow 2s ease-in-out infinite; }
+.og-bubble-admin { background: linear-gradient(145deg, rgba(120,20,10,0.7), rgba(90,45,5,0.65)); border-color: rgba(250,204,21,0.5); box-shadow: 0 0 16px rgba(239,68,68,0.25), 0 0 6px rgba(250,204,21,0.18); animation: og-pulse-ring 2.2s ease-in-out infinite; }
+.og-bubble-mod { background: linear-gradient(145deg, rgba(30,58,138,0.65), rgba(15,23,42,0.7)); border-color: rgba(96,165,250,0.55); box-shadow: 0 0 14px rgba(59,130,246,0.3); animation: og-frame-breathe 2.6s ease-in-out infinite; }
+.og-bubble-holo { background: linear-gradient(120deg, rgba(255,255,255,0.12), rgba(96,165,250,0.22), rgba(244,114,182,0.18), rgba(255,255,255,0.1)); background-size: 300% 300%; border-color: rgba(255,255,255,0.3); animation: og-rainbow-border 3.5s linear infinite; }
 

@@ -1,4 +1,4 @@
-import { db, listingsTable, adminSettingsTable } from "@workspace/db";
+import { db, listingsTable, adminSettingsTable, chatMessagesTable } from "@workspace/db";
 import { eq, count, sql } from "drizzle-orm";
 
 type IO = { emit: (event: string, data: unknown) => void };
@@ -12,10 +12,10 @@ const BOT_USER = {
   userNameColor: "#06B6D4", userNameAnimated: false, isBot: true,
 };
 
-function makeBotMsg(content: string, replyToUsername?: string) {
+function makeBotMsg(content: string, replyToUsername?: string, id?: number, createdAt?: string) {
   return {
     ...BOT_USER,
-    id: Date.now() + Math.random(),
+    id: id ?? Date.now(),
     content,
     replyToId: null,
     replyToUsername: replyToUsername ?? null,
@@ -23,8 +23,28 @@ function makeBotMsg(content: string, replyToUsername?: string) {
     isPinned: false,
     mentions: replyToUsername ? [replyToUsername] : [],
     reactions: [],
-    createdAt: new Date().toISOString(),
+    level: 1,
+    badges: [],
+    avatarFrame: "none",
+    chatBubble: "default",
+    createdAt: createdAt ?? new Date().toISOString(),
   };
+}
+
+async function saveAndEmitBot(content: string, replyToUsername?: string) {
+  if (!_io) return;
+  try {
+    const [row] = await db.insert(chatMessagesTable).values({
+      userId: 0,
+      content,
+      isPinned: false,
+      isDeleted: false,
+    }).returning({ id: chatMessagesTable.id, createdAt: chatMessagesTable.createdAt });
+    if (!row) return;
+    _io.emit("chat:message", makeBotMsg(content, replyToUsername, row.id, row.createdAt.toISOString()));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── Bot enable/disable cache ───────────────────────────────────────
@@ -439,6 +459,6 @@ export function triggerContextualReply(content: string, username: string, role: 
       reply = genericFallback(username, stats);
     }
 
-    _io!.emit("chat:message", makeBotMsg(reply, username));
+    void saveAndEmitBot(reply, username);
   }, delay);
 }

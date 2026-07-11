@@ -184,7 +184,7 @@ export default function Chat() {
 
   useEffect(() => {
     if (!initialData) return;
-    const list = [...initialData as ExtMsg[]];
+    const list = (initialData as ExtMsg[]).filter((m) => isDbMessageId(m.id));
     setMessages(list);
     rememberMessageIds(list);
   }, [initialData]);
@@ -203,7 +203,10 @@ export default function Chat() {
   const rememberMessageIds = (items: AnyMsg[]) => {
     const ids = items.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id);
     messageIdsRef.current = new Set(ids);
-    lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...ids, 0);
+    const dbIds = ids.filter(isDbMessageId);
+    if (dbIds.length > 0) {
+      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...dbIds);
+    }
   };
 
   const addMsg = useCallback((msg: AnyMsg): boolean => {
@@ -217,7 +220,9 @@ export default function Chat() {
     } else {
       const id = (msg as ExtMsg).id;
       messageIdsRef.current.add(id);
-      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, id);
+      if (isDbMessageId(id)) {
+        lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, id);
+      }
     }
 
     setMessages(prev => {
@@ -236,7 +241,9 @@ export default function Chat() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const url = after > 0 ? `/api/chat/messages?limit=25&after=${after}` : "/api/chat/messages?limit=50";
+      const url = after > 0 && isDbMessageId(after)
+        ? `/api/chat/messages?limit=100&after=${after}`
+        : "/api/chat/messages?limit=100";
       const res = await fetch(url, {
         headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
         cache: "no-store",
@@ -245,9 +252,9 @@ export default function Chat() {
       if (!Array.isArray(data)) return;
       setMessages(prev => {
         const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
-        const incoming = data.filter(m => !existingIds.has(m.id));
+        const incoming = data.filter(m => !existingIds.has(m.id) && isDbMessageId(m.id));
         if (incoming.length === 0) return prev;
-        const next = [...prev, ...incoming];
+        const next = [...prev, ...incoming].slice(-200);
         rememberMessageIds(next);
         return next;
       });
@@ -295,6 +302,11 @@ export default function Chat() {
     });
     s.on("chat:delete", ({ id }: { id: number }) => {
       setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id));
+    });
+    s.on("chat:pin", ({ id, isPinned }: { id: number; isPinned: boolean }) => {
+      setMessages(prev => prev.map(m =>
+        !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned } : m
+      ));
     });
     s.on("chat:join", ({ username }: { username: string }) => {
       addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
@@ -544,10 +556,9 @@ export default function Chat() {
               <div
                 className={`${chatBubbleClass(
                   chatMsg.chatBubble
-                    || (chatMsg.userRole === "admin" ? "admin" : chatMsg.isVip ? "vip" : chatMsg.userRole === "moderator" ? "neon" : null),
+                    || (chatMsg.userRole === "admin" ? "admin" : chatMsg.isVip ? "vip" : chatMsg.userRole === "moderator" ? "mod" : null),
                   isMe,
                 )} text-sm ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
-                style={{ fontSize: "0.875rem", padding: "0.625rem 1rem" }}
               >
                 {chatMsg.replyToId && (() => {
                   const repliedToMe = chatMsg.replyToUsername === user?.username;
@@ -597,6 +608,11 @@ export default function Chat() {
                         targetRole={chatMsg.userRole}
                         isOwn={isMe}
                         align={isMe ? "end" : "start"}
+                        canPin={user.role === "admin"}
+                        isPinned={!!chatMsg.isPinned}
+                        onPinned={(id, pinned) => setMessages(prev => prev.map(m =>
+                          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
+                        ))}
                         onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
                       />
                     </div>
@@ -806,6 +822,23 @@ export default function Chat() {
           ))}
           <span className="ml-auto text-[10px] text-white/30 self-center">Üyeler = gerçek kullanıcılar</span>
         </div>
+        {(() => {
+          const pinnedMsgs = messages.filter(m => !isSystem(m) && (m as ExtMsg).isPinned) as ExtMsg[];
+          if (pinnedMsgs.length === 0) return null;
+          return (
+            <div className="shrink-0 border-b border-amber-400/20 bg-amber-400/8 px-3 py-2 space-y-1.5 max-h-28 overflow-y-auto">
+              {pinnedMsgs.map((pm) => (
+                <div key={`pin-${pm.id}`} className="flex items-start gap-2 text-[11px]">
+                  <span className="text-amber-300 shrink-0 mt-0.5">📌</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-bold text-amber-200/90">{pm.displayName || pm.username}</span>
+                    <p className="text-white/70 line-clamp-2 leading-snug">{pm.content}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         {/* min-h-0: flex-1 + overflow-y-auto'nun çalışması için zorunlu */}
         <div ref={msgContainerRef} className="flex-1 min-h-0 overflow-y-auto py-4 space-y-3">
           {isLoading ? (

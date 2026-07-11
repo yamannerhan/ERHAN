@@ -35,6 +35,8 @@ export const usersTable = pgTable("users", {
   level: integer("level").notNull().default(1),
   /** Avatar çerçevesi (chat-cosmetics key) */
   avatarFrame: text("avatar_frame").notNull().default("none"),
+  /** Geçici çerçeve bitiş (günlük/haftalık/aylık hediye) */
+  avatarFrameExpiresAt: timestamp("avatar_frame_expires_at", { withTimezone: true }),
   /** Mesaj balonu stili */
   chatBubble: text("chat_bubble").notNull().default("default"),
   /** Geçici balon (günlük hediye) bitiş */

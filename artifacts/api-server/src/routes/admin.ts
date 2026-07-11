@@ -473,12 +473,33 @@ router.patch("/admin/users/:id/vip", authMiddleware, requireAdmin, async (req, r
   const { enabled, days } = req.body as { enabled?: boolean; days?: number };
   const active = Boolean(enabled);
   const vipUntil = active && days && days > 0 ? new Date(Date.now() + days * 24 * 3600 * 1000) : null;
-  await db.update(usersTable).set({
+  const vipUpdates: Partial<typeof usersTable.$inferInsert> = {
     isVip: active,
     vipUntil,
     nameColor: active ? "#FACC15" : null,
     nameAnimated: active,
-  }).where(eq(usersTable.id, id));
+    updatedAt: new Date(),
+  };
+  if (active) {
+    vipUpdates.avatarFrame = "vip";
+    vipUpdates.avatarFrameExpiresAt = null;
+    vipUpdates.chatBubble = "vip";
+    vipUpdates.chatBubbleExpiresAt = null;
+  } else {
+    const [cur] = await db.select({
+      avatarFrame: usersTable.avatarFrame,
+      chatBubble: usersTable.chatBubble,
+    }).from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (cur?.avatarFrame === "vip") {
+      vipUpdates.avatarFrame = "none";
+      vipUpdates.avatarFrameExpiresAt = null;
+    }
+    if (cur?.chatBubble === "vip") {
+      vipUpdates.chatBubble = "default";
+      vipUpdates.chatBubbleExpiresAt = null;
+    }
+  }
+  await db.update(usersTable).set(vipUpdates).where(eq(usersTable.id, id));
   res.json({ success: true, isVip: active, vipUntil: vipUntil?.toISOString() ?? null });
 });
 
@@ -521,10 +542,11 @@ router.patch("/admin/users/:id/level", authMiddleware, requireAdminOrModerator, 
 router.patch("/admin/users/:id/cosmetics", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
-  const { avatarFrame, chatBubble, bubbleHours } = req.body as {
+  const { avatarFrame, chatBubble, bubbleHours, frameHours } = req.body as {
     avatarFrame?: string | null;
     chatBubble?: string | null;
     bubbleHours?: number | null;
+    frameHours?: number | null;
   };
   const { isValidFrameKey, isValidBubbleKey } = await import("../lib/chat-cosmetics");
   const updates: Partial<typeof usersTable.$inferInsert> = { updatedAt: new Date() };
@@ -533,6 +555,11 @@ router.patch("/admin/users/:id/cosmetics", authMiddleware, requireAdminOrModerat
     const key = avatarFrame || "none";
     if (!isValidFrameKey(key)) { res.status(400).json({ error: "Geçersiz çerçeve" }); return; }
     updates.avatarFrame = key;
+    if (frameHours && frameHours > 0) {
+      updates.avatarFrameExpiresAt = new Date(Date.now() + frameHours * 3600 * 1000);
+    } else {
+      updates.avatarFrameExpiresAt = null;
+    }
   }
   if (chatBubble !== undefined) {
     const key = chatBubble || "default";
@@ -553,6 +580,7 @@ router.patch("/admin/users/:id/cosmetics", authMiddleware, requireAdminOrModerat
     success: true,
     avatarFrame: u?.avatarFrame ?? "none",
     chatBubble: u?.chatBubble ?? "default",
+    avatarFrameExpiresAt: u?.avatarFrameExpiresAt?.toISOString() ?? null,
     chatBubbleExpiresAt: u?.chatBubbleExpiresAt?.toISOString() ?? null,
   });
 });

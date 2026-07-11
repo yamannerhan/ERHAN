@@ -83,9 +83,11 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   try {
     const name = displayName || username;
     const welcomeMsg = `🎉 **${name}** @${username} aramıza katıldı! Hoşgeldin, iyi eğlenceler dileriz! 👋`;
-    await saveChatMessage(0, welcomeMsg);
+    const saved = await saveChatMessage(0, welcomeMsg);
     io.emit("chat:welcome", { message: welcomeMsg, username });
-    io.emit("chat:message", makeBotMsg(welcomeMsg, null));
+    if (saved) {
+      io.emit("chat:message", makeBotMsg(welcomeMsg, null, saved.id, saved.createdAt.toISOString()));
+    }
   } catch {
     // Chat mesajı gönderilemezse kaydı etkileme
   }
