@@ -50,6 +50,15 @@ function decodeHtml(value: string): string {
     .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Script/style/nav çöplerini at — tüm sayfa HTML'ini açıklama sanma. */
+function stripPageChrome(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+}
+
 function absoluteUrl(url: string): string {
   return new URL(url, BASE).toString();
 }
@@ -104,14 +113,28 @@ function getJsonLdJobPosting(html: string): Record<string, unknown> | null {
 
 function isOzelGuvenlikJob(title: string, description: string): boolean {
   const t = `${title}\n${description}`.toLocaleLowerCase("tr-TR");
-  // Sadece özel güvenlik / güvenlik görevlisi ilanları
-  const ok = /(?:özel\s+güvenlik|ögg\b|güvenlik\s+görevlisi|güvenlik\s+personeli|kimlikli\s+güvenlik|silahl[ıi]\s+güvenlik|silahs[ıi]z\s+güvenlik|5188)/.test(t);
+  const ok = /(?:özel\s+güvenlik|ögg\b|güvenlik\s+görevlisi|güvenlik\s+personeli|kimlikli\s+güvenlik|silahl[ıi]\s+güvenlik|silahs[ıi]z\s+güvenlik|5188|guvenlik\s+gorevlisi|ozel\s+guvenlik)/.test(t);
   if (!ok) return false;
-  // Açıkça başka meslek
-  if (/(?:temizlik\s+personeli|aşçı|garson|kurye|şoför|muhasebe|yazılım|satış\s+danışmanı)/.test(t) && !/güvenlik/.test(t)) {
+  if (/(?:temizlik\s+personeli|aşçı|garson|kurye|şoför|muhasebe|yazılım|satış\s+danışmanı)/.test(t) && !/güvenlik|guvenlik/.test(t)) {
     return false;
   }
   return true;
+}
+
+/** Filtre menüsü / index / JS çöpü mü? */
+function isGarbageDescription(text: string): boolean {
+  if (!text || text.length < 20) return true;
+  const lower = text.toLocaleLowerCase("tr-TR");
+  if (/function\s*\(|=>\s*\{|document\.|window\.|var\s+\w+\s*=|const\s+\w+\s*=/.test(text)) return true;
+  if (/#####\s*(şehir|pozisyon|bölüm|sektör)/i.test(text)) return true;
+  if (/arama seçimleriniz|detaylı ara|haritada göster|kelimeyi en uygun/i.test(lower)) return true;
+  // Uzun sektör/bölüm index listeleri
+  const indexHits = (lower.match(/\b(?:acente|ambulans|anestezi|arge|bordro|cnc|depo|eczane|finans|grafik|ihracat|ithalat|kalite|lojistik|muhasebe|pazarlama|sekreterlik|yazılım)\b/g) || []).length;
+  if (indexHits >= 8 && !/güvenlik|guvenlik|ögg|ogg/.test(lower)) return true;
+  if (indexHits >= 12) return true;
+  // Aşırı uzun ve güvenlik kelimesi yok
+  if (text.length > 4000 && !/güvenlik|guvenlik|ögg|5188/.test(lower)) return true;
+  return false;
 }
 
 function cleanElemanDescription(text: string): string {
@@ -121,17 +144,50 @@ function cleanElemanDescription(text: string): string {
     .replace(/Kaynak:\s*Eleman\.net/gi, "")
     .replace(/İlan URL:\s*\S+/gi, "")
     .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s{3,}/g, " ")
     .trim();
+}
+
+/** Detay sayfasından yalnızca ilan gövdesini çek — tüm HTML değil. */
+function extractDescriptionFromHtml(html: string): string {
+  const cleaned = stripPageChrome(html);
+  const patterns = [
+    /<(?:div|section|article)[^>]*(?:ilan[_-]?detay|job[_-]?desc|description|ilan[_-]?aciklama|ilan_icerik)[^>]*>([\s\S]*?)<\/(?:div|section|article)>/i,
+    /<div[^>]*class=["'][^"']*(?:aciklama|description|ilan-detay|detay-icerik)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    /<(?:p|div)[^>]*itemprop=["']description["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i,
+  ];
+  for (const re of patterns) {
+    const m = cleaned.match(re);
+    if (m?.[1]) {
+      const text = decodeHtml(m[1]);
+      if (text.length >= 40 && !isGarbageDescription(text)) return text;
+    }
+  }
+  // meta description
+  const meta = cleaned.match(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)
+    ?? cleaned.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i);
+  if (meta?.[1]) {
+    const text = decodeHtml(meta[1]);
+    if (text.length >= 40 && !isGarbageDescription(text)) return text;
+  }
+  return "";
 }
 
 export function parseElemanDetailHtml(html: string, item: ElemanListItem): ElemanJobDetail | null {
   const job = getJsonLdJobPosting(html);
   const title = typeof job?.title === "string" ? job.title : item.title;
-  let description = typeof job?.description === "string" ? decodeHtml(job.description) : "";
-  if (!description || description.length < 40) {
-    description = decodeHtml(html);
+
+  let description = "";
+  if (typeof job?.description === "string") {
+    description = cleanElemanDescription(decodeHtml(job.description));
   }
-  description = cleanElemanDescription(description);
+  if (!description || description.length < 40 || isGarbageDescription(description)) {
+    description = cleanElemanDescription(extractDescriptionFromHtml(html));
+  }
+  // Hâlâ çöp / boşsa sadece başlık kullan — tüm sayfa HTML'ini ASLA alma
+  if (!description || isGarbageDescription(description)) {
+    description = title;
+  }
 
   if (!isOzelGuvenlikJob(title, description)) {
     logger.info({ id: item.id, title }, "eleman: özel güvenlik değil — atlandı");
@@ -142,18 +198,20 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
   const companyName = typeof company === "object" && company !== null && typeof (company as Record<string, unknown>).name === "string"
     ? (company as Record<string, unknown>).name as string
     : null;
-  const phone = extractPhoneNumber(`${description}\n${title}`);
-  // Detayda numara yoksa HTML'in ilgili kısmından dene (footer/script hariç kısaltılmış)
-  const phoneFallback = phone || extractPhoneNumber(html.slice(0, 60_000));
-  if (!phoneFallback) {
+
+  // Telefon: önce temiz açıklama, sonra sınırlı HTML (script'siz)
+  const phoneZone = stripPageChrome(html).slice(0, 80_000);
+  const phone = extractPhoneNumber(`${description}\n${title}`)
+    || extractPhoneNumber(phoneZone);
+  if (!phone) {
     logger.info({ id: item.id, title }, "eleman: telefon yok — ilan çekilmedi");
     return null;
   }
 
-  const rawText = [title, companyName, description, `Telefon: ${phoneFallback}`]
+  const rawText = [title, companyName, description, `Telefon: ${phone}`]
     .filter(Boolean)
     .join("\n\n");
-  return { ...item, title, companyName, description, phone: phoneFallback, rawText };
+  return { ...item, title, companyName, description, phone, rawText };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {

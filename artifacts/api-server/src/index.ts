@@ -956,7 +956,7 @@ process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
 });
 
-// Süresi dolan ilanlar otomatik silinir (expiresAt veya Telegram 30 gün).
+// Süresi dolan ilanlar: bot ilanları silinmez (pasif); manuel+tikli silinir.
 void purgeExpiredListings();
 setInterval(() => { void purgeExpiredListings(); }, 30 * 60 * 1000);
 void trimChatHistory();

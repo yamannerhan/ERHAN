@@ -283,8 +283,9 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   if (search) conditions.push(ilike(listingsTable.title, `%${search}%`));
   conditions.push(eq(listingsTable.status, "active"));
   conditions.push(eq(listingsTable.isActive, true));
+  // Sitede eklenme / son görülme tarihine göre 30 gün — Telegram orijinal post tarihi değil
   const activeCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  conditions.push(sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
+  conditions.push(sql`COALESCE(${listingsTable.lastSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
 
   const settings = await db.select({ hiddenListingCities: adminSettingsTable.hiddenListingCities }).from(adminSettingsTable).limit(1);
   const hiddenCities = parseHiddenListingCities(settings[0]?.hiddenListingCities);
@@ -341,7 +342,7 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
     .where(and(
       eq(listingsTable.status, "active"),
       eq(listingsTable.isActive, true),
-      sql`COALESCE(${listingsTable.publishedAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)}`,
+      sql`COALESCE(${listingsTable.lastSeenAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)}`,
     ))
     .groupBy(listingsTable.city)
     .orderBy(sql`count(*) desc`, listingsTable.city);

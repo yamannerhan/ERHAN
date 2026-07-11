@@ -104,9 +104,10 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     companyLogoUrl: createSmartListingImage(job.rawText, title),
     // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil); numara yoksa link/kaynağa düş
     applyUrl: job.phone ? `tel:${job.phone}` : (job.applicationUrl ?? job.sourceUrl ?? undefined),
-    ...(job.platform === "telegram" ? { expiresAt: new Date(job.createdAt.getTime() + 30 * 24 * 60 * 60 * 1000) } : {}),
-    // Gerçek gönderim tarihini koru (onay anı değil) — sıralama ve "X gün önce" doğru olsun
-    ...(job.createdAt ? { createdAt: job.createdAt } : {}),
+    autoDeleteOnExpiry: false,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    publishedAt: job.createdAt ?? new Date(),
+    lastSeenAt: new Date(),
   }).returning();
   if (listing) {
     await announceNewListing(listing);
