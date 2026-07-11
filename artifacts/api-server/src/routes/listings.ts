@@ -170,8 +170,29 @@ async function getLocationTermsForProvince(province: string): Promise<string[]> 
 async function cityFilterCondition(city: string) {
   const province = extractProvinceName(city) ?? city;
   const customTerms = await getLocationTermsForProvince(province);
-  const patterns = [province, ...Object.entries(DISTRICT_PROVINCES).filter(([, p]) => p === province).map(([d]) => d), ...customTerms];
-  return or(...patterns.map(locationTermCondition));
+  const districts = Object.entries(DISTRICT_PROVINCES)
+    .filter(([, p]) => p === province)
+    .map(([d]) => d);
+  // Sadece city alanında ara. Başlık/açıklamada "Ankara" vb. geçen İstanbul ilanları
+  // yanlışlıkla Ankara filtresine düşüyordu (SEO /ankara sayfasını bozuyordu).
+  const patterns = [province, city, ...districts, ...customTerms]
+    .map((t) => String(t || "").trim())
+    .filter((t) => t.length >= 2);
+  const unique = [...new Set(patterns)];
+
+  return or(...unique.flatMap((pattern) => {
+    const variants = locationSearchVariants(pattern);
+    return variants.flatMap((variant) => {
+      const norm = normalizeCityText(variant);
+      const compact = norm.replace(/\s+/g, "");
+      if (compact.length < 2) return [];
+      return [
+        ilike(listingsTable.city, `%${variant}%`),
+        sql`${normalizedColumn(listingsTable.city)} like ${`%${norm}%`}`,
+        sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${compact}%`}`,
+      ];
+    });
+  }));
 }
 
 function pickAutoImage(title: string, description: string | null): string {
