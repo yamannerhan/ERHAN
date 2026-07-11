@@ -2864,6 +2864,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [connected, setConnected] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingMode, setPairingMode] = useState(false);
   const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
   const [errorLog, setErrorLog] = useState<string>("");
@@ -2889,15 +2890,20 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       const status = await apiCall("/admin/whatsapp/status", "GET");
       const nextStatus = status as {
         connected?: boolean; ready?: boolean; qr?: string | null;
-        pairingCode?: string | null; error?: string | null; starting?: boolean;
+        pairingCode?: string | null; pairing?: boolean;
+        error?: string | null; starting?: boolean;
       };
       const isConn = !!(nextStatus.connected ?? nextStatus.ready);
+      const isPairing = !!(nextStatus.pairing || pairingMode);
       setConnected(isConn);
-      setQr(nextStatus.qr ?? null);
+      if (isConn) setPairingMode(false);
+      else if (nextStatus.pairing) setPairingMode(true);
+      // Onay kodu modunda QR gösterme
+      setQr(isPairing ? null : (nextStatus.qr ?? null));
       setPairingCode(nextStatus.pairingCode ?? null);
       setErrorLog(nextStatus.error ?? "");
       if (isConn) setQrStatus("ready");
-      else if (nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
+      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
       else if (nextStatus.error) setQrStatus("failed");
 
       if (isConn) {
@@ -2932,20 +2938,23 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const connect = async (usePairing: boolean) => {
     setLoading(true);
     try {
-      setQrStatus("connecting");
-      const body = usePairing && form.phoneNumber.trim()
-        ? { phoneNumber: form.phoneNumber.trim() }
-        : {};
       if (usePairing && !form.phoneNumber.trim()) {
         toast({ title: "Telefon numarası gerekli", description: "Örn: 905xxxxxxxxx", variant: "destructive" });
         return;
       }
+      setQrStatus("connecting");
+      setPairingMode(usePairing);
+      setPairingCode(null);
+      setQr(null);
+      const body = usePairing
+        ? { phoneNumber: form.phoneNumber.trim() }
+        : {};
       await apiCall("/admin/whatsapp/start", "POST", body);
       await refresh();
       toast({
         title: usePairing ? "Onay kodu bekleniyor" : "QR bağlantısı başlatıldı",
         description: usePairing
-          ? "Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan"
+          ? "QR açılmaz. Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan"
           : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut",
       });
     } catch (error) {
@@ -2962,6 +2971,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       setConnected(false);
       setQr(null);
       setPairingCode(null);
+      setPairingMode(false);
       toast({ title: "WhatsApp bağlantısı kesildi" });
     } catch (error) {
       toast({ title: "Durdurulamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
@@ -3143,12 +3153,17 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                 </div>
                 <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Gelmezse 905… formatıyla tekrar deneyin.</p>
               </div>
+            ) : pairingMode ? (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
+                Onay kodu hazırlanıyor… QR açılmaz. Numara: {form.phoneNumber || "—"}
+                <p className="mt-2 text-xs text-slate-400">Telefonda: Bağlı Cihazlar → Telefon numarasıyla bağlan</p>
+              </div>
             ) : qr ? (
               <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" />
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">
                 {qrStatus === "connecting"
-                  ? "WhatsApp oturumu hazırlanıyor (QR veya onay kodu)…"
+                  ? "WhatsApp oturumu hazırlanıyor…"
                   : "Bağlanmak için «QR ile Bağlan» veya «Onay Kodu ile Bağlan» kullanın."}
               </div>
             )}
