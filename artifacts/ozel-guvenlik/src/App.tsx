@@ -18,7 +18,7 @@ import Destek from "@/pages/destek";
 import CvOlustur from "@/pages/cv-olustur";
 import PartTime from "@/pages/part-time";
 import {
-  ListingsWithSeo, SlugIsIlanlariPage, CitySeoListingsEnhanced, CityShortSeoPage,
+  ListingsWithSeo, SeoPathPage,
   BlogIndexPage, BlogPostPage,
 } from "@/pages/seo-pages";
 
@@ -49,10 +49,8 @@ function Router() {
       <Route path="/part-time" component={PartTime} />
       <Route path="/admin" component={AdminDashboard} />
       <Route path="/moderator" component={ModeratorDashboard} />
-      <Route path="/:slug-is-ilanlari" component={SlugIsIlanlariPage} />
-      <Route path="/:slug-ozel-guvenlik-is-ilanlari" component={CitySeoListingsEnhanced} />
-      {/* 81 il + ilçe kısa SEO: /ankara /istanbul /gebze */}
-      <Route path="/:citySlug" component={CityShortSeoPage} />
+      {/* /ankara /istanbul /securitas-is-ilanlari /silahli-guvenlik-is-ilanlari */}
+      <Route path="/:seoSlug" component={SeoPathPage} />
       <Route component={NotFound} />
     </Switch>
   );

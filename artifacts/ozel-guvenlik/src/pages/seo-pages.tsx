@@ -1,4 +1,4 @@
-import { useRoute, Redirect } from "wouter";
+import { useRoute, Redirect, useLocation } from "wouter";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import {
   SEO_BASE_URL, SEO_OG_IMAGE, buildCompanyDescription, buildCompanyTitle,
@@ -39,14 +39,44 @@ export function ListingsWithSeo() {
   return <Listings />;
 }
 
-export function SlugIsIlanlariPage() {
-  const [, params] = useRoute("/:slug-is-ilanlari");
-  const slug = params?.slug ?? "";
-  const keyword = getSeoKeywordPage(slug);
-  const company = getSeoCompany(slug);
+/**
+ * Tek segment SEO yönlendirici.
+ * Not: wouter'da `/:slug-is-ilanlari` kalıbı `/ankara` gibi tüm tek segmentleri
+ * yanlışlıkla yakalıyordu (param adı hyphen içeriyor). Bu yüzden pathname parse ediyoruz.
+ */
+export function SeoPathPage() {
+  const [location] = useLocation();
+  const path = location.replace(/^\//, "").split("?")[0] ?? "";
+  if (!path || path.includes("/")) return <NotFound />;
+
+  const keyword = getSeoKeywordPage(path);
   if (keyword) return <KeywordSeoListings keyword={keyword} />;
-  if (company) return <CompanySeoListings company={company} />;
+
+  const longCity = path.match(/^([a-z0-9-]+)-ozel-guvenlik-is-ilanlari$/i);
+  if (longCity?.[1] && slugToCity(longCity[1])) {
+    return <Redirect to={`/${longCity[1]}`} />;
+  }
+
+  const companyMatch = path.match(/^([a-z0-9-]+)-is-ilanlari$/i);
+  if (companyMatch?.[1]) {
+    const company = getSeoCompany(companyMatch[1]);
+    if (company) return <CompanySeoListings company={company} />;
+  }
+
+  const city = slugToCity(path);
+  if (city) return <CityShortSeoPage city={city} slug={path} />;
+
   return <NotFound />;
+}
+
+/** @deprecated — SeoPathPage kullan */
+export function SlugIsIlanlariPage() {
+  return <SeoPathPage />;
+}
+
+/** @deprecated — SeoPathPage kullan */
+export function CitySeoListingsEnhanced() {
+  return <SeoPathPage />;
 }
 
 function KeywordSeoListings({ keyword }: { keyword: NonNullable<ReturnType<typeof getSeoKeywordPage>> }) {
@@ -83,49 +113,35 @@ function CompanySeoListings({ company }: { company: NonNullable<ReturnType<typeo
   return <Listings initialSearch={company.searchTerms[0]} />;
 }
 
-export function CitySeoListingsEnhanced() {
-  const [, params] = useRoute("/:slug-ozel-guvenlik-is-ilanlari");
-  const slug = params?.slug ?? "";
-  if (!slugToCity(slug)) return <NotFound />;
-  // Eski uzun URL → kısa /ankara (Google tek canonical görsün)
-  return <Redirect to={`/${slug}`} />;
-}
-
 /** Kısa il sayfası: /ankara, /istanbul, /kocaeli … */
-export function CityShortSeoPage() {
-  const [, params] = useRoute("/:citySlug");
-  const slug = params?.citySlug ?? "";
-  const city = slugToCity(slug);
-  const seo = city ? SEO_CITY_CONTENTS[city] : null;
+export function CityShortSeoPage({ city, slug }: { city: string; slug: string }) {
+  const seo = SEO_CITY_CONTENTS[city];
   const pageUrl = `${SEO_BASE_URL}/${slug}`;
 
   useDocumentMeta({
-    title: seo?.title ?? `Özel Güvenlik İş İlanları`,
+    title: seo?.title ?? `${city} Özel Güvenlik İş İlanları`,
     description: seo?.description ?? "Türkiye genelinde özel güvenlik iş ilanları.",
     keywords: seo?.keywords,
     canonical: pageUrl,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
-    jsonLd: city
-      ? [
-          breadcrumbSchema([
-            { name: "Ana Sayfa", item: SEO_BASE_URL },
-            { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
-            { name: `${city} Özel Güvenlik İş İlanları`, item: pageUrl },
-          ]),
-          buildCityFaqSchema(city),
-          {
-            "@context": "https://schema.org",
-            "@type": "CollectionPage",
-            name: seo?.title ?? `${city} Özel Güvenlik İş İlanları`,
-            description: seo?.description,
-            url: pageUrl,
-          },
-        ]
-      : undefined,
+    jsonLd: [
+      breadcrumbSchema([
+        { name: "Ana Sayfa", item: SEO_BASE_URL },
+        { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+        { name: `${city} Özel Güvenlik İş İlanları`, item: pageUrl },
+      ]),
+      buildCityFaqSchema(city),
+      {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        name: seo?.title ?? `${city} Özel Güvenlik İş İlanları`,
+        description: seo?.description,
+        url: pageUrl,
+      },
+    ],
   });
 
-  if (!city) return <NotFound />;
   return <Listings initialCity={city} />;
 }
 
