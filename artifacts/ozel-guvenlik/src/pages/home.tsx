@@ -16,6 +16,7 @@ import { displayCompany } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { buildHomeTitle, buildHomeDescription, SEO_BASE_URL, SEO_OG_IMAGE, breadcrumbSchema } from "@/lib/seo-config";
+import { toSlug } from "@/lib/seo-cities";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -442,13 +443,26 @@ export default function Home() {
         <section className="og-pills hide-scrollbar">
           {QUICK_CITY_PILLS.map(p => {
             const active = activePill === p.id;
+            const href =
+              p.id === "istanbul" ? "/istanbul"
+              : p.id === "anadolu" ? "/istanbul-anadolu-yakasi"
+              : p.id === "avrupa" ? "/istanbul-avrupa-yakasi"
+              : null;
+            const className = `og-pill ${active ? "og-pill-active" : ""}`;
+            if (href) {
+              return (
+                <Link key={p.id} href={href} className={className}>
+                  {p.id === "istanbul" && <MapPin className="w-3 h-3" />}
+                  {p.label}
+                </Link>
+              );
+            }
             return (
               <button
                 key={p.id}
                 onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setActivePill(p.id); setOtherCity(null); setPage(1); }}
-                className={`og-pill ${active ? "og-pill-active" : ""}`}
+                className={className}
               >
-                {p.id === "istanbul" && <MapPin className="w-3 h-3" />}
                 {p.label}
               </button>
             );
@@ -490,20 +504,15 @@ export default function Home() {
                   {cityFilters
                     .filter(c => OTHER_CITIES.includes(c.city) && c.count > 0)
                     .map(c => (
-                      <button
+                      <Link
                         key={c.city}
-                        onClick={() => {
-                          sessionStorage.removeItem(HOME_SCROLL_KEY);
-                          setActivePill("other");
-                          setOtherCity(c.city);
-                          setPage(1);
-                          setOtherSheetOpen(false);
-                        }}
+                        href={`/${toSlug(c.city)}`}
+                        onClick={() => setOtherSheetOpen(false)}
                         className={`og-city-btn ${otherCity === c.city ? "og-city-btn-active" : ""}`}
                       >
                         <MapPin className="w-3.5 h-3.5" />
                         <span className="text-sm font-semibold">{c.city}</span>
-                      </button>
+                      </Link>
                     ))}
                   {cityFilters.filter(c => OTHER_CITIES.includes(c.city) && c.count > 0).length === 0 && (
                     <div className="col-span-2 text-center text-sm og-text-muted py-4">

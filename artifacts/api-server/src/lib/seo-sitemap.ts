@@ -75,8 +75,8 @@ function getStaticSitemapEntries(): SitemapEntry[] {
   ];
 
   const cityUrls = ALL_LOCATIONS.map((name) => ({
-    url: `${SEO_BASE_URL}/${toSlug(name)}-ozel-guvenlik-is-ilanlari`,
-    priority: "0.8",
+    url: `${SEO_BASE_URL}/${toSlug(name)}`,
+    priority: "0.85",
     changefreq: "daily",
   }));
 

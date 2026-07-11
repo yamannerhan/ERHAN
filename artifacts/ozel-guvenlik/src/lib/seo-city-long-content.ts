@@ -83,6 +83,6 @@ export function buildCityFaqSchema(city: string) {
 export function buildCityInternalLinks(city: string, limit = 20): string {
   const others = ALL_SEO_LOCATIONS.filter(c => c !== city).slice(0, limit);
   return others
-    .map(c => `<a href="https://ozelguvenlik.online/${toSlug(c)}-ozel-guvenlik-is-ilanlari">${c} Özel Güvenlik İş İlanları</a>`)
+    .map(c => `<a href="https://ozelguvenlik.online/${toSlug(c)}">${c} Özel Güvenlik İş İlanları</a>`)
     .join(" · ");
 }

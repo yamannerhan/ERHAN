@@ -121,7 +121,7 @@ interface SeoMeta {
 /* ───────────── HOME ───────────── */
 function buildHomeMeta(): SeoMeta {
   const cityLinks = ALL_LOCATIONS
-    .map(c => `<a href="${SEO_BASE_URL}/${toSlug(c)}-ozel-guvenlik-is-ilanlari">${escapeHtml(c)} Özel Güvenlik İş İlanları</a>`)
+    .map(c => `<a href="${SEO_BASE_URL}/${toSlug(c)}">${escapeHtml(c)} Özel Güvenlik İş İlanları</a>`)
     .join(" · ");
 
   return {
@@ -222,7 +222,7 @@ function makeCitySeo(city: string): { title: string; description: string } {
 
 async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
   const { title, description } = makeCitySeo(city);
-  const pageUrl = `${SEO_BASE_URL}/${slug}-ozel-guvenlik-is-ilanlari`;
+  const pageUrl = `${SEO_BASE_URL}/${slug}`;
 
   let cityListings: { id: number; title: string; company: string }[] = [];
   try {
@@ -246,12 +246,12 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     ? `<h2>${escapeHtml(city)} Aktif İlanlar</h2><ul>${cityListings
         .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a></li>`)
         .join("")}</ul>`
-    : "";
+    : `<p>${escapeHtml(city)} için şu an yayında ilan yok; yeni ilanlar eklendiğinde burada listelenir.</p>`;
 
   const otherCityLinks = ALL_LOCATIONS
     .filter(c => c !== city)
     .slice(0, 30)
-    .map(c => `<a href="${SEO_BASE_URL}/${toSlug(c)}-ozel-guvenlik-is-ilanlari">${escapeHtml(c)}</a>`)
+    .map(c => `<a href="${SEO_BASE_URL}/${toSlug(c)}">${escapeHtml(c)}</a>`)
     .join(" · ");
 
   return {
@@ -382,7 +382,7 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
 <h2>İlan Açıklaması</h2>
 <p>${escapeHtml(listing.description || desc)}</p>
 ${(listing as any).requirements ? `<h2>Aranan Şartlar</h2><p>${escapeHtml((listing as any).requirements)}</p>` : ""}
-<p><a href="${SEO_BASE_URL}/ilanlar">Tüm İlanlar</a> · <a href="${SEO_BASE_URL}/${toSlug(listing.city || "turkiye")}-ozel-guvenlik-is-ilanlari">${escapeHtml(listing.city || "")} İlanları</a></p>
+<p><a href="${SEO_BASE_URL}/ilanlar">Tüm İlanlar</a> · <a href="${SEO_BASE_URL}/${toSlug(listing.city || "turkiye")}">${escapeHtml(listing.city || "")} İlanları</a></p>
 </main>`,
     };
   } catch {
@@ -482,6 +482,14 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
   const cityMatch = clean.match(/^\/([a-z0-9-]+)-ozel-guvenlik-is-ilanlari$/i);
   if (cityMatch) {
     const slug = cityMatch[1]!;
+    const city = slugToCity(slug);
+    if (city) return buildCityMeta(city, slug);
+  }
+
+  // Kısa il URL: /ankara /istanbul /gebze
+  const shortCityMatch = clean.match(/^\/([a-z0-9-]+)$/i);
+  if (shortCityMatch) {
+    const slug = shortCityMatch[1]!;
     const city = slugToCity(slug);
     if (city) return buildCityMeta(city, slug);
   }

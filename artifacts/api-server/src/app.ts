@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL } from "./lib/seo-render";
+import { getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL, slugToCity } from "./lib/seo-render";
 import { generateSitemapXml, generateStaticSitemapXml } from "./lib/seo-sitemap";
 
 const app: Express = express();
@@ -37,6 +37,19 @@ app.use((req, res, next) => {
   if (host && host !== primaryHost && aliasHosts.has(host)) {
     res.redirect(301, `${SEO_BASE_URL}${req.originalUrl}`);
     return;
+  }
+  next();
+});
+
+// Eski uzun il URL → kısa: /ankara-ozel-guvenlik-is-ilanlari → /ankara
+app.use((req, res, next) => {
+  const m = req.path.match(/^\/([a-z0-9-]+)-ozel-guvenlik-is-ilanlari\/?$/i);
+  if (m) {
+    const slug = m[1]!;
+    if (slugToCity(slug)) {
+      res.redirect(301, `${SEO_BASE_URL}/${slug}`);
+      return;
+    }
   }
   next();
 });

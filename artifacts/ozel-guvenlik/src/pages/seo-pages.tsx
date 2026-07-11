@@ -1,4 +1,4 @@
-import { useRoute } from "wouter";
+import { useRoute, Redirect } from "wouter";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import {
   SEO_BASE_URL, SEO_OG_IMAGE, buildCompanyDescription, buildCompanyTitle,
@@ -86,9 +86,18 @@ function CompanySeoListings({ company }: { company: NonNullable<ReturnType<typeo
 export function CitySeoListingsEnhanced() {
   const [, params] = useRoute("/:slug-ozel-guvenlik-is-ilanlari");
   const slug = params?.slug ?? "";
+  if (!slugToCity(slug)) return <NotFound />;
+  // Eski uzun URL → kısa /ankara (Google tek canonical görsün)
+  return <Redirect to={`/${slug}`} />;
+}
+
+/** Kısa il sayfası: /ankara, /istanbul, /kocaeli … */
+export function CityShortSeoPage() {
+  const [, params] = useRoute("/:citySlug");
+  const slug = params?.citySlug ?? "";
   const city = slugToCity(slug);
   const seo = city ? SEO_CITY_CONTENTS[city] : null;
-  const pageUrl = `${SEO_BASE_URL}/${slug}-ozel-guvenlik-is-ilanlari`;
+  const pageUrl = `${SEO_BASE_URL}/${slug}`;
 
   useDocumentMeta({
     title: seo?.title ?? `Özel Güvenlik İş İlanları`,
@@ -101,8 +110,8 @@ export function CitySeoListingsEnhanced() {
       ? [
           breadcrumbSchema([
             { name: "Ana Sayfa", item: SEO_BASE_URL },
-            { name: city, item: pageUrl },
-            { name: "İş İlanları", item: `${SEO_BASE_URL}/ilanlar?city=${encodeURIComponent(city)}` },
+            { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+            { name: `${city} Özel Güvenlik İş İlanları`, item: pageUrl },
           ]),
           buildCityFaqSchema(city),
           {

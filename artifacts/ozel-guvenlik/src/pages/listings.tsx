@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { displayCompany } from "@/lib/utils";
 import { getListingImage } from "@/lib/listing-image";
+import { toSlug } from "@/lib/seo-cities";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -324,19 +325,16 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                   {cityFilters
                     .filter(c => OTHER_CITIES.includes(c.city))
                     .map(c => (
-                      <button
+                      <Link
                         key={c.city}
-                        onClick={() => {
-                          setCity(c.city);
-                          setPage(1);
-                          setOtherSheetOpen(false);
-                        }}
+                        href={`/${toSlug(c.city)}`}
+                        onClick={() => setOtherSheetOpen(false)}
                         className={`og-city-btn ${city === c.city ? "og-city-btn-active" : ""}`}
                       >
                         <MapPin className="w-3.5 h-3.5" />
                         <span className="text-sm font-semibold flex-1 text-left">{c.city}</span>
                         <span className="text-[10px] og-text-muted font-bold">({c.count})</span>
-                      </button>
+                      </Link>
                     ))}
                 </div>
               </motion.div>
@@ -581,15 +579,16 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                     {cityFilters
                       .filter(c => OTHER_CITIES.includes(c.city))
                       .map(c => (
-                        <button
+                        <Link
                           key={c.city}
-                          onClick={() => { setCity(c.city); setPage(1); }}
+                          href={`/${toSlug(c.city)}`}
+                          onClick={() => setFilterOpen(false)}
                           className={`og-city-btn ${city === c.city ? "og-city-btn-active" : ""}`}
                         >
                           <MapPin className="w-3.5 h-3.5" />
                           <span className="text-sm font-semibold flex-1 text-left">{c.city}</span>
                           <span className="text-[10px] font-bold">({c.count})</span>
-                        </button>
+                        </Link>
                       ))}
                   </div>
                 </div>

@@ -39,6 +39,26 @@ export function slugToCity(slug: string): string | null {
   return slugToCityMap.get(slug) ?? null;
 }
 
+/** Kısa SEO yolu: /ankara, /istanbul */
+export function cityPagePath(cityOrSlug: string): string {
+  const asCity = slugToCityMap.has(toSlug(cityOrSlug))
+    ? toSlug(cityOrSlug)
+    : toSlug(cityOrSlug);
+  return `/${asCity}`;
+}
+
+export function isCitySlug(slug: string): boolean {
+  return slugToCityMap.has(slug);
+}
+
+export function getAllCitySlugs(): string[] {
+  return ALL_SEO_LOCATIONS.map((name) => toSlug(name));
+}
+
+export function getProvinceSlugs(): string[] {
+  return SEO_PROVINCES.map((name) => toSlug(name));
+}
+
 /* ── Özel SEO metinleri ───────────────────────────────────────────────── */
 
 export interface SeoCityContent {
