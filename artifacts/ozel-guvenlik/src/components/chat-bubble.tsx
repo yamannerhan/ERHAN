@@ -1,21 +1,15 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Maximize2, Bot, CornerUpLeft, Trash2, Crown, Megaphone, Minus, Settings, BarChart2 } from "lucide-react";
+import { X, Send, Maximize2, Bot, Trash2, Megaphone, Minus, Settings, BarChart2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useLocation } from "wouter";
 import { io, Socket } from "socket.io-client";
 import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
-import { ChatPollCard } from "@/components/chat-poll-card";
-import { ChatModActions } from "@/components/chat-mod-actions";
-import { ChatUserIdentity } from "@/components/chat-user-identity";
-import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
+import { ChatMessageItem } from "@/components/chat-message-item";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
-}
 
 interface SystemMsg { id: number; type: "join" | "welcome"; text: string; createdAt: string; }
 type PollData = {
@@ -72,18 +66,6 @@ function renderMessageContent(content: string) {
     if (part.startsWith("@")) return <span key={i} className="text-amber-300 font-semibold">{part}</span>;
     return part;
   });
-}
-
-function ChatDisplayName({ msg, name, align = "start" }: { msg: ExtMsg; name: string; align?: "start" | "end" }) {
-  return <ChatUserIdentity msg={msg} name={name} align={align} />;
-}
-
-function UserAvatar({ src, username, role, isVip, online, frame }: {
-  src?: string | null; username: string; role: string; isVip?: boolean; online?: boolean; frame?: string | null;
-}) {
-  return (
-    <FramedAvatar src={src} name={username} role={role} isVip={isVip} frame={frame} size={32} online={online} />
-  );
 }
 
 /** Referans görseldeki cam/neon sohbet balonu FAB */
@@ -578,6 +560,8 @@ export function ChatBubble() {
 
   if (isOnChatPage) return null;
 
+  const [activeMsgId, setActiveMsgId] = useState<number | null>(null);
+
   const renderChatRow = (msg: AnyMsg) => {
     if (isSystem(msg)) {
       return (
@@ -588,7 +572,7 @@ export function ChatBubble() {
               {msg.text}
             </div>
           ) : (
-            <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed" style={{ background: "rgba(255,193,7,0.08)", border: "1px solid rgba(255,193,7,0.2)" }}>
+            <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed bg-amber-400/10 border border-amber-400/20">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <Bot className="w-3 h-3 text-amber-400" />
                 <span className="text-[10px] font-bold text-amber-400">ÖzelGüvenlik Bot</span>
@@ -602,109 +586,29 @@ export function ChatBubble() {
 
     const chatMsg = msg;
     const isMe = user?.id === chatMsg.userId;
-    const botLike = isBotOrFake(chatMsg);
-    const name = chatMsg.displayName || chatMsg.username;
-    const isBilgi = chatMsg.userId === -999;
-    const botLabel = isBilgi ? "BİLGİ BOTU" : chatMsg.isFake ? name : (chatMsg.displayName || chatMsg.username || "ÖzelGüvenlik Bot");
-
-    if (botLike) {
-      return (
-        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2 opacity-90">
-          <div className="relative shrink-0">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg,#2a2410,#1a1608)", border: "1.5px solid rgba(245,197,24,0.55)" }}>
-              {chatMsg.isFake && chatMsg.userAvatarUrl ? (
-                <img src={chatMsg.userAvatarUrl} alt="" className="w-full h-full rounded-full object-cover opacity-80" />
-              ) : (
-                <Bot className="w-4 h-4 text-amber-400" />
-              )}
-            </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#12161f]" />
-          </div>
-          <div className="max-w-[82%] rounded-2xl rounded-tl-sm px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-              <span className="text-[11px] font-bold text-white/90">{botLabel}</span>
-              <span className="text-[9px] text-white/30 ml-auto">{formatTime(chatMsg.createdAt)}</span>
-            </div>
-            <p className="break-words text-white/75 leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
-          </div>
-        </motion.div>
-      );
-    }
+    const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
 
     return (
-      <motion.div
-        key={chatMsg.id}
-        initial={{ opacity: 0, y: 5 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={`flex items-end gap-2 ${isMe ? "flex-row-reverse" : "flex-row"}`}
-      >
-        <UserAvatar
-          src={chatMsg.userAvatarUrl}
-          username={chatMsg.username}
-          role={chatMsg.userRole ?? "user"}
-          isVip={chatMsg.isVip}
-          online
-          frame={chatMsg.avatarFrame}
+      <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
+        <ChatMessageItem
+          msg={chatMsg}
+          isOwn={!!isMe && !isBotOrFake(chatMsg)}
+          currentUsername={user?.username}
+          token={getToken()}
+          canModerate={canMod && isDbMessageId(chatMsg.id)}
+          canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
+          renderContent={renderMessageContent}
+          active={activeMsgId === chatMsg.id}
+          onActivate={() => setActiveMsgId((id) => (id === chatMsg.id ? null : chatMsg.id))}
+          onReply={user ? (m) => startReply(m as ExtMsg) : undefined}
+          onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
+          onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
+            !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
+          ))}
+          onPollUpdate={(id, p) => setMessages((prev) => prev.map((m) =>
+            !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), poll: p } : m
+          ))}
         />
-        <div className={`flex flex-col max-w-[78%] ${isMe ? "items-end" : "items-start"}`}>
-          <div className={`flex items-center gap-1.5 mb-1 px-0.5 ${isMe ? "justify-end" : "justify-start"}`}>
-            <ChatDisplayName msg={chatMsg} name={name} align={isMe ? "end" : "start"} />
-            <span className="text-[9px] text-white/30 self-end pb-0.5">{formatTime(chatMsg.createdAt)}</span>
-          </div>
-          <div
-            className={`${chatBubbleClass(
-              chatMsg.chatBubble
-                || (chatMsg.userRole === "admin" ? "admin" : chatMsg.userRole === "moderator" ? "mod" : null),
-              isMe,
-            )} ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
-          >
-            {chatMsg.replyToId && (chatMsg.replyToUsername || chatMsg.replyToContent) && (
-              <div className="mb-1.5 pl-2 border-l-2 border-amber-400 text-[10px] rounded-r-md py-0.5 pr-2 bg-black/20">
-                <div className="font-semibold text-amber-300 mb-0.5">
-                  {chatMsg.replyToUsername === user?.username ? "Sen" : chatMsg.replyToUsername}
-                </div>
-                <div className="line-clamp-1 opacity-70">{chatMsg.replyToContent}</div>
-              </div>
-            )}
-            {chatMsg.poll ? (
-              <ChatPollCard
-                poll={chatMsg.poll}
-                token={getToken()}
-                onUpdate={(p) => setMessages(prev => prev.map(m =>
-                  !isSystem(m) && (m as ExtMsg).id === chatMsg.id ? { ...(m as ExtMsg), poll: p } : m
-                ))}
-              />
-            ) : (
-              <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
-            )}
-          </div>
-          {user && (
-            <div className={`flex items-center gap-1 mt-1 flex-wrap ${isMe ? "self-end flex-row-reverse" : "self-start"}`}>
-              <button
-                onClick={() => startReply(chatMsg)}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-amber-400/80 hover:bg-amber-400/10"
-              >
-                <CornerUpLeft className="w-2.5 h-2.5" /> Yanıtla
-              </button>
-              {(user.role === "admin" || user.role === "moderator") && isDbMessageId(chatMsg.id) && (
-                <ChatModActions
-                  messageId={chatMsg.id}
-                  targetUserId={chatMsg.userId}
-                  targetRole={chatMsg.userRole}
-                  isOwn={isMe}
-                  align={isMe ? "end" : "start"}
-                  compact
-                  canPin={user.role === "admin"}
-                  isPinned={!!chatMsg.isPinned}
-                  onPinned={(id, pinned) => setMessages(prev => prev.map(m =>
-                    !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
-                  ))}
-                  onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
-                />
-              )}
-            </div>
-          )}
-        </div>
       </motion.div>
     );
   };

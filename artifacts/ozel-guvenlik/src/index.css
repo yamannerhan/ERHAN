@@ -2187,3 +2187,250 @@ html:not(.dark) .og-pt-row {
 .og-bubble-mod { background: linear-gradient(145deg, rgba(30,58,138,0.65), rgba(15,23,42,0.7)); border-color: rgba(96,165,250,0.55); box-shadow: 0 0 14px rgba(59,130,246,0.3); animation: og-frame-breathe 2.6s ease-in-out infinite; }
 .og-bubble-holo { background: linear-gradient(120deg, rgba(255,255,255,0.12), rgba(96,165,250,0.22), rgba(244,114,182,0.18), rgba(255,255,255,0.1)); background-size: 300% 300%; border-color: rgba(255,255,255,0.3); animation: og-rainbow-border 3.5s linear infinite; }
 
+/* ── Chat message layout (flex only) ───────────────────────── */
+.chat-message {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.2rem 0;
+}
+.chat-message.is-own { flex-direction: row-reverse; }
+.chat-message.is-bot { opacity: 0.95; }
+.message-bot-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2a2410, #1a1608);
+  border: 1.5px solid rgba(245, 197, 24, 0.55);
+  flex-shrink: 0;
+}
+
+.message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+  max-width: min(80%, 22rem);
+}
+.chat-message.is-own .message-content { align-items: flex-end; }
+.chat-message:not(.is-own) .message-content { align-items: flex-start; }
+
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.2;
+}
+.chat-message.is-own .message-meta { justify-content: flex-end; }
+.message-username {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 7.5rem;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.chat-message.role-admin .message-username { color: #facc15; }
+.chat-message.role-moderator .message-username { color: #c4b5fd; }
+.message-time {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: rgba(148, 163, 184, 0.75);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.reply-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.3rem 0.55rem;
+  border-left: 2px solid rgba(245, 197, 24, 0.7);
+  border-radius: 0 0.45rem 0.45rem 0;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 0.65rem;
+}
+.reply-preview__user { font-weight: 700; color: #fcd34d; }
+.reply-preview__text {
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.42rem 0.72rem;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #fff;
+}
+.chat-message.is-own .message-bubble { border-radius: 16px 16px 4px 16px; }
+.chat-message:not(.is-own) .message-bubble { border-radius: 16px 16px 16px 4px; }
+.message-pin-row { display: flex; justify-content: flex-end; width: 100%; }
+.message-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fbbf24;
+  opacity: 0.9;
+}
+.message-pin svg { width: 0.7rem; height: 0.7rem; }
+.message-bubble-body { min-width: 0; }
+
+.message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.chat-message.is-own .message-actions { justify-content: flex-end; }
+.chat-message:hover .message-actions,
+.chat-message.is-active .message-actions,
+.chat-message:focus-within .message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .message-actions { opacity: 0; pointer-events: none; }
+  .chat-message.is-active .message-actions { opacity: 1; pointer-events: auto; }
+}
+.message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.4rem;
+  border: none;
+  background: transparent;
+  font-size: 0.62rem;
+  font-weight: 650;
+  color: rgba(245, 197, 24, 0.75);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.message-action-btn:hover {
+  background: rgba(245, 197, 24, 0.1);
+  color: #f5c518;
+}
+.message-action-btn--danger { color: rgba(248, 113, 113, 0.85); }
+.message-action-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+}
+.message-action-btn svg { width: 0.7rem; height: 0.7rem; }
+.message-bubble.og-chat-bubble { overflow: hidden; }
+
+/* ── Rank badges (pixel-match reference cards) ─────────────── */
+.rank-badge {
+  --rb-accent: #94a3b8;
+  --rb-glow: rgba(148, 163, 184, 0.45);
+  --rb-fill: rgba(15, 18, 28, 0.92);
+  --rb-title: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 1.55rem;
+  max-width: 100%;
+  padding: 0 0.55rem 0 0.18rem;
+  flex-shrink: 1;
+  min-width: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.06), transparent 40%),
+    var(--rb-fill);
+  border: 1px solid color-mix(in srgb, var(--rb-accent) 70%, #000);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--rb-accent) 25%, transparent),
+    0 0 10px var(--rb-glow),
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.35);
+  clip-path: polygon(0 0, calc(100% - 0.55rem) 0, 100% 50%, calc(100% - 0.55rem) 100%, 0 100%);
+  filter: drop-shadow(0 0 4px var(--rb-glow));
+}
+.rank-badge__hex {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.28rem;
+  height: 1.28rem;
+  flex-shrink: 0;
+  color: var(--rb-accent);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--rb-accent) 35%, #111), #0a0d14 70%);
+  clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  box-shadow:
+    0 0 6px var(--rb-glow),
+    inset 0 0 0 1px color-mix(in srgb, var(--rb-accent) 80%, #fff);
+}
+.rank-badge__icon { width: 0.68rem; height: 0.68rem; display: block; }
+.rank-badge__title {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-title);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 7.2rem;
+  text-shadow: 0 0 8px var(--rb-glow);
+  flex-shrink: 1;
+  min-width: 0;
+}
+.rank-badge__level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-right: 0.35rem;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #0b0f18;
+  background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--rb-accent) 75%, #fff));
+  box-shadow: 0 0 6px var(--rb-glow), inset 0 1px 0 rgba(255,255,255,0.55);
+  white-space: nowrap;
+}
+.rank-badge--admin { --rb-accent: #f5c518; --rb-glow: rgba(245, 197, 24, 0.55); --rb-title: #ffe9a0; }
+.rank-badge--vip { --rb-accent: #fbbf24; --rb-glow: rgba(251, 191, 36, 0.5); --rb-title: #fde68a; }
+.rank-badge--moderator { --rb-accent: #a855f7; --rb-glow: rgba(168, 85, 247, 0.55); --rb-title: #e9d5ff; }
+.rank-badge--trusted { --rb-accent: #22c55e; --rb-glow: rgba(34, 197, 94, 0.5); --rb-title: #bbf7d0; }
+.rank-badge--active { --rb-accent: #3b82f6; --rb-glow: rgba(59, 130, 246, 0.5); --rb-title: #bfdbfe; }
+.rank-badge--new { --rb-accent: #22d3ee; --rb-glow: rgba(34, 211, 238, 0.5); --rb-title: #a5f3fc; }
+.rank-badge--chatter { --rb-accent: #f97316; --rb-glow: rgba(249, 115, 22, 0.5); --rb-title: #fed7aa; }
+.rank-badge--visitor { --rb-accent: #94a3b8; --rb-glow: rgba(148, 163, 184, 0.4); --rb-title: #e2e8f0; }
+.rank-badge--banned { --rb-accent: #ef4444; --rb-glow: rgba(239, 68, 68, 0.5); --rb-title: #fecaca; }
+.rank-badge--bot { --rb-accent: #38bdf8; --rb-glow: rgba(56, 189, 248, 0.5); --rb-title: #bae6fd; }
+
+@media (max-width: 380px) {
+  .message-content { max-width: 78%; }
+  .message-username { max-width: 5.5rem; font-size: 0.72rem; }
+  .rank-badge__title { max-width: 5rem; font-size: 0.52rem; }
+  .rank-badge { height: 1.4rem; }
+  .rank-badge__hex { width: 1.12rem; height: 1.12rem; }
+}
+

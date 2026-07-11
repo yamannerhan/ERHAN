@@ -5,15 +5,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { io, Socket } from "socket.io-client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, X, Bot, Zap, CornerUpLeft, Trash2, Crown, Settings, BarChart2 } from "lucide-react";
+import { Send, X, Bot, Zap, CornerUpLeft, Trash2, Settings, BarChart2 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
-import { ChatPollCard } from "@/components/chat-poll-card";
-import { ChatModActions } from "@/components/chat-mod-actions";
-import { ChatUserIdentity } from "@/components/chat-user-identity";
-import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
+import { ChatMessageItem } from "@/components/chat-message-item";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -64,16 +61,6 @@ function renderMessageContent(content: string) {
 }
 
 interface UserSuggestion { id: number; username: string; displayName?: string | null; avatarUrl: string | null; role: string; }
-
-function ChatDisplayName({ msg, name, align = "start" }: { msg: ExtMsg; name: string; align?: "start" | "end" }) {
-  return <ChatUserIdentity msg={msg} name={name} align={align} showMemberLabel />;
-}
-
-function UserAvatar({ src, name, role, isVip, frame }: {
-  src?: string | null; name: string; role: string; isVip?: boolean; frame?: string | null;
-}) {
-  return <FramedAvatar src={src} name={name} role={role} isVip={isVip} frame={frame} size={32} />;
-}
 
 /* ── Swipeable row ────────────────────────────────────────────── */
 // React'ın synthetic onTouchMove olayı PWA'da passive geldiğinden
@@ -487,43 +474,7 @@ export default function Chat() {
     const chatMsg = msg as ExtMsg;
     const isBot = isBotOrFake(chatMsg);
     const isMe = !isBot && user?.id === chatMsg.userId;
-    const name = chatName(chatMsg);
-
-    if (isBot) {
-      const isBilgiBot = chatMsg.userId === -999;
-      const botColor = chatMsg.isFake ? "#94a3b8" : isBilgiBot ? "#22C55E" : "#F5C518";
-      const botBg   = "rgba(255,255,255,0.04)";
-      const botBdr  = "rgba(255,255,255,0.08)";
-      const botName = chatMsg.displayName ?? chatMsg.username ?? (isBilgiBot ? "BİLGİ BOTU" : "ÖzelGüvenlik Bot");
-      const lines   = chatMsg.content.split("\n").filter(l => l.trim() !== "");
-      const isInfo  = isBilgiBot && lines[0]?.startsWith("🔎");
-      return (
-        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-2 group px-2 opacity-90">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-5 overflow-hidden" style={{ background: "linear-gradient(135deg,#2a2410,#1a1608)", border: "1.5px solid rgba(245,197,24,0.45)" }}>
-            {chatMsg.isFake && chatMsg.userAvatarUrl
-              ? <img src={chatMsg.userAvatarUrl} alt="" className="w-full h-full object-cover opacity-80" />
-              : <Bot className="w-4 h-4" style={{ color: botColor }} />}
-          </div>
-          <div className="flex flex-col items-start max-w-[82%]">
-            <div className="flex items-center gap-1.5 mb-1 ml-1">
-              <span className="text-[11px] font-bold text-white/90">{botName}</span>
-            </div>
-            <div className="px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
-              {isInfo ? (
-                <>
-                  <p className="text-[11px] font-bold mb-1.5 text-amber-300">{lines[0]}</p>
-                  <p className="break-words text-foreground/80">{renderMessageContent(lines.slice(1).join(" "))}</p>
-                </>
-              ) : (
-                <p className="break-words text-foreground/80">{renderMessageContent(chatMsg.content)}</p>
-              )}
-              <p className="text-[10px] text-muted-foreground mt-1">{new Date(chatMsg.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</p>
-            </div>
-          </div>
-        </motion.div>
-      );
-    }
-
+    const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
     const msgReactions: Reaction[] = chatMsg.reactions ?? [];
     const reactionGroups = msgReactions.reduce((acc, r) => {
       acc[r.emoji] = acc[r.emoji] ?? [];
@@ -533,133 +484,77 @@ export default function Chat() {
     const isActive = activeMsg === chatMsg.id;
     const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
+    const row = (
+      <ChatMessageItem
+        msg={chatMsg}
+        isOwn={!!isMe}
+        currentUsername={user?.username}
+        token={getToken()}
+        canModerate={canMod && isDbMessageId(chatMsg.id)}
+        canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
+        renderContent={renderMessageContent}
+        active={isActive}
+        onActivate={() => setActiveMsg(isActive ? null : chatMsg.id)}
+        onReply={user ? (m) => { setReplyTo(m as ExtMsg); setActiveMsg(null); } : undefined}
+        onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
+        onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
+          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
+        ))}
+        onPollUpdate={(id, p) => setMessages((prev) => prev.map((m) =>
+          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), poll: p } : m
+        ))}
+      />
+    );
+
     return (
       <SwipeableMessage key={chatMsg.id} onReply={() => setReplyTo(chatMsg)}>
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-          className={`flex flex-col px-2 ${isMe ? "items-end" : "items-start"} group`}
-          onClick={() => setActiveMsg(isActive ? null : chatMsg.id)}>
-          <div className={`flex max-w-[85%] ${isMe ? "flex-row-reverse" : "flex-row"} items-end gap-2`}>
-            {/* Avatar */}
-            <UserAvatar
-              src={chatMsg.userAvatarUrl}
-              name={name}
-              role={chatMsg.userRole ?? "user"}
-              isVip={chatMsg.isVip}
-              frame={chatMsg.avatarFrame}
-            />
-
-            <div className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-              <div className={`flex flex-col mb-1 px-1 ${isMe ? "items-end" : "items-start"}`}>
-                <ChatDisplayName msg={chatMsg} name={name} align={isMe ? "end" : "start"} />
-              </div>
-
-              <div
-                className={`${chatBubbleClass(
-                  chatMsg.chatBubble
-                    || (chatMsg.userRole === "admin" ? "admin" : chatMsg.isVip ? "vip" : chatMsg.userRole === "moderator" ? "mod" : null),
-                  isMe,
-                )} text-sm ${isMe ? "rounded-br-sm" : "rounded-bl-sm"}`}
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="px-2">
+          {row}
+          {Object.entries(reactionGroups).length > 0 && (
+            <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`}>
+              {Object.entries(reactionGroups).map(([emoji, users]) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleReact(chatMsg.id, emoji); }}
+                  className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all active:scale-95 ${
+                    users.some((r) => r.userId === user?.id)
+                      ? "bg-primary/20 border-primary/50 text-primary"
+                      : "bg-white/5 border-white/10 text-foreground/70 hover:bg-white/10"
+                  }`}
+                >
+                  <span>{emoji}</span><span className="font-medium">{users.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <AnimatePresence>
+            {isActive && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                transition={{ duration: 0.15 }}
+                className={`flex items-center gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`}
+                onClick={(e) => e.stopPropagation()}
               >
-                {chatMsg.replyToId && (() => {
-                  const repliedToMe = chatMsg.replyToUsername === user?.username;
-                  return (
-                    <div className={`mb-2 pl-2 border-l-2 border-blue-400 text-xs rounded-r-lg py-0.5 pr-2 ${
-                      repliedToMe ? "bg-blue-400/10" : isMe ? "bg-white/5" : "bg-white/5"
-                    }`}>
-                      <div className="flex items-center gap-1.5 font-semibold mb-0.5">
-                        <span className="text-blue-400">{chatMsg.replyToUsername}</span>
-                        {repliedToMe && (
-                          <span className="text-[9px] bg-blue-400/20 text-blue-300 px-1.5 py-0.5 rounded-full font-bold tracking-wide">SEN</span>
-                        )}
-                      </div>
-                      <div className="line-clamp-1 opacity-70">{chatMsg.replyToContent}</div>
-                    </div>
-                  );
-                })()}
-                {chatMsg.poll ? (
-                  <ChatPollCard
-                    poll={chatMsg.poll}
-                    token={getToken()}
-                    onUpdate={(p) => setMessages(prev => prev.map(m =>
-                      !isSystem(m) && (m as ExtMsg).id === chatMsg.id ? { ...(m as ExtMsg), poll: p } : m
-                    ))}
-                  />
-                ) : (
-                  <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
-                )}
-                <span className={`text-[10px] mt-1 block ${isMe ? "text-white/40" : "text-white/30"}`}>
-                  {new Date(chatMsg.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-
-              {/* Her zaman görünen Yanıtla butonu */}
-              {user && (
-                <div className={`flex items-center gap-1 mt-1 flex-wrap ${isMe ? "self-end flex-row-reverse" : "self-start"}`}>
-                  <button
-                    onClick={e => { e.stopPropagation(); setReplyTo(chatMsg); setActiveMsg(null); }}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[11px] font-semibold text-blue-400 hover:bg-blue-400/10 active:scale-95 transition-all">
-                    <CornerUpLeft className="w-3 h-3" /> Yanıtla
-                  </button>
-                  {(user.role === "admin" || user.role === "moderator") && isDbMessageId(chatMsg.id) && (
-                    <div onClick={e => e.stopPropagation()}>
-                      <ChatModActions
-                        messageId={chatMsg.id}
-                        targetUserId={chatMsg.userId}
-                        targetRole={chatMsg.userRole}
-                        isOwn={isMe}
-                        align={isMe ? "end" : "start"}
-                        canPin={user.role === "admin"}
-                        isPinned={!!chatMsg.isPinned}
-                        onPinned={(id, pinned) => setMessages(prev => prev.map(m =>
-                          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
-                        ))}
-                        onDeleted={(id) => setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id))}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Emoji reactions display */}
-              {Object.entries(reactionGroups).length > 0 && (
-                <div className={`flex flex-wrap gap-1 mt-1 px-1 ${isMe ? "justify-end" : "justify-start"}`}>
-                  {Object.entries(reactionGroups).map(([emoji, users]) => (
-                    <button key={emoji}
-                      onClick={e => { e.stopPropagation(); handleReact(chatMsg.id, emoji); }}
-                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all active:scale-95 ${
-                        users.some(r => r.userId === user?.id)
-                          ? "bg-primary/20 border-primary/50 text-primary"
-                          : "bg-white/5 border-white/10 text-foreground/70 hover:bg-white/10"
-                      }`}>
-                      <span>{emoji}</span><span className="font-medium">{users.length}</span>
+                <div className="flex items-center gap-0.5 bg-[#1E293B] border border-white/10 rounded-2xl px-2 py-1.5 shadow-xl">
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleReact(chatMsg.id, emoji)}
+                      className={`text-lg leading-none p-1 rounded-xl transition-all active:scale-90 hover:scale-110 hover:bg-white/10 ${
+                        msgReactions.some((r) => r.userId === user?.id && r.emoji === emoji) ? "bg-primary/20" : ""
+                      }`}
+                    >
+                      {emoji}
                     </button>
                   ))}
                 </div>
-              )}
-
-              {/* Action bar (tap to open) — sadece emoji reaksiyonlar */}
-              <AnimatePresence>
-                {isActive && (
-                  <motion.div initial={{ opacity: 0, scale: 0.9, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9, y: -4 }} transition={{ duration: 0.15 }}
-                    className={`flex items-center gap-1 mt-1 px-1 ${isMe ? "justify-end" : "justify-start"}`}
-                    onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-0.5 bg-[#1E293B] border border-white/10 rounded-2xl px-2 py-1.5 shadow-xl">
-                      {QUICK_EMOJIS.map(emoji => (
-                        <button key={emoji}
-                          onClick={() => handleReact(chatMsg.id, emoji)}
-                          className={`text-lg leading-none p-1 rounded-xl transition-all active:scale-90 hover:scale-110 hover:bg-white/10 ${
-                            msgReactions.some(r => r.userId === user?.id && r.emoji === emoji) ? "bg-primary/20" : ""
-                          }`}>
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </SwipeableMessage>
     );
@@ -667,64 +562,6 @@ export default function Chat() {
 
   return (
     <Layout>
-      <style>{`
-        @keyframes admin-flare {
-          0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 4px rgba(250,204,21,.45)) drop-shadow(0 0 10px rgba(239,68,68,.25)); }
-          40%  { background-position: 55% 50%;  filter: drop-shadow(0 0 12px rgba(250,204,21,.85)) drop-shadow(0 0 18px rgba(239,68,68,.55)); }
-          70%  { background-position: 100% 50%; filter: drop-shadow(0 0 14px rgba(239,68,68,.9)) drop-shadow(0 0 8px rgba(250,204,21,.4)); }
-          100% { background-position: 0% 50%;   filter: drop-shadow(0 0 4px rgba(250,204,21,.45)) drop-shadow(0 0 10px rgba(239,68,68,.25)); }
-        }
-        @keyframes mod-aurora {
-          0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 4px rgba(127,29,29,.5)) drop-shadow(0 0 8px rgba(59,130,246,.3)); }
-          35%  { background-position: 40% 50%;  filter: drop-shadow(0 0 12px rgba(153,27,27,.75)) drop-shadow(0 0 16px rgba(96,165,250,.55)); }
-          65%  { background-position: 85% 50%;  filter: drop-shadow(0 0 14px rgba(59,130,246,.9)) drop-shadow(0 0 10px rgba(127,29,29,.45)); }
-          100% { background-position: 0% 50%;   filter: drop-shadow(0 0 4px rgba(127,29,29,.5)) drop-shadow(0 0 8px rgba(59,130,246,.3)); }
-        }
-        .badge-admin {
-          background: linear-gradient(90deg,
-            #facc15 0%, #f59e0b 22%, #ef4444 48%, #fbbf24 72%, #dc2626 100%);
-          background-size: 280% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: admin-flare 2.6s ease-in-out infinite;
-          letter-spacing: 0.12em;
-        }
-        .badge-mod {
-          background: linear-gradient(90deg,
-            #7f1d1d 0%, #991b1b 20%, #1e3a8a 48%, #60a5fa 72%, #7f1d1d 100%);
-          background-size: 280% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: mod-aurora 3.2s ease-in-out infinite;
-          letter-spacing: 0.12em;
-        }
-        .name-admin {
-          background: linear-gradient(105deg,
-            #fde68a 0%, #facc15 18%, #f97316 38%, #ef4444 55%, #fbbf24 72%, #dc2626 88%, #fde68a 100%);
-          background-size: 320% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: admin-flare 3.4s ease-in-out infinite;
-          font-weight: 800;
-        }
-        .name-mod {
-          background: linear-gradient(105deg,
-            #7f1d1d 0%, #b91c1c 18%, #1e40af 42%, #3b82f6 58%, #93c5fd 72%, #7f1d1d 100%);
-          background-size: 320% auto;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          animation: mod-aurora 4s ease-in-out infinite;
-          font-weight: 800;
-        }
-        .name-user {
-          color: #e2e8f0;
-          text-shadow: 0 0 8px rgba(148,163,184,0.3);
-        }
-      `}</style>
       {/* fixed: header(56px) ile bottom-nav(70px) arasını kapla — Layout scroll'undan bağımsız.
           Inline style: calc içinde + etrafı boşluklu olmalı, yoksa CSS geçersiz sayar. */}
       <div
