@@ -10,6 +10,60 @@ import { eq, desc } from "drizzle-orm";
 export const SEO_BASE_URL = "https://ozelguvenlik.online";
 export const SEO_DISPLAY_URL = "ozelguvenlik.online";
 
+const DEFAULT_SALARY_MIN = 25000;
+const DEFAULT_SALARY_MAX = 55000;
+
+function parseSalaryMinMax(salary: unknown): { min: number | null; max: number | null } {
+  const raw = String(salary ?? "").trim();
+  if (!raw) return { min: null, max: null };
+  const normalized = raw
+    .replace(/\./g, "")
+    .replace(/,/g, "")
+    .replace(/(\d)\s*bin\b/gi, (_, d) => `${d}000`)
+    .replace(/\s+/g, " ");
+  const rangeMatch = normalized.match(/(\d{4,6})\s*[-–—/]\s*(\d{4,6})/);
+  if (rangeMatch) {
+    const a = Number(rangeMatch[1]);
+    const b = Number(rangeMatch[2]);
+    if (Number.isFinite(a) && Number.isFinite(b) && a >= 1000 && b >= 1000) {
+      return { min: Math.min(a, b), max: Math.max(a, b) };
+    }
+  }
+  const single = normalized.match(/(\d{4,6})/);
+  if (single) {
+    const n = Number(single[1]);
+    if (Number.isFinite(n) && n >= 1000) return { min: n, max: n };
+  }
+  return { min: null, max: null };
+}
+
+function buildBaseSalary(opts: {
+  salary?: string | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+}) {
+  let min = typeof opts.salaryMin === "number" && opts.salaryMin >= 1000 ? opts.salaryMin : null;
+  let max = typeof opts.salaryMax === "number" && opts.salaryMax >= 1000 ? opts.salaryMax : null;
+  if (min == null && max == null) {
+    const parsed = parseSalaryMinMax(opts.salary);
+    min = parsed.min;
+    max = parsed.max;
+  }
+  if (min == null && max == null) {
+    min = DEFAULT_SALARY_MIN;
+    max = DEFAULT_SALARY_MAX;
+  } else if (min == null) {
+    min = max;
+  } else if (max == null) {
+    max = min;
+  }
+  const value =
+    min === max
+      ? { "@type": "QuantitativeValue", value: min!, unitText: "MONTH" }
+      : { "@type": "QuantitativeValue", minValue: min!, maxValue: max!, unitText: "MONTH" };
+  return { "@type": "MonetaryAmount", currency: "TRY", value };
+}
+
 const PROVINCES = [
   "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
   "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
@@ -71,9 +125,9 @@ function buildHomeMeta(): SeoMeta {
     .join(" · ");
 
   return {
-    title: "Özel Güvenlik İş İlanları | Güncel Bay Bayan Güvenlik Personeli Alımları",
+    title: "Özel Güvenlik İş İlanları | ozelguvenlik.online — Bay Bayan Güvenlik Personeli Alımları",
     description:
-      "Türkiye genelinde güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru fırsatları.",
+      "ozelguvenlik.online — Türkiye geneli özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru.",
     canonical: `${SEO_BASE_URL}/`,
     ogImage: `${SEO_BASE_URL}/og-image.jpg`,
     ogType: "website",
@@ -82,6 +136,7 @@ function buildHomeMeta(): SeoMeta {
         "@context": "https://schema.org",
         "@type": "WebSite",
         name: "Özel Güvenlik İş İlanları",
+        alternateName: ["ozelguvenlik.online", "ÖzelGüvenlik.Online", "özel güvenlik iş ilanları"],
         url: SEO_BASE_URL,
         potentialAction: {
           "@type": "SearchAction",
@@ -93,6 +148,7 @@ function buildHomeMeta(): SeoMeta {
         "@context": "https://schema.org",
         "@type": "Organization",
         name: "Özel Güvenlik Online",
+        alternateName: ["ozelguvenlik.online", "ÖzelGüvenlik.Online"],
         url: SEO_BASE_URL,
         logo: `${SEO_BASE_URL}/favicon-192x192.png`,
         sameAs: [],
@@ -101,7 +157,7 @@ function buildHomeMeta(): SeoMeta {
     bodyHtml: `
 <header><h1>Özel Güvenlik İş İlanları — Türkiye Geneli Bay Bayan Personel Alımı</h1></header>
 <main>
-<p>Özel Güvenlik Online, Türkiye genelinde silahlı ve silahsız özel güvenlik görevlisi iş ilanlarının yayınlandığı ücretsiz bir platformdur. AVM, fabrika, site, plaza, hastane, otel, OSB, lojistik ve okul güvenliği gibi tüm pozisyonlarda bay bayan personel alımları burada listelenir. Yapay zeka destekli iş bulma asistanı, ücretsiz CV oluşturma aracı ve şehir bazlı detaylı arama özellikleri ile aradığınız özel güvenlik işine kolayca ulaşırsınız.</p>
+<p><strong>ozelguvenlik.online</strong>, Türkiye genelinde silahlı ve silahsız özel güvenlik görevlisi iş ilanlarının yayınlandığı ücretsiz bir platformdur. AVM, fabrika, site, plaza, hastane, otel, OSB, lojistik ve okul güvenliği gibi tüm pozisyonlarda bay bayan personel alımları burada listelenir. Yapay zeka destekli iş bulma asistanı, ücretsiz CV oluşturma aracı ve şehir bazlı detaylı arama özellikleri ile aradığınız özel güvenlik işine kolayca ulaşırsınız.</p>
 <h2>Şehir Bazlı Özel Güvenlik İş İlanları</h2>
 <nav>${cityLinks}</nav>
 <h2>Hızlı Erişim</h2>
@@ -297,6 +353,11 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
             "@type": "Place",
             address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" },
           },
+          baseSalary: buildBaseSalary({
+            salary: (listing as { salary?: string | null }).salary,
+            salaryMin: (listing as { salaryMin?: number | null }).salaryMin,
+            salaryMax: (listing as { salaryMax?: number | null }).salaryMax,
+          }),
           url: pageUrl,
           image: (listing as { companyLogoUrl?: string | null }).companyLogoUrl || `${SEO_BASE_URL}/og-image.jpg`,
         },

@@ -177,7 +177,7 @@ export default function Home() {
   useDocumentMeta({
     title: buildHomeTitle(),
     description: buildHomeDescription(),
-    keywords: "özel güvenlik iş ilanları, güvenlik görevlisi alımı, bay bayan güvenlik ilanları, silahlı güvenlik iş ilanları, silahsız güvenlik iş ilanları, İstanbul özel güvenlik iş ilanları, Kocaeli özel güvenlik iş ilanları, Gebze güvenlik iş ilanları, GOSB güvenlik ilanları, TOSB güvenlik ilanları, avm güvenlik, fabrika güvenlik, site güvenlik, özel güvenlik maaşları, ögg iş ilanları",
+    keywords: "özel güvenlik iş ilanları, ozelguvenlik.online, özelgüvenlik.online, güvenlik görevlisi alımı, bay bayan güvenlik ilanları, silahlı güvenlik iş ilanları, silahsız güvenlik iş ilanları, İstanbul özel güvenlik iş ilanları, Kocaeli özel güvenlik iş ilanları, Gebze güvenlik iş ilanları, GOSB güvenlik ilanları, TOSB güvenlik ilanları, avm güvenlik, fabrika güvenlik, site güvenlik, özel güvenlik maaşları, ögg iş ilanları",
     canonical: SEO_BASE_URL,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
@@ -186,6 +186,7 @@ export default function Home() {
         "@context": "https://schema.org",
         "@type": "WebSite",
         "name": "Özel Güvenlik İş İlanları",
+        "alternateName": ["ozelguvenlik.online", "ÖzelGüvenlik.Online", "özel güvenlik iş ilanları"],
         "url": BASE_URL,
         "potentialAction": {
           "@type": "SearchAction",
@@ -197,6 +198,7 @@ export default function Home() {
         "@context": "https://schema.org",
         "@type": "Organization",
         "name": "Özel Güvenlik Online",
+        "alternateName": ["ozelguvenlik.online", "ÖzelGüvenlik.Online"],
         "url": BASE_URL,
         "logo": `${BASE_URL}/favicon-192x192.png`,
         "sameAs": [],

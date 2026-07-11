@@ -18,12 +18,12 @@ export function truncateDescription(text: string, max = 158): string {
 }
 
 export function buildHomeTitle(): string {
-  return "Özel Güvenlik İş İlanları | Güncel Bay Bayan Güvenlik Personeli Alımları";
+  return "Özel Güvenlik İş İlanları | ozelguvenlik.online — Bay Bayan Güvenlik Personeli Alımları";
 }
 
 export function buildHomeDescription(): string {
   return truncateDescription(
-    "Türkiye genelinde güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru fırsatları.",
+    "ozelguvenlik.online — Türkiye geneli özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru.",
   );
 }
 
@@ -105,12 +105,91 @@ export function mapEmploymentType(workType: unknown): string {
   return "FULL_TIME";
 }
 
+/** Sektördeki tipik aylık brüt aralık — maaş belirtilmemiş ilanlar için (Google baseSalary) */
+const DEFAULT_SALARY_MIN = 25000;
+const DEFAULT_SALARY_MAX = 55000;
+
 export function parseSalaryNumber(salary: unknown): number | null {
   const raw = safeText(salary, "");
-  if (!raw || /görüş|belirtil|asgari/i.test(raw)) return null;
+  if (!raw || /görüş|belirtil|müzakere|muzakere/i.test(raw)) return null;
+  if (/asgari/i.test(raw) && !/\d/.test(raw)) return null;
+  const range = parseSalaryMinMax(raw);
+  if (range.min != null && range.max != null && range.min !== range.max) return null;
+  if (range.min != null) return range.min;
   const digits = raw.replace(/[^\d]/g, "");
   const n = Number(digits);
   return Number.isFinite(n) && n >= 1000 ? n : null;
+}
+
+/** "30.000 - 45.000", "30000/45000", "net 32 bin" vb. metinden min/max çıkarır */
+export function parseSalaryMinMax(salary: unknown): { min: number | null; max: number | null } {
+  const raw = safeText(salary, "");
+  if (!raw) return { min: null, max: null };
+
+  const normalized = raw
+    .replace(/\./g, "")
+    .replace(/,/g, "")
+    .replace(/(\d)\s*bin\b/gi, (_, d) => `${d}000`)
+    .replace(/\s+/g, " ");
+
+  const rangeMatch = normalized.match(/(\d{4,6})\s*[-–—/]\s*(\d{4,6})/);
+  if (rangeMatch) {
+    const a = Number(rangeMatch[1]);
+    const b = Number(rangeMatch[2]);
+    if (Number.isFinite(a) && Number.isFinite(b) && a >= 1000 && b >= 1000) {
+      return { min: Math.min(a, b), max: Math.max(a, b) };
+    }
+  }
+
+  const single = normalized.match(/(\d{4,6})/);
+  if (single) {
+    const n = Number(single[1]);
+    if (Number.isFinite(n) && n >= 1000) return { min: n, max: n };
+  }
+  return { min: null, max: null };
+}
+
+/** Google JobPosting: baseSalary her zaman dolu olsun (önerilen alan uyarısını keser) */
+export function buildBaseSalary(opts: {
+  salary?: string | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+}) {
+  let min =
+    typeof opts.salaryMin === "number" && opts.salaryMin >= 1000 ? opts.salaryMin : null;
+  let max =
+    typeof opts.salaryMax === "number" && opts.salaryMax >= 1000 ? opts.salaryMax : null;
+
+  if (min == null && max == null) {
+    const parsed = parseSalaryMinMax(opts.salary);
+    min = parsed.min;
+    max = parsed.max;
+  }
+
+  if (min == null && max == null) {
+    min = DEFAULT_SALARY_MIN;
+    max = DEFAULT_SALARY_MAX;
+  } else if (min == null) {
+    min = max;
+  } else if (max == null) {
+    max = min;
+  }
+
+  const value =
+    min === max
+      ? { "@type": "QuantitativeValue" as const, value: min!, unitText: "MONTH" }
+      : {
+          "@type": "QuantitativeValue" as const,
+          minValue: min!,
+          maxValue: max!,
+          unitText: "MONTH",
+        };
+
+  return {
+    "@type": "MonetaryAmount" as const,
+    currency: "TRY",
+    value,
+  };
 }
 
 export function buildJobPostingSchema(listing: {
@@ -120,6 +199,8 @@ export function buildJobPostingSchema(listing: {
   company?: string | null;
   city?: string | null;
   salary?: string | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
   workType?: string | null;
   companyLogoUrl?: string | null;
   createdAt?: string | null;
@@ -134,7 +215,6 @@ export function buildJobPostingSchema(listing: {
   const validThrough = listing.expiresAt
     ? toIsoDate(listing.expiresAt)
     : toIsoDate(Date.now() + 30 * 24 * 60 * 60 * 1000);
-  const salaryNum = parseSalaryNumber(listing.salary);
 
   return {
     "@context": "https://schema.org",
@@ -163,17 +243,11 @@ export function buildJobPostingSchema(listing: {
         addressCountry: "TR",
       },
     },
-    baseSalary: salaryNum
-      ? {
-          "@type": "MonetaryAmount",
-          currency: "TRY",
-          value: {
-            "@type": "QuantitativeValue",
-            value: salaryNum,
-            unitText: "MONTH",
-          },
-        }
-      : undefined,
+    baseSalary: buildBaseSalary({
+      salary: listing.salary,
+      salaryMin: listing.salaryMin,
+      salaryMax: listing.salaryMax,
+    }),
     image: listing.companyLogoUrl || SEO_OG_IMAGE,
     url: pageUrl,
   };

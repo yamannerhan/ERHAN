@@ -1,4 +1,4 @@
-﻿import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
@@ -25,7 +25,16 @@ function sendXml(res: Response, xml: string): void {
 
 app.use((req, res, next) => {
   const host = (req.headers.host ?? "").split(":")[0]?.toLowerCase() ?? "";
-  if (host.startsWith("www.")) {
+  const primaryHost = "ozelguvenlik.online";
+  // www + IDN (özelgüvenlik.online → xn--zelgvenlik-dcb0f.online) → ana domain
+  const aliasHosts = new Set([
+    `www.${primaryHost}`,
+    "xn--zelgvenlik-dcb0f.online",
+    "www.xn--zelgvenlik-dcb0f.online",
+    "özelgüvenlik.online",
+    "www.özelgüvenlik.online",
+  ]);
+  if (host && host !== primaryHost && aliasHosts.has(host)) {
     res.redirect(301, `${SEO_BASE_URL}${req.originalUrl}`);
     return;
   }

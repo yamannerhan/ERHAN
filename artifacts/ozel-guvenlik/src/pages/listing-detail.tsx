@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useGetListing, useToggleListingLike, useToggleListingFavorite, getGetListingQueryKey } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
 import { useParams, Link, useLocation } from "wouter";
@@ -113,6 +113,8 @@ export default function ListingDetail() {
       company: listing.company,
       city: listing.city,
       salary: listing.salary,
+      salaryMin: (listing as { salaryMin?: number | null }).salaryMin,
+      salaryMax: (listing as { salaryMax?: number | null }).salaryMax,
       workType: listing.workType,
       companyLogoUrl: listing.companyLogoUrl,
       createdAt: listing.createdAt,
