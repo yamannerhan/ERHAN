@@ -3,7 +3,7 @@ import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc } fro
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
-import { fetchWhatsAppMessages, isWhatsAppReady } from "../services/whatsapp-client";
+import { fetchWhatsAppMessagesDetailed, isWhatsAppReady } from "../services/whatsapp-client";
 import {
   elemanCityCount,
   formatElemanCursor,
@@ -1518,11 +1518,16 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   );
 
   let messages;
+  let reachedCutoff = false;
+  let fetchRounds = 0;
   try {
-    // İlk tarama: 30 güne geri git (loadEarlierMsgs), tüm mesajları eski→yeni al.
-    messages = await fetchWhatsAppMessages(groupJid, isInitialScan
+    // İlk tarama: 30 güne geri git (loadEarlierMsgs + syncHistory + scroll)
+    const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
       ? { maxAgeDays: INITIAL_SCAN_DAYS, deep: true }
-      : { afterTimestampMs: lastTs, limit: 150 });
+      : { afterTimestampMs: lastTs, limit: 300 });
+    messages = fetched.messages;
+    reachedCutoff = fetched.reachedCutoff;
+    fetchRounds = fetched.rounds;
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
@@ -1536,10 +1541,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     return stats;
   }
 
-  // İlk taramada 0 mesaj: done yapma — ama mevcut imleci (lastTelegramMessageId) silme
+  // İlk taramada 0 mesaj: done yapma — imleç korunur
   if (isInitialScan && messages.length === 0) {
     await patchSourceProgress(source.id, {
-      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek.",
+      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).",
       isScanning: false,
       lastCheckedAt: new Date(),
       initialScanDone: false,
@@ -1547,9 +1552,8 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       lastScanMessagesRead: 0,
       lastScanFound: 0,
       lastScanAdded: 0,
-      // lastTelegramMessageId korunur — baştan sıfırlanmaz
     });
-    logger.warn({ sourceId: source.id, name: source.name, lastTs }, "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek");
+    logger.warn({ sourceId: source.id, name: source.name, lastTs, rounds: fetchRounds }, "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek");
     return stats;
   }
 
@@ -1558,9 +1562,11 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let processed = 0;
 
   await patchSourceProgress(source.id, {
-    lastError: null,
+    lastError: isInitialScan && !reachedCutoff
+      ? `Geçmiş yükleniyor… ${messages.length} mesaj (30 güne henüz ulaşılmadı, devam edecek)`
+      : null,
     initialScanPhase: isInitialScan ? "forward" : null,
-    initialScanProgress: isInitialScan ? 5 : 100,
+    initialScanProgress: isInitialScan ? Math.min(90, Math.max(5, Math.round((fetchRounds / 100) * 80))) : 100,
     lastScanMessagesRead: messages.length,
   });
 
@@ -1603,14 +1609,19 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 
   stats.maxId = maxTs;
 
+  // 30 güne ulaşılmadan initialScanDone=true YAPMA — aksi halde az mesajla günlük moda düşer
+  const markDone = !isInitialScan || reachedCutoff || (messages.length >= 800 && fetchRounds >= 80);
+
   await patchSourceProgress(source.id, {
     lastCheckedAt: new Date(),
     lastTelegramMessageId: maxTs > 0 ? String(maxTs) : source.lastTelegramMessageId,
-    initialScanDone: true,
-    initialScanProgress: 100,
-    initialScanPhase: null,
+    initialScanDone: markDone ? true : false,
+    initialScanProgress: markDone ? 100 : Math.min(95, Math.max(10, source.initialScanProgress ?? 10)),
+    initialScanPhase: markDone ? null : "backward",
     isScanning: false,
-    lastError: null,
+    lastError: markDone
+      ? null
+      : `30 gün henüz tamamlanmadı (${messages.length} mesaj, ${fetchRounds} tur). Sonraki turda devam.`,
     lastScanMessagesRead: messages.length,
     lastScanFound: stats.found,
     lastScanAdded: stats.added,
@@ -1621,7 +1632,15 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   });
 
   logger.info(
-    { sourceId: source.id, name: source.name, initial: isInitialScan, ...stats },
+    {
+      sourceId: source.id,
+      name: source.name,
+      initial: isInitialScan,
+      reachedCutoff,
+      markDone,
+      rounds: fetchRounds,
+      ...stats,
+    },
     "scraper: whatsapp kaynak tarandı",
   );
   return stats;
@@ -1668,17 +1687,29 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
         const stats = await checkWhatsAppSource(source);
         const [fresh] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, source.id)).limit(1);
         if (fresh && !fresh.initialScanDone) {
-          emptyRetries++;
-          if (emptyRetries >= 3) {
-            await patchSourceProgress(source.id, {
-              initialScanDone: true,
-              initialScanProgress: 100,
-              isScanning: false,
-              lastError: "3 denemede mesaj alınamadı — sonraki gruba geçildi.",
-            });
-            emptyRetries = 0;
+          // 30 güne ulaşılmadı — aynı grubu tekrar dene (boşsa sayaç artır)
+          if ((stats.messagesRead ?? 0) === 0) {
+            emptyRetries++;
+            if (emptyRetries >= 5) {
+              logger.warn({ sourceId: source.id }, "scraper: wa 5 boş tur — sıradaki gruba geç (done YAPILMADI)");
+              // done yapma; sadece sırayı kaydır: progress düşük bırak, kısa bekle sonra diğer pending'e bak
+              emptyRetries = 0;
+              await patchSourceProgress(source.id, {
+                lastError: "Geçmiş yüklenemedi — sonra tekrar denenecek. Diğer gruplara geçici geçiliyor.",
+                initialScanProgress: Math.max(1, fresh.initialScanProgress ?? 1),
+                // initialScanDone false kalır
+              });
+              // Bu grubu listenin sonuna itmek için lastCheckedAt güncelle; sıradaki id'ye geç
+              await db.update(sourcesTable)
+                .set({ lastCheckedAt: new Date() })
+                .where(eq(sourcesTable.id, source.id));
+            } else {
+              await sleep(10_000);
+            }
           } else {
-            await sleep(8_000);
+            emptyRetries = 0;
+            // Mesaj var ama cutoff yok — aynı grup tekrar (sıralı döngü tekrar seçecek)
+            await sleep(5_000);
           }
         } else {
           emptyRetries = 0;
@@ -2033,6 +2064,32 @@ export function startScraperWorker(): void {
   // Sadece takılı isScanning kilidini aç — imleç/progress ASLA sıfırlanmaz (deploy sonrası kaldığı yerden devam)
   void releaseStaleScanLocks(true).then(async (n) => {
     if (n > 0) logger.info({ released: n }, "scraper: deploy sonrası scan kilitleri açıldı (imleçler korundu)");
+
+    // WhatsApp: az mesajla yanlışlıkla "günlük"e düşmüş grupları yeniden 30g kuyruğuna al (ilan silinmez)
+    try {
+      const requeued = await db.update(sourcesTable)
+        .set({
+          initialScanDone: false,
+          initialScanProgress: 1,
+          initialScanPhase: "backward",
+          lastError: "Eksik geçmiş — 30 gün yeniden taranacak (mevcut ilanlar silinmez).",
+        })
+        .where(and(
+          eq(sourcesTable.platform, "whatsapp"),
+          eq(sourcesTable.active, true),
+          eq(sourcesTable.initialScanDone, true),
+          sql`COALESCE(${sourcesTable.lastScanMessagesRead}, 0) < 150`,
+        ))
+        .returning({ id: sourcesTable.id, name: sourcesTable.name });
+      if (requeued.length > 0) {
+        logger.info({ count: requeued.length, ids: requeued.map((r) => r.id) }, "scraper: wa eksik geçmiş grupları 30g kuyruğuna alındı");
+        waScanGeneration++;
+        void runWhatsAppSequentialDeepScan();
+      }
+    } catch (e) {
+      logger.warn({ err: e }, "scraper: wa requeue atlandı");
+    }
+
     const rows = await db.select({
       id: sourcesTable.id,
       platform: sourcesTable.platform,
