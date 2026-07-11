@@ -2094,6 +2094,183 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   );
 }
 
+function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
+  const [stats, setStats] = useState<{
+    subscribers: number;
+    pushEnabled: boolean;
+    pushOnNewListing: boolean;
+    pushOnChatReply: boolean;
+    pushSoundEnabled: boolean;
+    pushDigestMode: string;
+    pushDigestLastSentAt: string | null;
+    recent: Array<{ id: number; title: string; body: string; schedule: string; sentCount: number; createdAt: string; sentAt: string | null }>;
+  } | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [url, setUrl] = useState("/");
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const r = await apiCall("/admin/push/stats", "GET") as typeof stats;
+      setStats(r);
+    } catch (e) {
+      toast({ title: "Push istatistik alınamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  useEffect(() => { void refresh(); }, []);
+
+  const patch = async (patchBody: Record<string, unknown>, label: string) => {
+    setLoading(true);
+    try {
+      await apiCall("/admin/settings", "PATCH", patchBody);
+      toast({ title: label });
+      await refresh();
+    } catch (e) {
+      toast({ title: "Kaydedilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendNow = async () => {
+    if (!title.trim() || !body.trim()) {
+      toast({ title: "Başlık ve mesaj gerekli", variant: "destructive" });
+      return;
+    }
+    setSending(true);
+    try {
+      const r = await apiCall("/admin/push/send", "POST", {
+        title: title.trim(),
+        body: body.trim(),
+        url: url.trim() || "/",
+        schedule: "instant",
+      }) as { message?: string; sent?: number; total?: number };
+      toast({ title: "Bildirim gönderildi", description: r.message || `${r.sent ?? 0} cihaz` });
+      setTitle("");
+      setBody("");
+      await refresh();
+    } catch (e) {
+      toast({ title: "Gönderilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const Toggle = ({ on, label, desc, onClick }: { on: boolean; label: string; desc: string; onClick: () => void }) => (
+    <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+      <div>
+        <div className="text-sm font-medium text-white">{label}</div>
+        <div className="text-[11px] text-slate-400">{desc}</div>
+      </div>
+      <button type="button" disabled={loading} onClick={onClick} className={`relative inline-flex h-6 w-11 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-white/10"}`}>
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${on ? "translate-x-5" : "translate-x-0.5"} mt-0.5`} />
+      </button>
+    </div>
+  );
+
+  return (
+    <Section title="Canlı Push Bildirimleri (PWA / Tarayıcı)" icon={Bell} defaultOpen>
+      <div className="space-y-4">
+        <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-[11px] text-amber-100/80 leading-relaxed">
+          Siteye veya PWA’ya girenlerden bir kez bildirim izni istenir. İzin verenlere Android gibi canlı bildirim gider (sistem sesi + titreşim).
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+            <div className="text-[10px] text-slate-400 uppercase">Abone cihaz</div>
+            <div className="text-2xl font-black text-emerald-400 mt-1">{stats?.subscribers ?? "—"}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+            <div className="text-[10px] text-slate-400 uppercase">Özet modu</div>
+            <div className="text-lg font-bold text-white mt-1 capitalize">{stats?.pushDigestMode ?? "off"}</div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Toggle
+            on={stats?.pushEnabled !== false}
+            label="Push bildirimleri"
+            desc="Tüm canlı bildirimleri aç/kapat"
+            onClick={() => void patch({ pushEnabled: !(stats?.pushEnabled !== false) }, "Push ayarı güncellendi")}
+          />
+          <Toggle
+            on={stats?.pushOnNewListing !== false}
+            label="Yeni ilan bildirimi"
+            desc="Her yeni ilan yayınlanınca abonelere gönder"
+            onClick={() => void patch({ pushOnNewListing: !(stats?.pushOnNewListing !== false) }, "İlan bildirimi güncellendi")}
+          />
+          <Toggle
+            on={stats?.pushOnChatReply !== false}
+            label="Sohbet yanıt bildirimi"
+            desc="Mesajına yanıt gelince kullanıcıya push"
+            onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Yanıt bildirimi güncellendi")}
+          />
+          <Toggle
+            on={stats?.pushSoundEnabled !== false}
+            label="Sesli bildirim"
+            desc="Sistem sesi + titreşim (sessiz mod kapalı)"
+            onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-slate-400 mb-1.5 block">Özet bildirim (günlük / haftalık / aylık)</label>
+          <div className="flex flex-wrap gap-2">
+            {(["off", "daily", "weekly", "monthly"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                disabled={loading}
+                onClick={() => void patch({ pushDigestMode: m }, m === "off" ? "Özet kapandı" : `${m} özet aktif`)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                  (stats?.pushDigestMode ?? "off") === m
+                    ? "bg-amber-400 text-black border-amber-400"
+                    : "bg-white/5 text-white/70 border-white/10 hover:bg-white/10"
+                }`}
+              >
+                {m === "off" ? "Kapalı" : m === "daily" ? "Günlük" : m === "weekly" ? "Haftalık" : "Aylık"}
+              </button>
+            ))}
+          </div>
+          {stats?.pushDigestLastSentAt && (
+            <p className="text-[10px] text-slate-500 mt-1">Son özet: {new Date(stats.pushDigestLastSentAt).toLocaleString("tr-TR")}</p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+          <div className="text-sm font-bold text-white flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-amber-300" /> Anlık bildirim gönder
+          </div>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Başlık" className="border-white/10 bg-white/5" />
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Mesaj metni" rows={3} className="border-white/10 bg-white/5" />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Tıklanınca açılsın (/ veya /ilanlar)" className="border-white/10 bg-white/5" />
+          <Button onClick={() => void sendNow()} disabled={sending} className="w-full bg-amber-400 text-black hover:bg-amber-300 font-bold">
+            {sending ? "Gönderiliyor…" : "Tüm abonelere gönder"}
+          </Button>
+        </div>
+
+        {stats?.recent && stats.recent.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-semibold text-slate-400 uppercase">Son gönderimler</div>
+            {stats.recent.slice(0, 8).map((c) => (
+              <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <div className="text-xs font-bold text-white">{c.title}</div>
+                <div className="text-[10px] text-slate-400 line-clamp-1">{c.body}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {c.schedule} · {c.sentCount} cihaz · {new Date(c.createdAt).toLocaleString("tr-TR")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -2807,7 +2984,7 @@ type AdminTab =
   | "dashboard" | "ilanlar" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "yetkiler" | "ilan-haklari"
   | "telegram" | "whatsapp" | "eleman" | "mesajlar" | "destek"
-  | "bakiye" | "kaynaklar" | "bildirimler" | "ayarlar" | "loglar";
+  | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar";
 
 interface SidebarItem {
   id: AdminTab;
@@ -2856,6 +3033,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
       { id: "bakiye", label: "Bakiye İşlemleri", icon: CreditCard },
       { id: "kaynaklar", label: "İlan Kaynakları", icon: Globe2 },
       { id: "bildirimler", label: "Bildirimler", icon: Bell },
+      { id: "push", label: "Canlı Push", icon: Zap },
       { id: "ayarlar", label: "Ayarlar", icon: Settings },
       { id: "loglar", label: "Log Kayıtları", icon: Terminal },
     ],
@@ -4285,6 +4463,8 @@ export default function AdminDashboard() {
         {activeTab === "mesajlar" && <ChatManagementSection apiCall={apiCall} toast={toast} />}
 
         {activeTab === "bildirimler" && <AdminNotificationsInbox />}
+
+        {activeTab === "push" && <PushNotificationsSection apiCall={apiCall} toast={toast} />}
 
         {activeTab === "bildirimler" && (
         <Section title="Kayan Yazı Yönetimi" icon={MessageSquare}>

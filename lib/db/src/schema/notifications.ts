@@ -45,6 +45,16 @@ export const adminSettingsTable = pgTable("admin_settings", {
   botFakeEnabled: boolean("bot_fake_enabled").notNull().default(true),
   /** Telegram tarama aralığı (dakika): 1, 5, 10 veya 30 */
   telegramScanIntervalMinutes: integer("telegram_scan_interval_minutes").notNull().default(10),
+  /** Web Push (PWA/tarayıcı) canlı bildirimler */
+  pushEnabled: boolean("push_enabled").notNull().default(true),
+  pushOnNewListing: boolean("push_on_new_listing").notNull().default(true),
+  pushOnChatReply: boolean("push_on_chat_reply").notNull().default(true),
+  pushSoundEnabled: boolean("push_sound_enabled").notNull().default(true),
+  /** off | daily | weekly | monthly — özet bildirim */
+  pushDigestMode: text("push_digest_mode").notNull().default("off"),
+  pushDigestLastSentAt: timestamp("push_digest_last_sent_at", { withTimezone: true }),
+  vapidPublicKey: text("vapid_public_key"),
+  vapidPrivateKey: text("vapid_private_key"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

@@ -12,6 +12,7 @@ import parttimeRouter from "./parttime";
 import sourcesRouter from "./sources";
 import pendingJobsRouter from "./pending-jobs";
 import telegramAuthRouter from "./telegram-auth";
+import pushRouter from "./push";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(parttimeRouter);
 router.use(sourcesRouter);
 router.use(pendingJobsRouter);
 router.use(telegramAuthRouter);
+router.use(pushRouter);
 
 export default router;

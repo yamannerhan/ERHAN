@@ -485,6 +485,12 @@ function settingsJson(s: typeof adminSettingsTable.$inferSelect) {
     botBilgiEnabled: s.botBilgiEnabled ?? true,
     botFakeEnabled: s.botFakeEnabled ?? true,
     telegramScanIntervalMinutes: s.telegramScanIntervalMinutes ?? 10,
+    pushEnabled: s.pushEnabled ?? true,
+    pushOnNewListing: s.pushOnNewListing ?? true,
+    pushOnChatReply: s.pushOnChatReply ?? true,
+    pushSoundEnabled: s.pushSoundEnabled ?? true,
+    pushDigestMode: s.pushDigestMode ?? "off",
+    pushDigestLastSentAt: s.pushDigestLastSentAt?.toISOString() ?? null,
   };
 }
 
@@ -499,7 +505,7 @@ router.get("/admin/settings", authMiddleware, requireAdmin, async (_req, res): P
 });
 
 router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, chatTickerMessage, chatPinnedMessage, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes } = req.body as Record<string, unknown>;
+  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, chatTickerMessage, chatPinnedMessage, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes, pushEnabled, pushOnNewListing, pushOnChatReply, pushSoundEnabled, pushDigestMode } = req.body as Record<string, unknown>;
   const updates: Partial<typeof adminSettingsTable.$inferInsert> = {};
   if (chatLocked !== undefined) updates.chatLocked = Boolean(chatLocked);
   if (fakeOnlineBonus !== undefined) updates.fakeOnlineBonus = parseInt(String(fakeOnlineBonus), 10);
@@ -515,6 +521,14 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (botGuvenlikEnabled !== undefined) updates.botGuvenlikEnabled = Boolean(botGuvenlikEnabled);
   if (botBilgiEnabled !== undefined) updates.botBilgiEnabled = Boolean(botBilgiEnabled);
   if (botFakeEnabled !== undefined) updates.botFakeEnabled = Boolean(botFakeEnabled);
+  if (pushEnabled !== undefined) updates.pushEnabled = Boolean(pushEnabled);
+  if (pushOnNewListing !== undefined) updates.pushOnNewListing = Boolean(pushOnNewListing);
+  if (pushOnChatReply !== undefined) updates.pushOnChatReply = Boolean(pushOnChatReply);
+  if (pushSoundEnabled !== undefined) updates.pushSoundEnabled = Boolean(pushSoundEnabled);
+  if (pushDigestMode !== undefined) {
+    const m = String(pushDigestMode);
+    if (["off", "daily", "weekly", "monthly"].includes(m)) updates.pushDigestMode = m;
+  }
   if (telegramScanIntervalMinutes !== undefined) {
     const m = parseInt(String(telegramScanIntervalMinutes), 10);
     if ([1, 5, 10, 30].includes(m)) updates.telegramScanIntervalMinutes = m;

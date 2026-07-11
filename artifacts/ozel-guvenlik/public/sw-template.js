@@ -1,13 +1,68 @@
-const CACHE_NAME = "ozelguvenlik-__CACHE_VERSION__";
+/* ÖzelGüvenlik PWA Service Worker — Web Push + cache bust */
+const CACHE_NAME = "ozelguvenlik-push-v1";
 
-self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+});
 
-self.addEventListener("activate", e => {
-  e.waitUntil(
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: "window" }))
-      .then(clients => clients.forEach(c => c.postMessage({ type: "SW_UPDATED" })))
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let data = {
+    title: "Özel Güvenlik",
+    body: "Yeni bildirim",
+    url: "/",
+    tag: "og-push",
+    sound: true,
+  };
+  try {
+    if (event.data) {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    }
+  } catch {
+    try {
+      data.body = event.data ? event.data.text() : data.body;
+    } catch { /* ignore */ }
+  }
+
+  const options = {
+    body: data.body,
+    icon: "/favicon-192x192.png",
+    badge: "/favicon-32x32.png",
+    tag: data.tag || "og-push",
+    renotify: true,
+    requireInteraction: false,
+    silent: data.sound === false,
+    vibrate: data.sound === false ? undefined : [120, 60, 120],
+    data: { url: data.url || "/" },
+    actions: [{ action: "open", title: "Aç" }],
+  };
+
+  event.waitUntil(self.registration.showNotification(data.title || "Özel Güvenlik", options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const raw = (event.notification.data && event.notification.data.url) || "/";
+  const target = raw.startsWith("http") ? raw : new URL(raw, self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          if ("navigate" in client && typeof client.navigate === "function") {
+            return client.navigate(target).then(() => client.focus());
+          }
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
   );
 });

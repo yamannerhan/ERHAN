@@ -18,6 +18,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { io as socketIo } from "socket.io-client";
 import { useToast } from "@/hooks/use-toast";
+import { PushPermissionBanner } from "./push-permission-banner";
+import { playNotificationBeep } from "@/lib/web-push";
 
 /* ── Theme hook ───────────────────────────────────────────── */
 function useTheme() {
@@ -306,6 +308,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       if (payload?.userId != null && payload.userId !== user.id) return;
       void refetchNotifs();
       void refetchUnread();
+      try { playNotificationBeep(); } catch { /* ignore */ }
     });
     if (socket.connected) authenticate();
     return () => {
@@ -578,6 +581,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       <MobileBottomNav />
       <ChatBubble />
+      <PushPermissionBanner />
     </div>
   );
 }

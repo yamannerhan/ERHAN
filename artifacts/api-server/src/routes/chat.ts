@@ -193,6 +193,9 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
           userId: orig.userId,
           createdAt: new Date().toISOString(),
         });
+        void import("../lib/web-push").then((m) =>
+          m.maybePushChatReply(orig.userId, title, message),
+        ).catch(() => {});
       }
     } catch { /* bildirim hatası mesajı engellemesin */ }
   }

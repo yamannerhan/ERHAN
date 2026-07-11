@@ -1002,7 +1002,8 @@ async function bootstrapWorkers(): Promise<void> {
     // Admin panelden «Bağlan» ile başlar (WA_AUTO_CONNECT=1 ile opsiyonel).
     void initWhatsAppClient();
     startScraperWorker();
-    logger.info("Workers started (telegram + scraper; whatsapp on-demand)");
+    void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
+    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push)");
   } catch (e) {
     logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
   }

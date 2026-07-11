@@ -35,20 +35,22 @@ setDeviceIdGetter(safeGetDeviceId);
 
 const queryClient = new QueryClient();
 
+// PWA Service Worker — Web Push için kaydet (eski cache'leri temizle, SW kalsın)
 if ("serviceWorker" in navigator) {
   void (async () => {
     try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
-    } catch {
-      return;
-    }
-    try {
       const cacheKeys = await caches.keys();
-      await Promise.all(cacheKeys.map((key) => caches.delete(key)));
-    } catch {
-      return;
-    }
+      await Promise.all(
+        cacheKeys
+          .filter((k) => !k.startsWith("ozelguvenlik-push"))
+          .map((k) => caches.delete(k)),
+      );
+    } catch { /* ignore */ }
+    try {
+      const { registerPushServiceWorker, ensurePushSubscriptionQuiet } = await import("./lib/web-push");
+      await registerPushServiceWorker();
+      await ensurePushSubscriptionQuiet();
+    } catch { /* ignore */ }
   })();
 }
 

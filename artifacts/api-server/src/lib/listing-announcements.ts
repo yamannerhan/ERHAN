@@ -99,4 +99,9 @@ export async function announceNewListing(
     adminOnly,
     createdAt: new Date().toISOString(),
   });
+
+  // PWA/tarayıcı: herkese açık yayınlanan ilanlar (izin veren cihazlar)
+  void import("./web-push").then((m) =>
+    m.maybePushNewListing({ id: listing.id, title: listing.title, city: listing.city }),
+  ).catch(() => {});
 }
