@@ -651,7 +651,7 @@ export async function fetchWhatsAppMessagesDetailed(
 
   const cutoff = opts.afterTimestampMs != null
     ? opts.afterTimestampMs
-    : (Date.now() - (opts.maxAgeDays ?? 15) * 24 * 60 * 60 * 1000);
+    : (Date.now() - (opts.maxAgeDays ?? 730) * 24 * 60 * 60 * 1000);
 
   const chatId = (chat as any).id?._serialized ?? groupJid;
   const byId = new Map<string, WhatsAppMessage>();

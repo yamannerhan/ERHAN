@@ -163,10 +163,16 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
   return source.autoPublish || !source.requireApproval;
 }
 
-// İlk tarama / sıfırlama: son 15 gün. Sonraki taramalar: lastTelegramMessageId sonrası.
+// Telegram ilk tarama: son 30 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
-const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
+/** WhatsApp geçmişi — Chromium ne kadar verirse (üst sınır sadece cutoff hesabı) */
+const WA_INITIAL_SCAN_DAYS = 730;
+const WA_INITIAL_SCAN_MS = WA_INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
+/** Bot ilanları sitede kalma süresi (tarama penceresinden bağımsız) */
+const LISTING_TTL_DAYS = 15;
+const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 90 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
@@ -326,10 +332,10 @@ function bumpScanBackoffOnRateLimit(): void {
 }
 
 /**
- * Bot ilanı sitede INITIAL_SCAN_DAYS (15) gün kalsın (siteye giriş zamanı).
+ * Bot ilanı sitede LISTING_TTL_DAYS (15) gün kalsın — tarama süresi (30g / WA geçmiş) ayrı.
  */
 function listingExpiryFrom(_postedAt?: Date): Date {
-  return new Date(Date.now() + INITIAL_SCAN_MS);
+  return new Date(Date.now() + LISTING_TTL_MS);
 }
 
 /** Tekrar görülen ilan: lastSeen güncelle, yayın/bitiş tarihini değiştirme. */
@@ -1573,9 +1579,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let fetchRounds = 0;
   let oldestTs = Date.now();
   try {
-    // İlk tarama: 30g hedef; WA/Chromium yetmezse gidebildiği kadar → eski→yeni işle
+    // İlk tarama: WA gidebildiği kadar (Chromium); TG ayrı 30g
     const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
-      ? { maxAgeDays: INITIAL_SCAN_DAYS, deep: true }
+      ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true }
       : { afterTimestampMs: lastTs, limit: 300 });
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
@@ -1618,12 +1624,12 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   // Derinlik: en eski mesaj hedefe ne kadar yaklaştı; tükenince %100’e çekilir
   const depthMs = Math.max(0, Date.now() - oldestTs);
   const depthDays = Math.max(0, Math.round(depthMs / 86400000));
-  const depthPct = Math.min(95, Math.max(5, Math.round((depthMs / INITIAL_SCAN_MS) * 95)));
+  const depthPct = Math.min(95, Math.max(5, Math.round((depthMs / WA_INITIAL_SCAN_MS) * 95)));
   let liveProgress = Math.max(Number(source.initialScanProgress ?? 1), depthPct);
 
   await patchSourceProgress(source.id, {
     lastError: isInitialScan && !reachedCutoff && !historyExhausted
-      ? `Geçmiş yükleniyor… ${messages.length} mesaj · en eski ~${depthDays}g (hedef ${INITIAL_SCAN_DAYS}g, sonra yeniye)`
+      ? `Geçmiş yükleniyor… ${messages.length} mesaj · en eski ~${depthDays}g (gidebildiği kadar)`
       : null,
     initialScanPhase: isInitialScan ? "backward" : null,
     initialScanProgress: isInitialScan ? liveProgress : 100,
@@ -1711,7 +1717,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
         messages: messages.length,
       },
       reachedCutoff
-        ? `scraper: wa ilk tarama tamam (${INITIAL_SCAN_DAYS}g)`
+        ? `scraper: wa ilk tarama tamam (gidebildiği kadar)`
         : `scraper: wa ilk tarama tamam (gidebildiği kadar ~${depthDays}g, eski→yeni)`,
     );
   }
@@ -1735,7 +1741,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
-/** Arka planda grup/kanalları sırayla 15 gün tara — tur tur round-robin (aynı kaynakta takılmaz). */
+/** Arka planda grup/kanalları sırayla gidebildiği kadar tara — tur tur round-robin. */
 let waSequentialRunning = false;
 let waScanGeneration = 0;
 
@@ -1750,7 +1756,7 @@ export function onWhatsAppReady(): void {
         await patchSourceProgress(s.id, {
           lastError: s.initialScanDone
             ? "Erişim sağlandı — kaldığı mesajdan dinleniyor"
-            : `Erişim sağlandı — son ${INITIAL_SCAN_DAYS} gün taranıyor`,
+            : "Erişim sağlandı — geçmiş gidebildiği kadar taranıyor",
           isScanning: false,
           lastCheckedAt: new Date(),
         });
@@ -1884,7 +1890,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
     }
   } finally {
     if (myGen === waScanGeneration) waSequentialRunning = false;
-    logger.info("scraper: wa sıralı 15 gün tarama kuyruğu bitti");
+    logger.info("scraper: wa sıralı derin tarama kuyruğu bitti");
   }
 }
 
@@ -1935,7 +1941,7 @@ async function resetWhatsAppSourceState(sourceId: number): Promise<void> {
   }).where(eq(sourcesTable.id, sourceId));
 }
 
-/** WhatsApp ilanlarını sil + 15 gün temiz tarama (Telegram Botları Sıfırla gibi). */
+/** WhatsApp ilanlarını sil + gidebildiği kadar temiz tarama (Telegram Botları Sıfırla gibi). */
 export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; pendingGroups: number }> {
   waScanGeneration++;
   waSequentialRunning = false;
@@ -1958,7 +1964,7 @@ export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }):
     deletedListings += await deleteListingsByIds(orphans.map((o) => o.id));
   }
 
-  logger.info({ deletedListings, groups: waSources.length }, "scraper: WhatsApp sıfırlandı, 15 gün tarama başlıyor");
+  logger.info({ deletedListings, groups: waSources.length }, "scraper: WhatsApp sıfırlandı, gidebildiği kadar tarama başlıyor");
 
   if (!opts?.deferRescan && isWhatsAppReady() && waSources.some((s) => s.active)) {
     void runWhatsAppSequentialDeepScan();
@@ -1967,7 +1973,7 @@ export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }):
   return { deletedListings, pendingGroups: waSources.filter((s) => s.active).length };
 }
 
-/** Tek WA grubunu sıfırla + 15 gün yeniden tara. */
+/** Tek WA grubunu sıfırla + gidebildiği kadar yeniden tara. */
 export async function resetSingleWhatsAppSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
@@ -1987,7 +1993,7 @@ export async function resetSingleWhatsAppSource(sourceId: number): Promise<{ del
   return { deletedListings };
 }
 
-/** Şimdi Tara: bitmemiş 15 gün varsa devam; bittiyse sadece yeni mesajlar (üstüne aynı ilanı eklemez). */
+/** Şimdi Tara: bitmemiş ilk tarama varsa devam; bittiyse sadece yeni mesajlar. */
 export async function triggerWhatsAppScan(): Promise<{
   scanned: number;
   ready: boolean;
@@ -2058,7 +2064,7 @@ async function scanWhatsAppSources(
     return;
   }
 
-  // İlk 15 gün bitmemişse sıralı derin tarama; bittiyse 5 dk artımlı devam
+  // İlk tarama bitmemişse sıralı derin tarama; bittiyse artımlı devam
   const hasPendingInitial = whatsappSources.some((s) => !s.initialScanDone);
   if (hasPendingInitial) {
     void runWhatsAppSequentialDeepScan();
@@ -2344,12 +2350,12 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + INITIAL_SCAN_DAYS. */
+/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + LISTING_TTL_DAYS (15). */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
-  const days = INITIAL_SCAN_DAYS;
+  const days = LISTING_TTL_DAYS;
 
-  // Bot ilanları INITIAL_SCAN_DAYS süreli; eski satırları da hizala
+  // Bot ilanları 15 gün sitede kalır (tarama 30g / WA geçmişinden bağımsız)
   try {
     await db.execute(sql.raw(`
       UPDATE listings
@@ -2410,7 +2416,7 @@ export async function expireImportedListings(): Promise<number> {
   return purgeExpiredListings();
 }
 
-/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara. */
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */
 export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
@@ -2500,7 +2506,7 @@ export async function resetAllBotsAndRescan(): Promise<{
     `Telegram: ${tg.deletedListings} ilan silindi, yeniden taranıyor`,
     whatsappSkipped
       ? "WhatsApp: bağlı değil (önce QR ile bağlanın)"
-      : `WhatsApp: ${whatsappDeleted} ilan silindi, 15 gün taranıyor`,
+      : `WhatsApp: ${whatsappDeleted} ilan silindi, gidebildiği kadar taranıyor`,
     `Eleman.net: ${el.deletedListings} ilan silindi, iller taranıyor (telefon zorunlu)`,
   ];
 
@@ -2513,7 +2519,7 @@ export async function resetAllBotsAndRescan(): Promise<{
   };
 }
 
-/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 15 günü yeniden tara. */
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
@@ -2572,7 +2578,7 @@ export async function triggerDeepRescan30Days(): Promise<void> {
     isScanning: false,
     lastError: null,
   }).where(eq(sourcesTable.platform, "telegram"));
-  logger.info({ sources: ids.length }, "scraper: 15 gün derin tarama başlatıldı");
+  logger.info({ sources: ids.length }, "scraper: 30 gün derin tarama başlatıldı");
   await triggerRescan();
 }
 
