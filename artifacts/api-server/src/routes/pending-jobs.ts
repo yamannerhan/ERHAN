@@ -106,7 +106,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     applyUrl: job.phone ? `tel:${job.phone}` : undefined,
     autoDeleteOnExpiry: true,
     // 30 gün = onay/siteye yayın anı (kaynak mesaj tarihi değil)
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     publishedAt: job.createdAt ?? new Date(),
     lastSeenAt: new Date(),
     firstSeenAt: new Date(),

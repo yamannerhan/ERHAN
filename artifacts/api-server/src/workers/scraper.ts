@@ -1,4 +1,4 @@
-import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
+﻿import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
 import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
@@ -163,9 +163,9 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
   return source.autoPublish || !source.requireApproval;
 }
 
-// İlk tarama: son 30 gün. Sonraki taramalar: lastTelegramMessageId sonrası.
+// İlk tarama / sıfırlama: son 15 gün. Sonraki taramalar: lastTelegramMessageId sonrası.
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
-const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 90 * 1000;
@@ -326,8 +326,7 @@ function bumpScanBackoffOnRateLimit(): void {
 }
 
 /**
- * İlan sitede 30 gün kalsın (kaynak mesaj tarihi değil, siteye giriş zamanı).
- * Botların eski TG/WA tarihine göre süre biçmesi sayı çökmesine yol açıyordu.
+ * Bot ilanı sitede INITIAL_SCAN_DAYS (15) gün kalsın (siteye giriş zamanı).
  */
 function listingExpiryFrom(_postedAt?: Date): Date {
   return new Date(Date.now() + INITIAL_SCAN_MS);
@@ -1736,14 +1735,40 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
-/** Arka planda grup/kanalları sırayla 30 gün tara — tur tur round-robin (aynı kaynakta takılmaz). */
+/** Arka planda grup/kanalları sırayla 15 gün tara — tur tur round-robin (aynı kaynakta takılmaz). */
 let waSequentialRunning = false;
 let waScanGeneration = 0;
 
-/** WhatsApp bağlanınca / kaynak eklenince otomatik başlat (sıfırlama gerekmez) */
+/** WhatsApp bağlanınca: aktif gruplara erişim + kaldığı yerden dinle (sıfırlama gerekmez) */
 export function onWhatsAppReady(): void {
-  logger.info("scraper: WhatsApp ready — bekleyen ilk taramalar başlatılıyor");
-  void runWhatsAppSequentialDeepScan();
+  logger.info("scraper: WhatsApp ready — gruplar erişime açılıyor, kaldığı yerden dinleniyor");
+  void (async () => {
+    try {
+      const waSources = await db.select().from(sourcesTable)
+        .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.active, true)));
+      for (const s of waSources) {
+        await patchSourceProgress(s.id, {
+          lastError: s.initialScanDone
+            ? "Erişim sağlandı — kaldığı mesajdan dinleniyor"
+            : `Erişim sağlandı — son ${INITIAL_SCAN_DAYS} gün taranıyor`,
+          isScanning: false,
+          lastCheckedAt: new Date(),
+        });
+      }
+      await db.update(sourcesTable)
+        .set({ status: "active" })
+        .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.active, true)));
+    } catch (e) {
+      logger.warn({ err: e }, "scraper: wa ready status update failed");
+    }
+    void runWhatsAppSequentialDeepScan();
+    // Bitmiş gruplar için bir kez artımlı tarama (son mesajdan)
+    try {
+      await triggerWhatsAppScan();
+    } catch (e) {
+      logger.warn({ err: e }, "scraper: wa ready incremental kick failed");
+    }
+  })();
 }
 
 export function kickWhatsAppDeepScan(): void {
@@ -1859,7 +1884,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
     }
   } finally {
     if (myGen === waScanGeneration) waSequentialRunning = false;
-    logger.info("scraper: wa sıralı 30 gün tarama kuyruğu bitti");
+    logger.info("scraper: wa sıralı 15 gün tarama kuyruğu bitti");
   }
 }
 
@@ -1910,7 +1935,7 @@ async function resetWhatsAppSourceState(sourceId: number): Promise<void> {
   }).where(eq(sourcesTable.id, sourceId));
 }
 
-/** WhatsApp ilanlarını sil + 30 gün temiz tarama (Telegram Botları Sıfırla gibi). */
+/** WhatsApp ilanlarını sil + 15 gün temiz tarama (Telegram Botları Sıfırla gibi). */
 export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; pendingGroups: number }> {
   waScanGeneration++;
   waSequentialRunning = false;
@@ -1933,7 +1958,7 @@ export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }):
     deletedListings += await deleteListingsByIds(orphans.map((o) => o.id));
   }
 
-  logger.info({ deletedListings, groups: waSources.length }, "scraper: WhatsApp sıfırlandı, 30 gün tarama başlıyor");
+  logger.info({ deletedListings, groups: waSources.length }, "scraper: WhatsApp sıfırlandı, 15 gün tarama başlıyor");
 
   if (!opts?.deferRescan && isWhatsAppReady() && waSources.some((s) => s.active)) {
     void runWhatsAppSequentialDeepScan();
@@ -1942,7 +1967,7 @@ export async function resetAllWhatsAppSources(opts?: { deferRescan?: boolean }):
   return { deletedListings, pendingGroups: waSources.filter((s) => s.active).length };
 }
 
-/** Tek WA grubunu sıfırla + 30 gün yeniden tara. */
+/** Tek WA grubunu sıfırla + 15 gün yeniden tara. */
 export async function resetSingleWhatsAppSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
@@ -1962,7 +1987,7 @@ export async function resetSingleWhatsAppSource(sourceId: number): Promise<{ del
   return { deletedListings };
 }
 
-/** Şimdi Tara: bitmemiş 30 gün varsa devam; bittiyse sadece yeni mesajlar (üstüne aynı ilanı eklemez). */
+/** Şimdi Tara: bitmemiş 15 gün varsa devam; bittiyse sadece yeni mesajlar (üstüne aynı ilanı eklemez). */
 export async function triggerWhatsAppScan(): Promise<{
   scanned: number;
   ready: boolean;
@@ -2033,7 +2058,7 @@ async function scanWhatsAppSources(
     return;
   }
 
-  // İlk 30 gün bitmemişse sıralı derin tarama; bittiyse 5 dk artımlı devam
+  // İlk 15 gün bitmemişse sıralı derin tarama; bittiyse 5 dk artımlı devam
   const hasPendingInitial = whatsappSources.some((s) => !s.initialScanDone);
   if (hasPendingInitial) {
     void runWhatsAppSequentialDeepScan();
@@ -2195,7 +2220,7 @@ export function startScraperWorker(): void {
         .from(sourcesTable).where(eq(sourcesTable.active, true));
       for (const s of active) {
         const err = (s.lastError ?? "").toLowerCase();
-        const soft = /bağlı değil|bağlanın|oturum yenilenemedi|yeniden bağlanıyor/.test(err);
+        const soft = /bağlı değil|bağlanın|oturum yenilenemedi|yeniden bağlanıyor|erişim sağlandı/.test(err);
         await db.update(sourcesTable)
           .set({ isScanning: false, ...(soft ? { lastError: null } : {}) })
           .where(eq(sourcesTable.id, s.id));
@@ -2319,26 +2344,27 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + 30 gün. */
+/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + INITIAL_SCAN_DAYS. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
+  const days = INITIAL_SCAN_DAYS;
 
-  // Eski bot mantığı publishedAt+30 yapıyordu → erken siliniyordu. firstSeenAt+30'a düzelt.
+  // Bot ilanları INITIAL_SCAN_DAYS süreli; eski satırları da hizala
   try {
-    await db.execute(sql`
+    await db.execute(sql.raw(`
       UPDATE listings
       SET
         first_seen_at = COALESCE(first_seen_at, NOW()),
-        expires_at = COALESCE(first_seen_at, NOW()) + INTERVAL '30 days',
+        expires_at = COALESCE(first_seen_at, NOW()) + INTERVAL '${days} days',
         auto_delete_on_expiry = true
       WHERE status = 'active'
         AND is_active = true
         AND (
           expires_at IS NULL
           OR first_seen_at IS NULL
-          OR expires_at < COALESCE(first_seen_at, NOW()) + INTERVAL '29 days'
+          OR expires_at < COALESCE(first_seen_at, NOW()) + INTERVAL '${Math.max(1, days - 1)} days'
         )
-    `);
+    `));
   } catch (e) {
     logger.warn({ err: e }, "scraper: expiresAt düzeltmesi atlandı");
   }
@@ -2384,7 +2410,7 @@ export async function expireImportedListings(): Promise<number> {
   return purgeExpiredListings();
 }
 
-/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara. */
 export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
@@ -2474,7 +2500,7 @@ export async function resetAllBotsAndRescan(): Promise<{
     `Telegram: ${tg.deletedListings} ilan silindi, yeniden taranıyor`,
     whatsappSkipped
       ? "WhatsApp: bağlı değil (önce QR ile bağlanın)"
-      : `WhatsApp: ${whatsappDeleted} ilan silindi, 30 gün taranıyor`,
+      : `WhatsApp: ${whatsappDeleted} ilan silindi, 15 gün taranıyor`,
     `Eleman.net: ${el.deletedListings} ilan silindi, iller taranıyor (telefon zorunlu)`,
   ];
 
@@ -2487,7 +2513,7 @@ export async function resetAllBotsAndRescan(): Promise<{
   };
 }
 
-/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 15 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
@@ -2546,7 +2572,7 @@ export async function triggerDeepRescan30Days(): Promise<void> {
     isScanning: false,
     lastError: null,
   }).where(eq(sourcesTable.platform, "telegram"));
-  logger.info({ sources: ids.length }, "scraper: 30 gün derin tarama başlatıldı");
+  logger.info({ sources: ids.length }, "scraper: 15 gün derin tarama başlatıldı");
   await triggerRescan();
 }
 

@@ -316,7 +316,7 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   conditions.push(eq(listingsTable.status, "active"));
   conditions.push(eq(listingsTable.isActive, true));
   // Sitede görünme: siteye eklenme tarihine göre 30 gün (kaynak mesaj tarihi değil)
-  const activeCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
   conditions.push(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
 
   const settings = await db.select({ hiddenListingCities: adminSettingsTable.hiddenListingCities }).from(adminSettingsTable).limit(1);
@@ -374,7 +374,7 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
     .where(and(
       eq(listingsTable.status, "active"),
       eq(listingsTable.isActive, true),
-      sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)}`,
+      sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)}`,
     ))
     .groupBy(listingsTable.city)
     .orderBy(sql`count(*) desc`, listingsTable.city);
@@ -462,7 +462,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     authorId: req.user!.id,
     status: "active",
     isActive: true,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
   }).returning();
 
@@ -715,7 +715,7 @@ router.post("/listings/:id/republish", authMiddleware, async (req, res): Promise
   if (listing.authorId !== req.user!.id && req.user!.role !== "admin") {
     res.status(403).json({ error: "Bu ilanı yeniden yayınlama yetkiniz yok" }); return;
   }
-  const newExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const newExpiry = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
   const now = new Date();
   const [updated] = await db.update(listingsTable)
     .set({ status: "active", isActive: true, expiresAt: newExpiry, publishedAt: now, updatedAt: now })

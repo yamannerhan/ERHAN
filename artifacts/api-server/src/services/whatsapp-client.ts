@@ -95,14 +95,40 @@ async function loadWhatsAppLib(): Promise<void> {
 }
 
 function normalizePhone(raw: string): string {
-  return raw.replace(/\D/g, "").replace(/^0/, "90");
+  let d = raw.replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  // 05xxxxxxxxx → 905xxxxxxxxx
+  if (d.length === 11 && d.startsWith("0")) d = "90" + d.slice(1);
+  // 5xxxxxxxxx → 905xxxxxxxxx
+  if (d.length === 10 && d.startsWith("5")) d = "90" + d;
+  return d;
+}
+
+function isValidWaPhone(phone: string): boolean {
+  // Uluslararası, sembolsüz (TR: 905xxxxxxxxx)
+  return /^\d{10,15}$/.test(phone) && !phone.startsWith("0");
+}
+
+function clearWhatsAppLocalSession(): void {
+  try {
+    const sessionDir = path.join(AUTH_PATH, "session-ozelguvenlik");
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      logger.info("wa: pairing için eski LocalAuth oturumu silindi");
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: session temizlenemedi");
+  }
 }
 
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
     logger.info("wa: QR received");
     lastError = null;
-    pairingCode = null;
+    // Kod ile bağlanırken QR pairingCode'u silmesin
+    if (!pendingPhone) {
+      pairingCode = null;
+    }
     try {
       qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2, errorCorrectionLevel: "M" });
       logger.info("wa: QR data URL hazır");
@@ -116,8 +142,9 @@ function attachHandlers(c: any): void {
   });
 
   c.on("code", (code: string) => {
-    logger.info("wa: pairing code received");
-    pairingCode = code;
+    const raw = String(code || "").replace(/\s+/g, "");
+    logger.info({ codeLen: raw.length }, "wa: pairing code received");
+    pairingCode = raw;
     qrDataUrl = null;
     lastError = null;
   });
@@ -233,17 +260,44 @@ function stopWhatsAppWatchdog(): void {
   }
 }
 
-export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Promise<void> {
-  if (isReady && client) return;
+export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?: boolean }): Promise<void> {
+  const pairingMode = !!(opts?.phoneNumber?.trim());
+  const force = opts?.force === true || pairingMode;
+
+  if (isReady && client && !force) return;
+  if (starting && !force) return;
+
+  // Pairing / force: önceki client'ı kapat, takılı starting'i çöz
+  if (force && (client || isReady || starting)) {
+    stopWhatsAppWatchdog();
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const old = client;
+    client = null;
+    isReady = false;
+    starting = false;
+    try { await old?.destroy?.(); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
   if (starting) return;
   starting = true;
   manualStop = false;
-  lastError = null;
+  lastError = pairingMode ? "Onay kodu hazırlanıyor…" : null;
   qrDataUrl = null;
   pairingCode = null;
 
-  if (opts?.phoneNumber) {
-    pendingPhone = normalizePhone(opts.phoneNumber);
+  if (pairingMode) {
+    pendingPhone = normalizePhone(opts!.phoneNumber!);
+    if (!isValidWaPhone(pendingPhone)) {
+      starting = false;
+      lastError = `Geçersiz numara: ${pendingPhone}. Örn: 905xxxxxxxxx (ülke kodu ile)`;
+      throw new Error(lastError);
+    }
+    // Eski oturum QR'a düşürüp kodu engelliyor — pairing için temiz başla
+    clearWhatsAppLocalSession();
   }
 
   try {
@@ -256,7 +310,7 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
     }
 
     const executablePath = resolveExecutablePath();
-    logger.info({ executablePath }, "wa: Chromium yolu");
+    logger.info({ executablePath, pairingMode, phone: pendingPhone }, "wa: Chromium yolu");
 
     const clientOpts: Record<string, unknown> = {
       authStrategy: new LocalAuthCtor({ dataPath: AUTH_PATH, clientId: "ozelguvenlik" }),
@@ -272,24 +326,51 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string }): Prom
           "--no-default-browser-check",
           "--disable-extensions",
           "--mute-audio",
-          // --single-process kaldırıldı: Chromium sık düşüyordu
         ],
       },
-      // Bağlantı kopmalarında wwebjs'in kendi yeniden denemesi
       restartOnAuthFail: false,
     };
 
-    if (pendingPhone) {
+    if (pendingPhone && pairingMode) {
+      // Kod ömrü ~1–2 dk — 60 sn'de yenile
       clientOpts.pairWithPhoneNumber = {
         phoneNumber: pendingPhone,
         showNotification: true,
-        intervalMs: 180_000,
+        intervalMs: 60_000,
       };
     }
 
     client = new ClientCtor(clientOpts);
     attachHandlers(client);
+
+    const codeWatch = pairingMode
+      ? setTimeout(() => {
+          if (!isReady && !pairingCode) {
+            lastError = "Onay kodu 90 sn içinde gelmedi. Numarayı 905… formatında kontrol edip tekrar deneyin.";
+            logger.warn({ phone: pendingPhone }, "wa: pairing code timeout");
+          }
+        }, 90_000)
+      : null;
+
     await client.initialize();
+    if (codeWatch) clearTimeout(codeWatch);
+
+    if (pairingMode && pendingPhone && !isReady && !pairingCode && typeof client.requestPairingCode === "function") {
+      try {
+        const code = await client.requestPairingCode(pendingPhone, true, 60_000);
+        if (code) {
+          pairingCode = String(code).replace(/\s+/g, "");
+          qrDataUrl = null;
+          lastError = null;
+          logger.info({ codeLen: pairingCode.length }, "wa: requestPairingCode ok");
+        }
+      } catch (e) {
+        logger.warn({ err: e }, "wa: requestPairingCode fallback başarısız");
+        if (!pairingCode) {
+          lastError = "Onay kodu alınamadı. Birkaç saniye sonra tekrar deneyin veya QR ile bağlanın.";
+        }
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     lastError = msg.includes("ENOENT") || msg.includes("Chromium")
@@ -570,7 +651,7 @@ export async function fetchWhatsAppMessagesDetailed(
 
   const cutoff = opts.afterTimestampMs != null
     ? opts.afterTimestampMs
-    : (Date.now() - (opts.maxAgeDays ?? 30) * 24 * 60 * 60 * 1000);
+    : (Date.now() - (opts.maxAgeDays ?? 15) * 24 * 60 * 60 * 1000);
 
   const chatId = (chat as any).id?._serialized ?? groupJid;
   const byId = new Map<string, WhatsAppMessage>();

@@ -277,14 +277,21 @@ router.get("/admin/whatsapp/status", authMiddleware, requireAdmin, async (_req, 
 router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber.trim() : undefined;
+    if (phoneNumber) {
+      const digits = phoneNumber.replace(/\D/g, "");
+      if (digits.length < 10) {
+        res.status(400).json({ success: false, error: "Geçerli telefon girin (örn: 905xxxxxxxxx)" });
+        return;
+      }
+    }
     // Arka planda başlat — QR/kod üretimi initialize sırasında gelir
-    void startWhatsAppClient(phoneNumber ? { phoneNumber } : undefined).catch((e) => {
+    void startWhatsAppClient(phoneNumber ? { phoneNumber, force: true } : { force: true }).catch((e) => {
       console.error("wa start error", e);
     });
     res.json({
       success: true,
       message: phoneNumber
-        ? "WhatsApp başlatıldı. Telefona gelen onay kodunu bekleyin..."
+        ? "WhatsApp başlatıldı. Telefona gelen onay kodunu bekleyin (905… formatı)."
         : "WhatsApp başlatıldı. QR kod bekleniyor...",
     });
   } catch (e) {
