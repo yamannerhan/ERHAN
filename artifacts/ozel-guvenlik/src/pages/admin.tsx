@@ -2100,11 +2100,11 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [qr, setQr] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
-  const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; selected?: boolean }>>([]);
+  const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
   const [errorLog, setErrorLog] = useState<string>("");
   const [lastScanAt, setLastScanAt] = useState<string>("Henüz taranmadı");
   const [savedSources, setSavedSources] = useState<Array<{
-    id: number; name: string; url: string; active: boolean; checkInterval: number;
+    id: number; name: string; url: string; kind?: "group" | "channel"; active: boolean; checkInterval: number;
     initialScanDone: boolean; initialScanProgress: number; isScanning: boolean;
     totalImported: number; listingCount: number;
     lastScanMessagesRead: number; lastScanFound: number; lastScanAdded: number;
@@ -2137,7 +2137,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
 
       if (isConn) {
         const groupList = await apiCall("/admin/whatsapp/groups", "GET");
-        const parsed = groupList as { groups?: Array<{ id: string; name: string; participants?: number }> };
+        const parsed = groupList as { groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }> };
         setGroups(prev => {
           const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
           return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
@@ -2208,7 +2208,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const saveSelectedGroups = async () => {
     const selected = groups.filter(g => g.selected);
     if (selected.length === 0) {
-      toast({ title: "Grup seçin", description: "Kaydetmek için en az bir grup seçin.", variant: "destructive" });
+      toast({ title: "Grup/kanal seçin", description: "Kaydetmek için en az bir grup veya kanal seçin.", variant: "destructive" });
       return;
     }
     setLoading(true);
@@ -2222,7 +2222,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         });
         ok++;
       }
-      toast({ title: `${ok} grup kaydedildi`, description: "İlk tarama: son 30 gün. Sonra her 5 dk devam." });
+      toast({ title: `${ok} kaynak kaydedildi`, description: "Grup + kanal. İlk tarama: son 30 gün." });
       setLastScanAt(new Date().toLocaleString("tr-TR"));
       await refresh();
     } catch (error) {
@@ -2399,19 +2399,28 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         </div>
       </div>
 
-      {/* Kayıtlı grup istatistikleri */}
+      {/* Kayıtlı grup/kanal istatistikleri */}
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
-        <h4 className="text-base font-bold text-white mb-1">Kayıtlı Gruplar — Tarama İstatistikleri</h4>
-        <p className="text-xs text-slate-400 mb-4">Hangi gruptan kaç ilan çekildi</p>
+        <h4 className="text-base font-bold text-white mb-1">Kayıtlı Gruplar & Kanallar — Tarama İstatistikleri</h4>
+        <p className="text-xs text-slate-400 mb-4">Hangi grup/kanaldan kaç ilan çekildi (tarama sırayla, takılmaz)</p>
         {savedSources.length === 0 ? (
-          <p className="text-xs text-slate-500 text-center py-6">Henüz kayıtlı WhatsApp grubu yok. Aşağıdan seçip kaydedin.</p>
+          <p className="text-xs text-slate-500 text-center py-6">Henüz kayıtlı WhatsApp grubu/kanalı yok. Aşağıdan seçip kaydedin.</p>
         ) : (
           <div className="space-y-2 max-h-[480px] overflow-y-auto">
             {savedSources.map((s) => (
               <div key={s.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <div className="text-sm font-bold text-white truncate">{s.name}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="text-sm font-bold text-white truncate">{s.name}</div>
+                      <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                        (s.kind === "channel" || s.url?.includes("@newsletter"))
+                          ? "bg-sky-500/20 text-sky-300"
+                          : "bg-emerald-500/15 text-emerald-300"
+                      }`}>
+                        {(s.kind === "channel" || s.url?.includes("@newsletter")) ? "KANAL" : "GRUP"}
+                      </span>
+                    </div>
                     <div className="text-[10px] text-slate-500 truncate">{s.url}</div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -2438,7 +2447,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                     disabled={resetting || resettingSourceId === s.id || !connected}
                     className="ml-auto text-[10px] font-bold text-rose-300 hover:text-rose-200 disabled:opacity-40"
                   >
-                    {resettingSourceId === s.id ? "Sıfırlanıyor…" : "Bu Grubu Sıfırla"}
+                    {resettingSourceId === s.id ? "Sıfırlanıyor…" : "Bu Kaynağı Sıfırla"}
                   </button>
                 </div>
                 {s.lastError && <div className="mt-1 text-[10px] text-rose-400 truncate">{s.lastError}</div>}
@@ -2451,8 +2460,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <h4 className="text-base font-bold text-white">Grup Listesi</h4>
-            <p className="text-xs text-slate-400">İlan çekilecek grupları seç → Kaydet</p>
+            <h4 className="text-base font-bold text-white">Grup & Kanal Listesi</h4>
+            <p className="text-xs text-slate-400">İlan çekilecek grupları ve kanalları seç → Kaydet</p>
           </div>
           <button
             onClick={() => void saveSelectedGroups()}
@@ -2465,14 +2474,21 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         <div className="space-y-2 max-h-[420px] overflow-y-auto">
           {groups.length === 0 ? (
             <p className="text-xs text-slate-500 text-center py-8">
-              {connected ? "Grup bulunamadı." : "Önce WhatsApp'a bağlanın."}
+              {connected ? "Grup/kanal bulunamadı." : "Önce WhatsApp'a bağlanın."}
             </p>
           ) : groups.map(group => (
             <button key={group.id} onClick={() => toggleGroup(group.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition ${group.selected ? "border-emerald-400 bg-emerald-400/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-bold text-white">{group.name}</div>
-                  <div className="text-xs text-slate-400 truncate">{group.id}{group.participants != null ? ` · ${group.participants} üye` : ""}</div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="truncate text-sm font-bold text-white">{group.name}</div>
+                    <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                      group.kind === "channel" ? "bg-sky-500/20 text-sky-300" : "bg-emerald-500/15 text-emerald-300"
+                    }`}>
+                      {group.kind === "channel" ? "KANAL" : "GRUP"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 truncate">{group.id}{group.participants != null && group.participants > 0 ? ` · ${group.participants} üye` : ""}</div>
                 </div>
                 <span className="text-xs font-bold text-slate-300 shrink-0">{group.selected ? "Seçildi" : "Seçilmedi"}</span>
               </div>

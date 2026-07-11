@@ -335,7 +335,8 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     lastTelegramMessageId: null,
   }).returning();
 
-  res.json({ success: true, source });
+  const kind = groupId.includes("@newsletter") ? "kanal" : "grup";
+  res.json({ success: true, source, message: `${kind} kaydedildi.` });
 });
 
 router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req, res) => {
@@ -351,6 +352,7 @@ router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req,
       id: s.id,
       name: s.name,
       url: s.url,
+      kind: s.url?.includes("@newsletter") ? "channel" : "group",
       active: s.active,
       checkInterval: s.checkInterval,
       initialScanDone: s.initialScanDone ?? false,

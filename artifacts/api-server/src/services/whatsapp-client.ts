@@ -32,6 +32,7 @@ export interface WhatsAppChannel {
   id: string;
   name: string;
   participants: number;
+  kind: "group" | "channel";
 }
 
 export interface WhatsAppMessage {
@@ -350,14 +351,50 @@ export async function stopWhatsAppClient(): Promise<void> {
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
-  const chats = await client.getChats();
-  return chats
-    .filter((c: any) => c.isGroup)
-    .map((c: any) => ({
-      id: c.id._serialized,
-      name: c.name || c.id._serialized,
-      participants: c.participants?.length ?? 0,
-    }));
+  const byId = new Map<string, WhatsAppChannel>();
+
+  try {
+    const chats = await client.getChats();
+    for (const c of chats as any[]) {
+      const id = String(c?.id?._serialized ?? "");
+      if (!id) continue;
+      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
+      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
+      if (!isChannel && !isGroup) continue;
+      byId.set(id, {
+        id,
+        name: String(c.name || c.formattedTitle || id),
+        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
+        kind: isChannel ? "channel" : "group",
+      });
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getChats failed");
+  }
+
+  // Abone olunan kanallar — getChats bazen eksik bırakır
+  try {
+    if (typeof client.getChannels === "function") {
+      const channels = await client.getChannels();
+      for (const c of channels as any[]) {
+        const id = String(c?.id?._serialized ?? "");
+        if (!id) continue;
+        byId.set(id, {
+          id,
+          name: String(c.name || c.formattedTitle || id),
+          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
+          kind: "channel",
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getChannels failed");
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
+    return a.name.localeCompare(b.name, "tr");
+  });
 }
 
 /** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */

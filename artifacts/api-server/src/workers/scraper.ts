@@ -1491,27 +1491,30 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   }
 
   const groupJid = source.url?.trim();
-  if (!groupJid || !groupJid.includes("@")) {
+  if (!groupJid || !(groupJid.includes("@g.us") || groupJid.includes("@newsletter") || groupJid.includes("@"))) {
     await patchSourceProgress(source.id, {
-      lastError: "Geçersiz WhatsApp grup ID. Önce grupları kaydedin.",
+      lastError: "Geçersiz WhatsApp grup/kanal ID. Önce grup veya kanal kaydedin.",
       isScanning: false,
     });
     return stats;
   }
 
+  const isChannel = groupJid.includes("@newsletter");
   const isInitialScan = !source.initialScanDone;
   const lastTs = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
 
   await patchSourceProgress(source.id, {
-    lastError: isInitialScan ? "30 gün geçmiş yükleniyor (binlerce mesaj)…" : null,
+    lastError: isInitialScan
+      ? (isChannel ? "Kanal geçmişi yükleniyor (30 gün)…" : "30 gün geçmiş yükleniyor (binlerce mesaj)…")
+      : null,
     isScanning: true,
     initialScanPhase: isInitialScan ? "backward" : null,
     initialScanProgress: isInitialScan ? Math.max(2, source.initialScanProgress ?? 1) : 100,
   });
 
   logger.info(
-    { sourceId: source.id, name: source.name, initial: isInitialScan, lastTs },
-    "scraper: whatsapp grup taraması başladı (tek grup)",
+    { sourceId: source.id, name: source.name, initial: isInitialScan, lastTs, kind: isChannel ? "channel" : "group" },
+    "scraper: whatsapp kaynak taraması başladı",
   );
 
   let messages;
@@ -1643,7 +1646,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   return stats;
 }
 
-/** Arka planda grupları TEK TEK 30 gün tara — bir grup bitmeden diğerine geçme. */
+/** Arka planda grup/kanalları sırayla 30 gün tara — tur tur round-robin (aynı kaynakta takılmaz). */
 let waSequentialRunning = false;
 let waScanGeneration = 0;
 
@@ -1652,64 +1655,87 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   if (waSequentialRunning) return;
   waSequentialRunning = true;
   try {
-    let emptyRetries = 0;
+    const emptyBySource = new Map<number, number>();
+    let idleLoops = 0;
     for (;;) {
       if (myGen !== waScanGeneration) break;
       if (!isWhatsAppReady()) break;
 
+      // En uzun süre taranmayan pending kaynak — böylece bir grupta takılmaz
       const pending = await db.select().from(sourcesTable)
         .where(and(
           eq(sourcesTable.active, true),
           eq(sourcesTable.platform, "whatsapp"),
           eq(sourcesTable.initialScanDone, false),
+          eq(sourcesTable.isScanning, false),
         ))
-        .orderBy(asc(sourcesTable.id))
+        .orderBy(
+          sql`COALESCE(${sourcesTable.lastCheckedAt}, to_timestamp(0)) ASC`,
+          asc(sourcesTable.id),
+        )
         .limit(1);
 
       const source = pending[0];
-      if (!source) break;
-      if (source.isScanning) {
-        await sleep(5_000);
-        continue;
+      if (!source) {
+        // Takılı isScanning kilidi varsa açıp tekrar dene
+        const stuck = await db.select({ id: sourcesTable.id }).from(sourcesTable)
+          .where(and(
+            eq(sourcesTable.active, true),
+            eq(sourcesTable.platform, "whatsapp"),
+            eq(sourcesTable.initialScanDone, false),
+            eq(sourcesTable.isScanning, true),
+          ))
+          .limit(3);
+        if (stuck.length > 0) {
+          await releaseStaleScanLocks();
+          idleLoops++;
+          if (idleLoops > 12) {
+            await releaseStaleScanLocks(true);
+            idleLoops = 0;
+          }
+          await sleep(5_000);
+          continue;
+        }
+        break;
       }
+      idleLoops = 0;
 
       const locked = await acquireSourceScanLock(source.id);
       if (!locked) {
-        await sleep(5_000);
+        await sleep(2_000);
         continue;
       }
 
       try {
-        logger.info({ sourceId: source.id, name: source.name }, "scraper: wa sıralı tarama — bu grup");
+        logger.info(
+          { sourceId: source.id, name: source.name, lastCheckedAt: source.lastCheckedAt },
+          "scraper: wa sıralı tarama — bu kaynak (round-robin)",
+        );
         const stats = await checkWhatsAppSource(source);
         const [fresh] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, source.id)).limit(1);
+
+        // lastCheckedAt checkWhatsAppSource içinde güncellenir → sıradaki turda başka kaynak seçilir
         if (fresh && !fresh.initialScanDone) {
-          // 30 güne ulaşılmadı — aynı grubu tekrar dene (boşsa sayaç artır)
           if ((stats.messagesRead ?? 0) === 0) {
-            emptyRetries++;
-            if (emptyRetries >= 5) {
-              logger.warn({ sourceId: source.id }, "scraper: wa 5 boş tur — sıradaki gruba geç (done YAPILMADI)");
-              // done yapma; sadece sırayı kaydır: progress düşük bırak, kısa bekle sonra diğer pending'e bak
-              emptyRetries = 0;
+            const n = (emptyBySource.get(source.id) ?? 0) + 1;
+            emptyBySource.set(source.id, n);
+            if (n >= 3) {
+              logger.warn({ sourceId: source.id, emptyPasses: n }, "scraper: wa 3 boş tur — best-effort done");
               await patchSourceProgress(source.id, {
-                lastError: "Geçmiş yüklenemedi — sonra tekrar denenecek. Diğer gruplara geçici geçiliyor.",
-                initialScanProgress: Math.max(1, fresh.initialScanProgress ?? 1),
-                // initialScanDone false kalır
+                initialScanDone: true,
+                initialScanProgress: 100,
+                initialScanPhase: null,
+                lastError: "Geçmiş sınırlı yüklendi — best-effort tamam. Yeni mesajlar artımlı taranacak.",
+                lastCheckedAt: new Date(),
+                isScanning: false,
               });
-              // Bu grubu listenin sonuna itmek için lastCheckedAt güncelle; sıradaki id'ye geç
-              await db.update(sourcesTable)
-                .set({ lastCheckedAt: new Date() })
-                .where(eq(sourcesTable.id, source.id));
-            } else {
-              await sleep(10_000);
+              emptyBySource.delete(source.id);
             }
           } else {
-            emptyRetries = 0;
-            // Mesaj var ama cutoff yok — aynı grup tekrar (sıralı döngü tekrar seçecek)
-            await sleep(5_000);
+            emptyBySource.delete(source.id);
           }
         } else {
-          emptyRetries = 0;
+          emptyBySource.delete(source.id);
         }
         void stats;
       } catch (e) {
