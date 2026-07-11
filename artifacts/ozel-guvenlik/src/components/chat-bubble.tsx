@@ -94,8 +94,8 @@ function UserAvatar({ src, username, role, isVip, online }: { src?: string | nul
   const [imageFailed, setImageFailed] = useState(false);
   const showImage = !!src && !imageFailed;
   const ring =
-    role === "admin" ? "rgba(239,68,68,0.9)" :
-    role === "moderator" ? "rgba(59,130,246,0.85)" :
+    role === "admin" ? "rgba(250,204,21,0.95)" :
+    role === "moderator" ? "rgba(127,29,29,0.9)" :
     isVip ? "rgba(250,204,21,0.95)" :
     "rgba(255,193,7,0.35)";
 
@@ -207,9 +207,11 @@ export function ChatBubble() {
   const lastSeenMessageIdRef = useRef(0);
   const pinnedRef = useRef(true);
   const openRef = useRef(open);
+  const userRef = useRef(user);
   const isOnChatPage = location === "/sohbet";
 
   useEffect(() => { openRef.current = open; }, [open]);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   const scrollToBottom = useCallback(() => {
     pinnedRef.current = true;
@@ -230,7 +232,10 @@ export function ChatBubble() {
   };
 
   const bumpUnreadIfHuman = (msg: ExtMsg) => {
-    if (!openRef.current && isRealHuman(msg)) {
+    if (openRef.current) return;
+    const u = userRef.current;
+    const replyToMe = !!u?.username && msg.replyToUsername === u.username;
+    if (isRealHuman(msg) || replyToMe) {
       setUnread(n => n + 1);
       setPulse(true);
       setTimeout(() => setPulse(false), 600);
@@ -394,23 +399,20 @@ export function ChatBubble() {
   const lastMsg = visibleMessages[visibleMessages.length - 1] as { id?: number | string; createdAt?: string } | undefined;
   const lastMsgKey = lastMsg ? `${lastMsg.id ?? ""}|${lastMsg.createdAt ?? ""}` : "";
   useLayoutEffect(() => {
-    // Bot mesajında sticky human varken zorla en alta inme — insan mesajı görünür kalsın
-    if (stickyHuman && lastMsg && !isSystem(lastMsg as AnyMsg) && isBotOrFake(lastMsg as ExtMsg)) {
-      return;
-    }
+    // Tümü / Üyeler: canlı sohbet — her zaman son mesaja kaydır
     if (pinnedRef.current) scrollToBottom();
-  }, [lastMsgKey, scrollToBottom, stickyHuman]);
+  }, [lastMsgKey, scrollToBottom, feedMode]);
 
   useEffect(() => {
     const inner = msgInnerRef.current;
     const cont = msgContainerRef.current;
     if (!inner || !cont) return;
     const ro = new ResizeObserver(() => {
-      if (pinnedRef.current && !stickyHuman) cont.scrollTop = cont.scrollHeight;
+      if (pinnedRef.current) cont.scrollTop = cont.scrollHeight;
     });
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [open, stickyHuman]);
+  }, [open]);
 
   const startCooldown = (seconds: number) => {
     setCooldownLeft(seconds);
@@ -553,9 +555,9 @@ export function ChatBubble() {
               isMe
                 ? { background: "rgba(18,22,31,0.95)", border: "1.5px solid rgba(245,197,24,0.75)", boxShadow: "0 0 12px rgba(245,197,24,0.15)" }
                 : chatMsg.userRole === "admin"
-                  ? { background: "linear-gradient(135deg,rgba(110,8,8,0.6),rgba(35,4,4,0.75))", border: "1px solid rgba(239,68,68,0.45)", boxShadow: "0 0 18px rgba(239,68,68,0.22)" }
+                  ? { background: "linear-gradient(145deg,rgba(120,20,10,0.72),rgba(90,45,5,0.65))", border: "1px solid rgba(250,204,21,0.55)", boxShadow: "0 0 20px rgba(239,68,68,0.28), 0 0 8px rgba(250,204,21,0.2)" }
                   : chatMsg.userRole === "moderator"
-                    ? { background: "linear-gradient(135deg,rgba(10,38,115,0.6),rgba(4,14,55,0.75))", border: "1px solid rgba(59,130,246,0.45)", boxShadow: "0 0 18px rgba(59,130,246,0.22)" }
+                    ? { background: "linear-gradient(145deg,rgba(70,10,40,0.7),rgba(15,35,90,0.68))", border: "1px solid rgba(96,165,250,0.5)", boxShadow: "0 0 18px rgba(127,29,29,0.35), 0 0 10px rgba(59,130,246,0.25)" }
                     : { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }
             }
           >
@@ -717,8 +719,8 @@ export function ChatBubble() {
               </div>
             </div>
 
-            {/* Sticky gerçek üye mesajı — botlar üstüne yazınca kaybolmasın */}
-            {stickyHuman && feedMode === "all" && (
+            {/* Sticky gerçek üye mesajı — yalnızca admin */}
+            {stickyHuman && feedMode === "all" && user?.role === "admin" && (
               <div className="shrink-0 px-3 py-2" style={{ borderTop: "1px solid rgba(245,197,24,0.25)", background: "rgba(245,197,24,0.07)" }}>
                 <div className="text-[9px] font-bold text-amber-400 mb-1 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
                 <div className="flex items-start gap-2">
@@ -727,11 +729,9 @@ export function ChatBubble() {
                     <div className="text-[11px] font-bold text-amber-300">{stickyHuman.displayName || stickyHuman.username}</div>
                     <div className="text-[11px] text-white/80 line-clamp-2">{stickyHuman.content}</div>
                   </div>
-                  {user && (
-                    <button onClick={() => startReply(stickyHuman)} className="text-[10px] font-bold text-amber-400 shrink-0">
-                      Yanıtla
-                    </button>
-                  )}
+                  <button onClick={() => startReply(stickyHuman)} className="text-[10px] font-bold text-amber-400 shrink-0">
+                    Yanıtla
+                  </button>
                 </div>
               </div>
             )}

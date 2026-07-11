@@ -296,14 +296,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
       secure: window.location.protocol === "https:",
       withCredentials: true,
     });
+    const authenticate = () => {
+      if (user?.id && socket.connected) socket.emit("authenticate", { userId: user.id });
+    };
+    socket.on("connect", authenticate);
     socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
-    socket.on("notification:new", () => {
-      if (user) {
-        refetchNotifs();
-        refetchUnread();
-      }
+    socket.on("notification:new", (payload?: { userId?: number; title?: string; message?: string }) => {
+      if (!user) return;
+      if (payload?.userId != null && payload.userId !== user.id) return;
+      void refetchNotifs();
+      void refetchUnread();
     });
-    return () => { socket.disconnect(); };
+    if (socket.connected) authenticate();
+    return () => {
+      socket.off("connect", authenticate);
+      socket.disconnect();
+    };
   }, [refetchNotifs, refetchUnread, user]);
 
   /* Click outside notification panel */

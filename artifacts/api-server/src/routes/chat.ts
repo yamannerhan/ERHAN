@@ -5,7 +5,7 @@ import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrMod
 import { triggerContextualReply } from "../lib/chat-bot";
 import { filterProfanity } from "../lib/profanity";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
-import { emitRealtime } from "../lib/realtime";
+import { emitRealtimeToUser } from "../lib/realtime";
 
 const router = Router();
 
@@ -184,7 +184,7 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
           linkUrl: "/sohbet",
           isRead: false,
         });
-        emitRealtime("notification:new", {
+        emitRealtimeToUser(orig.userId, "notification:new", {
           type: "message",
           title,
           message,

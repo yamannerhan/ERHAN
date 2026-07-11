@@ -742,8 +742,10 @@ async function getChatWelcomeMessage(): Promise<string> {
 }
 
 const userLastDisconnect = new Map<number, number>();
-const welcomedSockets = new Set<string>();
+const userLastWelcome = new Map<number, number>();
 const JOIN_THRESHOLD_MS = 20 * 60 * 1000;
+/** Hoşgeldin kuralları: sohbet kapandıktan / son gösterimden en az 1 saat sonra */
+const WELCOME_COOLDOWN_MS = 60 * 60 * 1000;
 
 // ── Socket.io ─────────────────────────────────────────────────────
 io.on("connection", (socket) => {
@@ -757,6 +759,7 @@ io.on("connection", (socket) => {
       const userId = data.userId;
       const entry = onlineSockets.get(socketId);
       if (entry) { entry.userId = userId; onlineSockets.set(socketId, entry); }
+      void socket.join(`user:${userId}`);
 
       const alreadyConnected = [...onlineSockets.values()].filter(e => e.userId === userId).length;
 
@@ -774,8 +777,16 @@ io.on("connection", (socket) => {
               });
             }
           }
-          if (!welcomedSockets.has(socketId)) {
-            welcomedSockets.add(socketId);
+          // Kurallar spam olmasın: ilk girişte bir kez; sonra yalnızca 1 saat uzak kaldıktan sonra
+          const lastWelcome = userLastWelcome.get(userId) ?? 0;
+          const lastDisc = userLastDisconnect.get(userId);
+          const firstTime = lastWelcome === 0;
+          const returnedAfterHour =
+            lastDisc != null
+            && (Date.now() - lastDisc) >= WELCOME_COOLDOWN_MS
+            && (Date.now() - lastWelcome) >= WELCOME_COOLDOWN_MS;
+          if (firstTime || returnedAfterHour) {
+            userLastWelcome.set(userId, Date.now());
             socket.emit("chat:welcome", { message: await getChatWelcomeMessage() });
           }
         }
@@ -784,7 +795,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    welcomedSockets.delete(socketId);
     const entry = onlineSockets.get(socketId);
     if (entry?.userId) {
       const remaining = [...onlineSockets.values()].filter(e => e.userId === entry.userId && e !== entry);
