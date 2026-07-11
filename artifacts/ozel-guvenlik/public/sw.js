@@ -1,5 +1,5 @@
 /* ÖzelGüvenlik PWA Service Worker — Web Push + custom sounds */
-const CACHE_NAME = "ozelguvenlik-push-v4";
+const CACHE_NAME = "ozelguvenlik-push-v5";
 const NOTIF_ICON = "/notification-icon.png";
 const NOTIF_BADGE = "/notification-badge.png";
 
@@ -37,23 +37,40 @@ self.addEventListener("push", (event) => {
   const icon = iconPath.startsWith("http") ? iconPath : `${origin}${iconPath}`;
   const badge = badgePath.startsWith("http") ? badgePath : `${origin}${badgePath}`;
 
-  const options = {
-    body: data.body,
-    icon,
-    badge,
-    tag: data.tag || "og-push",
-    renotify: true,
-    requireInteraction: false,
-    silent: data.sound === false,
-    vibrate: data.sound === false ? undefined : [120, 60, 120],
-    data: { url: data.url || "/", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" },
-    actions: [{ action: "open", title: "Aç" }],
-  };
-
   event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    // Uygulama sekmesi öndeyse OS bildirimi gösterme (arka plan tercihi)
+    const anyVisible = clients.some((c) => {
+      try {
+        return c.visibilityState === "visible" && "focused" in c ? c.focused !== false : c.visibilityState === "visible";
+      } catch {
+        return false;
+      }
+    });
+
+    if (anyVisible) {
+      // Sadece açık sekmeye sessiz ipucu (ses yok)
+      for (const c of clients) {
+        c.postMessage({ type: "OG_PUSH_SILENT", kind: data.kind || "campaign", title: data.title, body: data.body });
+      }
+      return;
+    }
+
+    const options = {
+      body: data.body,
+      icon,
+      badge,
+      tag: data.tag || "og-push",
+      renotify: true,
+      requireInteraction: false,
+      silent: data.sound === false,
+      vibrate: data.sound === false ? undefined : [120, 60, 120],
+      data: { url: data.url || "/", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" },
+      actions: [{ action: "open", title: "Aç" }],
+    };
+
     await self.registration.showNotification(data.title || "Özel Güvenlik", options);
     if (data.sound === false) return;
-    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of clients) {
       c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" });
     }

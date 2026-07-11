@@ -36,6 +36,8 @@ export const usersTable = pgTable("users", {
   notifSite: boolean("notif_site").notNull().default(true),
   notifOther: boolean("notif_other").notNull().default(true),
   notifSound: boolean("notif_sound").notNull().default(true),
+  notifChatSound: boolean("notif_chat_sound").notNull().default(true),
+  notifOnlyBackground: boolean("notif_only_background").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

@@ -1,9 +1,10 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, notificationsTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { authMiddleware, signToken } from "../middlewares/auth";
 import { io, makeBotMsg, saveChatMessage } from "../index";
+import { emitRealtimeToUser } from "../lib/realtime";
 
 const router = Router();
 
@@ -85,7 +86,33 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     // Chat mesajı gönderilemezse kaydı etkileme
   }
 
-  res.status(201).json({ user: userJson(user), token });
+  // Admin'den kişisel hoşgeldin bildirimi (uygulama kapalıysa push da gider)
+  try {
+    const name = displayName || username;
+    const title = "Hoş geldin!";
+    const message = `Merhaba ${name}, Özel Güvenlik ailesine katıldığın için teşekkürler. İyi eğlenceler!`;
+    await db.insert(notificationsTable).values({
+      userId: user.id,
+      type: "welcome",
+      title,
+      message,
+      linkUrl: "/",
+      isRead: false,
+    });
+    emitRealtimeToUser(user.id, "notification:new", {
+      type: "welcome",
+      title,
+      message,
+      linkUrl: "/",
+      userId: user.id,
+      createdAt: new Date().toISOString(),
+    });
+    void import("../lib/web-push").then((m) => m.maybePushWelcome(user.id, name)).catch(() => {});
+  } catch {
+    // bildirim hatası kaydı etkilemesin
+  }
+
+  res.status(201).json({ user: userJson(user), token: token });
 });
 
 router.post("/auth/login", async (req, res): Promise<void> => {

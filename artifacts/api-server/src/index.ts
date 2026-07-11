@@ -760,6 +760,8 @@ io.on("connection", (socket) => {
       const entry = onlineSockets.get(socketId);
       if (entry) { entry.userId = userId; onlineSockets.set(socketId, entry); }
       void socket.join(`user:${userId}`);
+      const { setPresence } = await import("./lib/presence");
+      setPresence(socketId, userId, true);
 
       const alreadyConnected = [...onlineSockets.values()].filter(e => e.userId === userId).length;
 
@@ -797,6 +799,15 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("presence:update", (data: { visible?: boolean; userId?: number }) => {
+    const entry = onlineSockets.get(socketId);
+    const userId = data?.userId ?? entry?.userId;
+    if (!userId) return;
+    void import("./lib/presence").then(({ setPresence }) => {
+      setPresence(socketId, userId, data?.visible !== false);
+    }).catch(() => {});
+  });
+
   socket.on("disconnect", () => {
     const entry = onlineSockets.get(socketId);
     if (entry?.userId) {
@@ -805,6 +816,7 @@ io.on("connection", (socket) => {
         userLastDisconnect.set(entry.userId, Date.now());
       }
     }
+    void import("./lib/presence").then(({ clearSocketPresence }) => clearSocketPresence(socketId)).catch(() => {});
     onlineSockets.delete(socketId);
     logger.info({ socketId, online: onlineSockets.size }, "Socket disconnected");
     void broadcastOnlineCount();

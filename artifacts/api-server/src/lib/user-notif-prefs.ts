@@ -8,6 +8,10 @@ export type UserNotifPrefs = {
   notifSite: boolean;
   notifOther: boolean;
   notifSound: boolean;
+  /** Gerçek kullanıcı sohbet mesajı sesi */
+  notifChatSound: boolean;
+  /** true = push/OS bildirimi yalnızca uygulama arka plandayken */
+  notifOnlyBackground: boolean;
 };
 
 export const DEFAULT_NOTIF_PREFS: UserNotifPrefs = {
@@ -16,6 +20,8 @@ export const DEFAULT_NOTIF_PREFS: UserNotifPrefs = {
   notifSite: true,
   notifOther: true,
   notifSound: true,
+  notifChatSound: true,
+  notifOnlyBackground: true,
 };
 
 let ensured = false;
@@ -29,6 +35,8 @@ export async function ensureUserNotifPrefsSchema(): Promise<void> {
       ["notif_site", "BOOLEAN NOT NULL DEFAULT TRUE"],
       ["notif_other", "BOOLEAN NOT NULL DEFAULT TRUE"],
       ["notif_sound", "BOOLEAN NOT NULL DEFAULT TRUE"],
+      ["notif_chat_sound", "BOOLEAN NOT NULL DEFAULT TRUE"],
+      ["notif_only_background", "BOOLEAN NOT NULL DEFAULT TRUE"],
     ];
     for (const [name, type] of cols) {
       await db.execute(sql.raw(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${type}`));
@@ -42,17 +50,35 @@ export async function ensureUserNotifPrefsSchema(): Promise<void> {
 export function prefsAllowPushKind(prefs: UserNotifPrefs, kind: string): boolean {
   if (kind === "listing") return prefs.notifListings !== false;
   if (kind === "join") return prefs.notifJoin !== false;
-  if (kind === "campaign" || kind === "digest") return prefs.notifSite !== false;
-  // reply ve diğerleri
+  if (kind === "campaign" || kind === "digest" || kind === "welcome") return prefs.notifSite !== false;
+  if (kind === "reply") return prefs.notifOther !== false;
   return prefs.notifOther !== false;
 }
 
-/** In-app bildirim tipi → kullanıcı tercihi */
 export function prefsAllowInAppType(prefs: UserNotifPrefs, type: string): boolean {
   if (type === "listing") return prefs.notifListings !== false;
-  if (type === "admin" || type === "system") return prefs.notifSite !== false;
-  // message | support | like | diğer
+  if (type === "admin" || type === "system" || type === "welcome") return prefs.notifSite !== false;
   return prefs.notifOther !== false;
+}
+
+function mapRow(u: {
+  notifListings: boolean | null;
+  notifJoin: boolean | null;
+  notifSite: boolean | null;
+  notifOther: boolean | null;
+  notifSound: boolean | null;
+  notifChatSound?: boolean | null;
+  notifOnlyBackground?: boolean | null;
+}): UserNotifPrefs {
+  return {
+    notifListings: u.notifListings !== false,
+    notifJoin: u.notifJoin !== false,
+    notifSite: u.notifSite !== false,
+    notifOther: u.notifOther !== false,
+    notifSound: u.notifSound !== false,
+    notifChatSound: u.notifChatSound !== false,
+    notifOnlyBackground: u.notifOnlyBackground !== false,
+  };
 }
 
 export async function getUserNotifPrefs(userId: number): Promise<UserNotifPrefs> {
@@ -63,15 +89,11 @@ export async function getUserNotifPrefs(userId: number): Promise<UserNotifPrefs>
     notifSite: usersTable.notifSite,
     notifOther: usersTable.notifOther,
     notifSound: usersTable.notifSound,
+    notifChatSound: usersTable.notifChatSound,
+    notifOnlyBackground: usersTable.notifOnlyBackground,
   }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!u) return { ...DEFAULT_NOTIF_PREFS };
-  return {
-    notifListings: u.notifListings !== false,
-    notifJoin: u.notifJoin !== false,
-    notifSite: u.notifSite !== false,
-    notifOther: u.notifOther !== false,
-    notifSound: u.notifSound !== false,
-  };
+  return mapRow(u);
 }
 
 export async function getNotifPrefsMap(userIds: number[]): Promise<Map<number, UserNotifPrefs>> {
@@ -86,15 +108,11 @@ export async function getNotifPrefsMap(userIds: number[]): Promise<Map<number, U
     notifSite: usersTable.notifSite,
     notifOther: usersTable.notifOther,
     notifSound: usersTable.notifSound,
+    notifChatSound: usersTable.notifChatSound,
+    notifOnlyBackground: usersTable.notifOnlyBackground,
   }).from(usersTable).where(inArray(usersTable.id, unique));
   for (const u of rows) {
-    map.set(u.id, {
-      notifListings: u.notifListings !== false,
-      notifJoin: u.notifJoin !== false,
-      notifSite: u.notifSite !== false,
-      notifOther: u.notifOther !== false,
-      notifSound: u.notifSound !== false,
-    });
+    map.set(u.id, mapRow(u));
   }
   return map;
 }
@@ -105,11 +123,9 @@ export async function updateUserNotifPrefs(
 ): Promise<UserNotifPrefs> {
   await ensureUserNotifPrefsSchema();
   const updates: Partial<UserNotifPrefs> = {};
-  if (patch.notifListings !== undefined) updates.notifListings = Boolean(patch.notifListings);
-  if (patch.notifJoin !== undefined) updates.notifJoin = Boolean(patch.notifJoin);
-  if (patch.notifSite !== undefined) updates.notifSite = Boolean(patch.notifSite);
-  if (patch.notifOther !== undefined) updates.notifOther = Boolean(patch.notifOther);
-  if (patch.notifSound !== undefined) updates.notifSound = Boolean(patch.notifSound);
+  (Object.keys(DEFAULT_NOTIF_PREFS) as Array<keyof UserNotifPrefs>).forEach((key) => {
+    if (patch[key] !== undefined) updates[key] = Boolean(patch[key]);
+  });
   if (Object.keys(updates).length) {
     await db.update(usersTable).set(updates).where(eq(usersTable.id, userId));
   }

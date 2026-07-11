@@ -20,6 +20,7 @@ import { io as socketIo } from "socket.io-client";
 import { useToast } from "@/hooks/use-toast";
 import { PushPermissionBanner } from "./push-permission-banner";
 import { playNotificationBeep, listenForPushSounds } from "@/lib/web-push";
+import { isBackgroundOnlyEnabled, isNotifSoundEnabled } from "@/lib/notif-prefs";
 
 /* ── Theme hook ───────────────────────────────────────────── */
 function useTheme() {
@@ -294,7 +295,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     return listenForPushSounds();
   }, []);
 
-  /* Socket.io — online count + push notifications */
+  /* Socket.io — online count + push notifications + presence */
   useEffect(() => {
     const socket = socketIo(window.location.origin, {
       path: "/ws",
@@ -302,8 +303,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
       secure: window.location.protocol === "https:",
       withCredentials: true,
     });
+    const emitPresence = () => {
+      if (!user?.id || !socket.connected) return;
+      socket.emit("presence:update", {
+        userId: user.id,
+        visible: document.visibilityState === "visible",
+      });
+    };
     const authenticate = () => {
-      if (user?.id && socket.connected) socket.emit("authenticate", { userId: user.id });
+      if (user?.id && socket.connected) {
+        socket.emit("authenticate", { userId: user.id });
+        emitPresence();
+      }
     };
     socket.on("connect", authenticate);
     socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
@@ -312,10 +323,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
       if (payload?.userId != null && payload.userId !== user.id) return;
       void refetchNotifs();
       void refetchUnread();
-      try { playNotificationBeep(); } catch { /* ignore */ }
+      // Uygulama öndeyse (tercih açıksa) bildirim sesi çalma
+      const bgOnly = isBackgroundOnlyEnabled();
+      const foreground = document.visibilityState === "visible";
+      if (isNotifSoundEnabled() && !(bgOnly && foreground)) {
+        try { playNotificationBeep(); } catch { /* ignore */ }
+      }
     });
+    const onVis = () => emitPresence();
+    document.addEventListener("visibilitychange", onVis);
     if (socket.connected) authenticate();
     return () => {
+      document.removeEventListener("visibilitychange", onVis);
       socket.off("connect", authenticate);
       socket.disconnect();
     };

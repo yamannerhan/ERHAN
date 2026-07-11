@@ -7,6 +7,7 @@ import {
   getNotifPrefsMap,
   prefsAllowPushKind,
 } from "./user-notif-prefs";
+import { isUserForeground } from "./presence";
 
 export type PushPayload = {
   title: string;
@@ -209,6 +210,15 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
 
     // Giriş yapmış kullanıcı tercihi kapalıysa gönderme
     if (sub.userId != null && !prefsAllowPushKind(prefs, kind)) continue;
+
+    // Uygulama öndeyse (ekran açık) ve tercih açıksa push gönderme
+    if (
+      sub.userId != null
+      && prefs.notifOnlyBackground !== false
+      && isUserForeground(sub.userId)
+    ) {
+      continue;
+    }
     eligible++;
 
     const sound = adminSoundOn && prefs.notifSound !== false;
@@ -269,6 +279,25 @@ export async function maybePushChatReply(userId: number, title: string, body: st
     );
   } catch (e) {
     logger.warn({ err: e }, "web-push: chat reply push failed");
+  }
+}
+
+export async function maybePushWelcome(userId: number, displayName: string): Promise<void> {
+  try {
+    const s = await getOrCreateSettings();
+    if (s.pushEnabled === false) return;
+    await broadcastPush(
+      {
+        title: "Hoş geldin!",
+        body: `Merhaba ${displayName}, Özel Güvenlik ailesine katıldığın için teşekkürler. İyi eğlenceler!`,
+        url: "/",
+        tag: `welcome-${userId}`,
+        kind: "welcome",
+      },
+      { userIds: [userId] },
+    );
+  } catch (e) {
+    logger.warn({ err: e }, "web-push: welcome push failed");
   }
 }
 

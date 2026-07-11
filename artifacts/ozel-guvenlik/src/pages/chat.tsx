@@ -5,15 +5,25 @@ import { useAuth } from "@/contexts/AuthContext";
 import { io, Socket } from "socket.io-client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, X, Bot, Zap, CornerUpLeft, Trash2, Crown } from "lucide-react";
+import { Send, X, Bot, Zap, CornerUpLeft, Trash2, Crown, Settings, BarChart2 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import type { ChatMessage } from "@workspace/api-client-react";
+import { playChatMessageSound } from "@/lib/notif-prefs";
+import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
+import { ChatPollCard } from "@/components/chat-poll-card";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
 interface SystemMsg { id: number; type: "join" | "welcome" | "cleared"; text: string; createdAt: string; }
 type Reaction = { emoji: string; userId: number; username: string; displayName: string | null };
-type ExtMsg = ChatMessage & { displayName?: string | null; isFake?: boolean; isBot?: boolean; reactions?: Reaction[] };
+type PollData = {
+  id: number; question: string; options: string[]; counts: number[];
+  totalVotes: number; myVote: number | null; isClosed: boolean;
+};
+type ExtMsg = ChatMessage & {
+  displayName?: string | null; isFake?: boolean; isBot?: boolean;
+  reactions?: Reaction[]; poll?: PollData | null;
+};
 type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
 
@@ -198,6 +208,10 @@ export default function Chat() {
   const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
   const [activeMsg, setActiveMsg] = useState<number | null>(null);
   const [cooldownLeft, setCooldownLeft] = useState(0);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [showPollForm, setShowPollForm] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState("Evet\nHayır");
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncInFlightRef = useRef(false);
   const messageIdsRef = useRef<Set<number>>(new Set());
@@ -301,7 +315,17 @@ export default function Chat() {
       if (user?.id && s.connected) s.emit("authenticate", { userId: user.id });
     };
     s.on("connect", authenticate);
-    s.on("chat:message", (msg: ExtMsg) => addMsg(msg));
+    s.on("chat:message", (msg: ExtMsg) => {
+      const added = addMsg(msg);
+      if (
+        added
+        && !isSystem(msg)
+        && isRealHuman(msg)
+        && msg.userId !== user?.id
+      ) {
+        playChatMessageSound();
+      }
+    });
     s.on("chat:delete", ({ id }: { id: number }) => {
       setMessages(prev => prev.filter(m => isSystem(m) || (m as ExtMsg).id !== id));
     });
@@ -315,6 +339,14 @@ export default function Chat() {
       setMessages(prev => prev.map(m =>
         !isSystem(m) && (m as ExtMsg).id === messageId ? { ...(m as ExtMsg), reactions } : m
       ));
+    });
+    s.on("chat:poll:update", (poll: PollData) => {
+      setMessages(prev => prev.map(m => {
+        if (isSystem(m)) return m;
+        const cm = m as ExtMsg;
+        if (cm.poll?.id === poll.id) return { ...cm, poll };
+        return m;
+      }));
     });
     s.on("chat:cleared", () => {
       setMessages([]);
@@ -566,7 +598,17 @@ export default function Chat() {
                     </div>
                   );
                 })()}
-                <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+                {chatMsg.poll ? (
+                  <ChatPollCard
+                    poll={chatMsg.poll}
+                    token={getToken()}
+                    onUpdate={(p) => setMessages(prev => prev.map(m =>
+                      !isSystem(m) && (m as ExtMsg).id === chatMsg.id ? { ...(m as ExtMsg), poll: p } : m
+                    ))}
+                  />
+                ) : (
+                  <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+                )}
                 <span className={`text-[10px] mt-1 block ${isMe ? "text-white/40" : "text-white/30"}`}>
                   {new Date(chatMsg.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
                 </span>
@@ -692,15 +734,78 @@ export default function Chat() {
         className="fixed left-0 right-0 flex flex-col bg-background z-20"
         style={{ top: "56px", bottom: "calc(70px + env(safe-area-inset-bottom))" }}
       >
-        {/* Admin/Moderatör sohbet temizleme butonu */}
-        {user && (user.role === "admin" || user.role === "moderator") && (
-          <div className="flex items-center justify-end px-4 py-2 border-b border-white/5 bg-background/60 backdrop-blur shrink-0">
-            <button
-              onClick={handleClearChat}
-              className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400/70 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all active:scale-95">
-              <Trash2 className="w-3.5 h-3.5" />
-              Sohbeti Temizle
-            </button>
+        {/* Admin/Moderatör sohbet araçları + bildirim ayarı */}
+        <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5 bg-background/60 backdrop-blur shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowNotifSettings(v => !v)}
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10 px-3 py-1.5 rounded-lg transition-all"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            Bildirimler
+          </button>
+          <div className="flex items-center gap-1">
+            {user && (user.role === "admin" || user.role === "moderator") && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowPollForm(v => !v)}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-400/80 hover:text-sky-400 hover:bg-sky-500/10 px-3 py-1.5 rounded-lg transition-all"
+                >
+                  <BarChart2 className="w-3.5 h-3.5" />
+                  Anket
+                </button>
+                <button
+                  onClick={handleClearChat}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400/70 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all active:scale-95">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Temizle
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+        {showNotifSettings && user && (
+          <div className="px-4 py-3 border-b border-white/5 bg-black/40 shrink-0 max-h-64 overflow-y-auto">
+            <NotifPrefsPanel compact onSaved={() => setShowNotifSettings(false)} />
+          </div>
+        )}
+        {showPollForm && user && (user.role === "admin" || user.role === "moderator") && (
+          <div className="px-4 py-3 border-b border-white/5 bg-black/40 shrink-0 space-y-2">
+            <Input
+              value={pollQuestion}
+              onChange={(e) => setPollQuestion(e.target.value)}
+              placeholder="Anket sorusu"
+              className="h-9 text-sm"
+            />
+            <textarea
+              value={pollOptions}
+              onChange={(e) => setPollOptions(e.target.value)}
+              placeholder={"Her satıra bir seçenek\nEvet\nHayır"}
+              className="w-full min-h-[72px] rounded-md bg-white/5 border border-white/10 px-3 py-2 text-sm"
+            />
+            <Button
+              type="button"
+              className="w-full h-9 bg-sky-500 hover:bg-sky-400 text-black font-bold"
+              onClick={async () => {
+                const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
+                if (!pollQuestion.trim() || options.length < 2) return;
+                const res = await fetch("/api/chat/polls", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+                  body: JSON.stringify({ question: pollQuestion.trim(), options }),
+                });
+                if (res.ok) {
+                  const sent = await res.json() as ExtMsg;
+                  addMsg(sent);
+                  setShowPollForm(false);
+                  setPollQuestion("");
+                  setPollOptions("Evet\nHayır");
+                }
+              }}
+            >
+              Anketi Paylaş
+            </Button>
           </div>
         )}
         <div className="flex gap-1.5 px-4 py-2 border-b border-white/5 shrink-0">
@@ -747,7 +852,8 @@ export default function Chat() {
               <AnimatePresence>
                 {mentionQuery !== null && suggestions.length > 0 && (
                   <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-                    className="absolute bottom-full left-0 right-0 mb-2 glass-card rounded-2xl overflow-hidden border border-white/10 shadow-xl">
+                    className="absolute bottom-full left-0 right-0 mb-2 glass-card rounded-2xl overflow-hidden border border-amber-400/30 shadow-xl z-30 max-h-56 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] text-amber-400/80 font-bold border-b border-white/5">Kullanıcı etiketle</div>
                     {suggestions.map(s => (
                       <button key={s.id} type="button" onClick={() => insertMention(s.username)}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left">
@@ -755,13 +861,19 @@ export default function Chat() {
                           style={{ background: s.avatarUrl ? "transparent" : "linear-gradient(135deg,#4F46E5,#7C3AED)" }}>
                           {s.avatarUrl ? <img src={s.avatarUrl} alt={s.username} className="w-full h-full object-cover" /> : s.username.substring(0, 2).toUpperCase()}
                         </div>
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <span className="text-sm font-medium">{s.displayName || s.username}</span>
-                          {s.displayName && <span className="text-[10px] text-muted-foreground ml-1">@{s.username}</span>}
+                          <span className="text-[10px] text-muted-foreground ml-1">@{s.username}</span>
                         </div>
                         <RoleBadge role={s.role} />
                       </button>
                     ))}
+                  </motion.div>
+                )}
+                {mentionQuery !== null && suggestions.length === 0 && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="absolute bottom-full left-0 right-0 mb-2 px-3 py-2 glass-card rounded-xl border border-white/10 text-[11px] text-muted-foreground z-30">
+                    Kullanıcı aranıyor…
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -801,7 +913,22 @@ export default function Chat() {
                   ref={inputRef}
                   value={content}
                   onChange={e => handleInputChange(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && mentionQuery === null) { e.preventDefault(); handleSend(e as any); } }}
+                  onKeyDown={e => {
+                    if (e.key === "Escape" && mentionQuery !== null) {
+                      setMentionQuery(null);
+                      setSuggestions([]);
+                      return;
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      if (mentionQuery !== null && suggestions.length > 0) {
+                        e.preventDefault();
+                        insertMention(suggestions[0]!.username);
+                        return;
+                      }
+                      e.preventDefault();
+                      handleSend(e as any);
+                    }
+                  }}
                   placeholder={cooldownLeft > 0 ? `${cooldownLeft}s sonra mesaj gönderebilirsin...` : replyTo ? `${chatName(replyTo)}'e yanıtla...` : "Mesajınızı yazın... (@ ile etiketle)"}
                   className="glass-card border-white/10 rounded-full h-12 px-5 text-sm"
                   maxLength={500}

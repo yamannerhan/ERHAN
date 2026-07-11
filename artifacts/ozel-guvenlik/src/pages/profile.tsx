@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { displayCompany } from "@/lib/utils";
 import { getListingImage } from "@/lib/listing-image";
+import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -84,14 +85,6 @@ export default function Profile() {
 
   // Notification settings
   const [showNotifSettings, setShowNotifSettings] = useState(false);
-  const [notifPrefs, setNotifPrefs] = useState({
-    notifListings: true,
-    notifJoin: true,
-    notifSite: true,
-    notifOther: true,
-    notifSound: true,
-  });
-  const [notifLoading, setNotifLoading] = useState(false);
 
   const { data: profile, isLoading } = useGetUserProfile(username || "", {
     query: {
@@ -99,61 +92,6 @@ export default function Profile() {
       queryKey: getGetUserProfileQueryKey(username || ""),
     },
   });
-
-  // Sunucudan bildirim tercihlerini yükle
-  useEffect(() => {
-    if (!isMe) return;
-    const token = getToken();
-    if (!token) return;
-    void (async () => {
-      try {
-        const res = await fetch("/api/push/prefs", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        if (!res.ok) return;
-        const data = await res.json() as typeof notifPrefs;
-        setNotifPrefs({
-          notifListings: data.notifListings !== false,
-          notifJoin: data.notifJoin !== false,
-          notifSite: data.notifSite !== false,
-          notifOther: data.notifOther !== false,
-          notifSound: data.notifSound !== false,
-        });
-        try {
-          localStorage.setItem("og_notif_sound", data.notifSound === false ? "0" : "1");
-        } catch { /* ignore */ }
-      } catch { /* ignore */ }
-    })();
-  }, [isMe]);
-
-  const saveNotifPrefs = async () => {
-    setNotifLoading(true);
-    try {
-      const token = getToken();
-      const res = await fetch("/api/push/prefs", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(notifPrefs),
-      });
-      if (!res.ok) throw new Error("save failed");
-      const saved = await res.json() as typeof notifPrefs;
-      setNotifPrefs(saved);
-      try {
-        localStorage.setItem("og_notif_sound", saved.notifSound === false ? "0" : "1");
-        localStorage.setItem("notif_prefs", JSON.stringify(saved));
-      } catch { /* ignore */ }
-      toast({ title: "Bildirim tercihleri kaydedildi" });
-      setShowNotifSettings(false);
-    } catch {
-      toast({ title: "Kaydedilemedi", variant: "destructive" });
-    } finally {
-      setNotifLoading(false);
-    }
-  };
 
   const { data: listingsData } = useGetListings({ page: 1, limit: 50 });
   const userListings = listingsData?.listings?.filter(l => l.authorUsername === username) || [];
@@ -718,37 +656,7 @@ export default function Profile() {
                   className="overflow-hidden"
                 >
                   <div className="og-setting-row flex-col items-stretch gap-2 p-4">
-                    <p className="text-[11px] og-text-muted mb-1">
-                      İstemediğiniz bildirimleri kapatın — rahatsız edilmezsiniz.
-                    </p>
-                    {[
-                      { key: "notifListings" as const, label: "İş ilanı bildirimleri", desc: "Yeni üye ilanı paylaşılınca" },
-                      { key: "notifJoin" as const, label: "Kullanıcı katılım bildirimleri", desc: "Sohbete yeni üye girince" },
-                      { key: "notifSite" as const, label: "Site bildirimleri", desc: "Kampanya, özet ve admin duyuruları" },
-                      { key: "notifOther" as const, label: "Diğer bildirimler", desc: "Yanıt, destek ve diğer uyarılar" },
-                      { key: "notifSound" as const, label: "Bildirim sesi", desc: "Açıkken özel / sistem sesi çalar" },
-                    ].map(item => (
-                      <label key={item.key} className="flex items-center justify-between gap-3 py-2 cursor-pointer">
-                        <span className="min-w-0">
-                          <span className="text-sm block">{item.label}</span>
-                          <span className="text-[10px] og-text-muted block">{item.desc}</span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={notifPrefs[item.key]}
-                          onChange={e => setNotifPrefs(p => ({ ...p, [item.key]: e.target.checked }))}
-                          className="w-4 h-4 accent-amber-400 shrink-0"
-                        />
-                      </label>
-                    ))}
-                    <Button
-                      onClick={() => void saveNotifPrefs()}
-                      disabled={notifLoading}
-                      className="w-full bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold mt-2"
-                    >
-                      {notifLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                      Kaydet
-                    </Button>
+                    <NotifPrefsPanel onSaved={() => setShowNotifSettings(false)} />
                   </div>
                 </motion.div>
               )}

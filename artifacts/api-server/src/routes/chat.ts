@@ -26,7 +26,8 @@ function extractMentions(content: string): string[] {
 async function formatMessage(
   msg: typeof chatMessagesTable.$inferSelect,
   userMap: Map<number, typeof usersTable.$inferSelect>,
-  reactionsMap?: Map<number, Array<{ emoji: string; userId: number; username: string; displayName: string | null }>>
+  reactionsMap?: Map<number, Array<{ emoji: string; userId: number; username: string; displayName: string | null }>>,
+  pollMap?: Map<number, Awaited<ReturnType<typeof import("../lib/chat-polls").getPollPayload>>>,
 ) {
   const vUser = VIRTUAL_USERS[msg.userId];
   const user = userMap.get(msg.userId);
@@ -36,16 +37,24 @@ async function formatMessage(
   if (msg.replyToId) {
     const [replyMsg] = await db.select().from(chatMessagesTable).where(eq(chatMessagesTable.id, msg.replyToId));
     if (replyMsg) {
-      replyToContent = replyMsg.content;
+      const { parsePollIdFromContent } = await import("../lib/chat-polls");
+      const pollId = parsePollIdFromContent(replyMsg.content);
+      replyToContent = pollId ? "📊 Anket" : replyMsg.content;
       const replyVUser = VIRTUAL_USERS[replyMsg.userId];
       const replyUser = userMap.get(replyMsg.userId);
       replyToUsername = replyVUser?.username ?? replyUser?.username ?? null;
     }
   }
 
+  const { parsePollIdFromContent } = await import("../lib/chat-polls");
+  const pollId = parsePollIdFromContent(msg.content);
+  const poll = pollId && pollMap ? pollMap.get(pollId) ?? null : null;
+
   return {
     id: msg.id,
-    content: msg.content,
+    content: poll ? `📊 ${poll.question}` : msg.content,
+    rawContent: msg.content,
+    poll: poll ?? null,
     userId: msg.userId,
     username:        vUser?.username        ?? user?.username        ?? "Silindi",
     displayName:     vUser?.displayName     ?? user?.displayName     ?? null,
@@ -102,7 +111,13 @@ router.get("/chat/messages", optionalAuthMiddleware, async (req, res): Promise<v
       }
     }
 
-    const formatted = await Promise.all(messages.map(m => formatMessage(m, userMap, reactionsMap)));
+    const { getPollsForMessages } = await import("../lib/chat-polls");
+    const pollMap = await getPollsForMessages(
+      messages.map((m) => m.content),
+      req.user?.id ?? null,
+    );
+
+    const formatted = await Promise.all(messages.map(m => formatMessage(m, userMap, reactionsMap, pollMap)));
     res.json(formatted);
   } catch (error) {
     req.app.get("logger")?.error?.({ error }, "chat/messages failed");
@@ -176,7 +191,7 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
         const prefs = await getUserNotifPrefs(orig.userId);
         if (prefsAllowInAppType(prefs, "message")) {
           const preview = filteredContent.length > 100 ? `${filteredContent.slice(0, 100)}…` : filteredContent;
-          const title = "Sohbete yanıt geldi";
+          const title = "Mesajın yanıtlandı";
           const message = `${req.user!.username}: ${preview}`;
           await db.insert(notificationsTable).values({
             userId: orig.userId,
@@ -325,6 +340,51 @@ router.get("/chat/online", async (_req, res): Promise<void> => {
     : (s0?.fakeOnlineBonus ?? 0);
   const realCount = onlineSockets.size;
   res.json({ count: realCount + fakeBonus, fakeBonus });
+});
+
+/** Admin / moderatör anket paylaşır */
+router.post("/chat/polls", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  try {
+    const { question, options } = req.body as { question?: string; options?: string[] };
+    const { createPoll } = await import("../lib/chat-polls");
+    const result = await createPoll({
+      question: question ?? "",
+      options: Array.isArray(options) ? options : [],
+      createdBy: req.user!.id,
+    });
+
+    const allUsers = await db.select().from(usersTable);
+    const userMap = new Map(allUsers.map(u => [u.id, u]));
+    const [msg] = await db.select().from(chatMessagesTable).where(eq(chatMessagesTable.id, result.messageId)).limit(1);
+    const pollMap = new Map([[result.poll.id, result.poll]]);
+    const formatted = await formatMessage(msg!, userMap, undefined, pollMap);
+
+    const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
+    if (io) io.emit("chat:message", formatted);
+
+    res.status(201).json(formatted);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Anket oluşturulamadı" });
+  }
+});
+
+router.post("/chat/polls/:id/vote", authMiddleware, async (req, res): Promise<void> => {
+  try {
+    const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+    const pollId = parseInt(rawId ?? "", 10);
+    const optionIndex = Number((req.body as { optionIndex?: number }).optionIndex);
+    if (isNaN(pollId) || isNaN(optionIndex)) {
+      res.status(400).json({ error: "Geçersiz oy" });
+      return;
+    }
+    const { votePoll } = await import("../lib/chat-polls");
+    const poll = await votePoll(pollId, req.user!.id, optionIndex);
+    const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
+    if (io) io.emit("chat:poll:update", poll);
+    res.json(poll);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Oy kaydedilemedi" });
+  }
 });
 
 export default router;

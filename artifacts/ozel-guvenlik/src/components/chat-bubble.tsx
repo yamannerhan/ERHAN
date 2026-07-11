@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, Maximize2, Bot, CornerUpLeft, Trash2, Crown, Megaphone, Minus } from "lucide-react";
+import { X, Send, Maximize2, Bot, CornerUpLeft, Trash2, Crown, Megaphone, Minus, Settings, BarChart2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useLocation } from "wouter";
 import { io, Socket } from "socket.io-client";
 import type { ChatMessage } from "@workspace/api-client-react";
+import { playChatMessageSound } from "@/lib/notif-prefs";
+import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
+import { ChatPollCard } from "@/components/chat-poll-card";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 function formatTime(iso: string) {
@@ -12,7 +15,11 @@ function formatTime(iso: string) {
 }
 
 interface SystemMsg { id: number; type: "join" | "welcome"; text: string; createdAt: string; }
-type ExtMsg = ChatMessage & { isBot?: boolean; isFake?: boolean; displayName?: string | null };
+type PollData = {
+  id: number; question: string; options: string[]; counts: number[];
+  totalVotes: number; myVote: number | null; isClosed: boolean;
+};
+type ExtMsg = ChatMessage & { isBot?: boolean; isFake?: boolean; displayName?: string | null; poll?: PollData | null };
 type AnyMsg = ExtMsg | SystemMsg;
 function isSystem(m: AnyMsg): m is SystemMsg { return "type" in m; }
 
@@ -196,6 +203,14 @@ export function ChatBubble() {
   const [feedMode, setFeedMode] = useState<"all" | "members">("all");
   const [chatTicker, setChatTicker] = useState("Küfür, hakaret, reklam ve yanıltıcı ilan yasaktır.");
   const [chatPinned, setChatPinned] = useState<string | null>(null);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [showPollForm, setShowPollForm] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState("Evet\nHayır");
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Array<{
+    id: number; username: string; displayName?: string | null; avatarUrl: string | null; role: string;
+  }>>([]);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendErrorRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -341,7 +356,12 @@ export function ChatBubble() {
     };
 
     s.on("connect", authenticate);
-    s.on("chat:message", (msg: ExtMsg) => { addMsg(msg); });
+    s.on("chat:message", (msg: ExtMsg) => {
+      const added = addMsg(msg);
+      if (added && isRealHuman(msg) && msg.userId !== userRef.current?.id) {
+        playChatMessageSound();
+      }
+    });
     s.on("chat:delete", ({ id }: { id: number }) => {
       setMessages(prev => prev.filter(m => !isSystem(m) && (m as ExtMsg).id !== id));
     });
@@ -351,6 +371,14 @@ export function ChatBubble() {
     });
     s.on("chat:welcome", ({ message }: { message: string }) => {
       addMsg({ id: Date.now() + 1, type: "welcome", text: message, createdAt: new Date().toISOString() });
+    });
+    s.on("chat:poll:update", (poll: PollData) => {
+      setMessages(prev => prev.map(m => {
+        if (isSystem(m)) return m;
+        const cm = m as ExtMsg;
+        if (cm.poll?.id === poll.id) return { ...cm, poll };
+        return m;
+      }));
     });
     s.on("online_count", ({ count }: { count: number }) => {
       if (typeof count === "number") setOnlineCount(count);
@@ -370,6 +398,8 @@ export function ChatBubble() {
   }, [open, scrollToBottom]);
 
   // Son gerçek insan mesajı — altına bot yağsa bile sticky kalır
+  const [skippedStickyId, setSkippedStickyId] = useState<number | null>(null);
+
   const stickyHuman = useMemo(() => {
     const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
     let lastHuman: ExtMsg | null = null;
@@ -380,6 +410,7 @@ export function ChatBubble() {
       }
     }
     if (!lastHuman) return null;
+    if (skippedStickyId != null && lastHuman.id === skippedStickyId) return null;
     const after = chatMsgs.filter(m => m.id > lastHuman!.id);
     const hasHumanAfter = after.some(isRealHuman);
     if (hasHumanAfter) return null;
@@ -387,7 +418,20 @@ export function ChatBubble() {
     if (after.length === 0) return null; // zaten en altta
     if (after.every(isBotOrFake)) return lastHuman;
     return null;
-  }, [messages]);
+  }, [messages, skippedStickyId]);
+
+  // Yeni üye mesajı gelince “geç” sıfırlanır
+  useEffect(() => {
+    const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
+    for (let i = chatMsgs.length - 1; i >= 0; i--) {
+      if (isRealHuman(chatMsgs[i]!)) {
+        if (skippedStickyId != null && chatMsgs[i]!.id !== skippedStickyId) {
+          setSkippedStickyId(null);
+        }
+        break;
+      }
+    }
+  }, [messages, skippedStickyId]);
 
   const visibleMessages = useMemo(() => {
     if (feedMode === "members") {
@@ -450,6 +494,8 @@ export function ChatBubble() {
         if (sent) addMsg(sent);
         setContent("");
         setReplyTo(null);
+        setMentionQuery(null);
+        setSuggestions([]);
         scrollToBottom();
         return;
       }
@@ -477,8 +523,52 @@ export function ChatBubble() {
 
   const replyName = (msg: ExtMsg) => msg.displayName || msg.username;
 
+  // @ etiket araması
+  useEffect(() => {
+    if (mentionQuery === null) { setSuggestions([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(mentionQuery)}`);
+        if (res.ok) setSuggestions(await res.json());
+      } catch { /* ignore */ }
+    }, 100);
+    return () => clearTimeout(t);
+  }, [mentionQuery]);
+
+  const handleInputChange = (val: string) => {
+    setContent(val);
+    const lastAt = val.lastIndexOf("@");
+    if (lastAt !== -1) {
+      const after = val.slice(lastAt + 1);
+      if (!after.includes(" ")) { setMentionQuery(after); return; }
+    }
+    setMentionQuery(null);
+  };
+
+  const insertMention = (username: string) => {
+    const lastAt = content.lastIndexOf("@");
+    const base = lastAt >= 0 ? content.slice(0, lastAt) : content;
+    setContent(`${base}@${username} `);
+    setMentionQuery(null);
+    setSuggestions([]);
+    inputRef.current?.focus();
+  };
+
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+    if (e.key === "Escape" && mentionQuery !== null) {
+      setMentionQuery(null);
+      setSuggestions([]);
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      if (mentionQuery !== null && suggestions.length > 0) {
+        e.preventDefault();
+        insertMention(suggestions[0]!.username);
+        return;
+      }
+      e.preventDefault();
+      void sendMsg();
+    }
   };
 
   if (isOnChatPage) return null;
@@ -569,7 +659,17 @@ export function ChatBubble() {
                 <div className="line-clamp-1 opacity-70">{chatMsg.replyToContent}</div>
               </div>
             )}
-            <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+            {chatMsg.poll ? (
+              <ChatPollCard
+                poll={chatMsg.poll}
+                token={getToken()}
+                onUpdate={(p) => setMessages(prev => prev.map(m =>
+                  !isSystem(m) && (m as ExtMsg).id === chatMsg.id ? { ...(m as ExtMsg), poll: p } : m
+                ))}
+              />
+            ) : (
+              <p className="break-words leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
+            )}
           </div>
           {user && (
             <button
@@ -651,6 +751,11 @@ export function ChatBubble() {
                   <Trash2 className="w-3.5 h-3.5 text-red-300" />
                 </button>
               )}
+              {user && (
+                <button onClick={() => setShowNotifSettings(v => !v)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Bildirim ayarları">
+                  <Settings className="w-3.5 h-3.5 text-amber-300" />
+                </button>
+              )}
               <Link href="/sohbet" onClick={() => setOpen(false)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Tam ekran">
                 <Maximize2 className="w-3.5 h-3.5 text-white/50" />
               </Link>
@@ -674,6 +779,12 @@ export function ChatBubble() {
             {chatPinned && (
               <div className="shrink-0 px-3 py-1.5 text-[11px] text-amber-200 bg-amber-400/10 border-b border-amber-400/20">
                 📌 {chatPinned}
+              </div>
+            )}
+
+            {showNotifSettings && user && (
+              <div className="shrink-0 px-3 py-2 max-h-48 overflow-y-auto border-b border-white/10 bg-black/40">
+                <NotifPrefsPanel compact onSaved={() => setShowNotifSettings(false)} />
               </div>
             )}
 
@@ -722,7 +833,17 @@ export function ChatBubble() {
             {/* Sticky gerçek üye mesajı — yalnızca admin */}
             {stickyHuman && feedMode === "all" && user?.role === "admin" && (
               <div className="shrink-0 px-3 py-2" style={{ borderTop: "1px solid rgba(245,197,24,0.25)", background: "rgba(245,197,24,0.07)" }}>
-                <div className="text-[9px] font-bold text-amber-400 mb-1 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[9px] font-bold text-amber-400 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
+                  <button
+                    type="button"
+                    onClick={() => setSkippedStickyId(stickyHuman.id)}
+                    className="text-[10px] font-bold text-white/50 hover:text-white/90 px-2 py-0.5 rounded-md hover:bg-white/10"
+                    title="Bu mesajı geç"
+                  >
+                    Geç
+                  </button>
+                </div>
                 <div className="flex items-start gap-2">
                   <UserAvatar src={stickyHuman.userAvatarUrl} username={stickyHuman.username} role={stickyHuman.userRole ?? "user"} isVip={stickyHuman.isVip} online />
                   <div className="flex-1 min-w-0">
@@ -748,7 +869,37 @@ export function ChatBubble() {
                   Giriş yap ve mesaj gönder
                 </Link>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 relative">
+                  <AnimatePresence>
+                    {mentionQuery !== null && suggestions.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 6 }}
+                        className="absolute bottom-full left-0 right-0 mb-1.5 rounded-xl overflow-hidden z-20 max-h-40 overflow-y-auto"
+                        style={{ background: "#1a2030", border: "1px solid rgba(245,197,24,0.35)", boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}
+                      >
+                        {suggestions.map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => insertMention(s.username)}
+                            className="w-full flex items-center gap-2 px-2.5 py-2 hover:bg-white/5 text-left"
+                          >
+                            <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[9px] font-bold bg-amber-500/30 text-amber-200">
+                              {s.avatarUrl
+                                ? <img src={s.avatarUrl} alt="" className="w-full h-full object-cover" />
+                                : (s.displayName || s.username).slice(0, 2).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-semibold text-white truncate">{s.displayName || s.username}</div>
+                              <div className="text-[9px] text-white/40">@{s.username}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   <AnimatePresence>
                     {replyTo && (
                       <motion.div
@@ -785,9 +936,9 @@ export function ChatBubble() {
                     <input
                       ref={inputRef}
                       value={content}
-                      onChange={e => setContent(e.target.value)}
+                      onChange={e => handleInputChange(e.target.value)}
                       onKeyDown={handleKey}
-                      placeholder={cooldownLeft > 0 ? `${cooldownLeft}s bekle...` : replyTo ? `${replyName(replyTo)}'e yanıtla...` : "Mesajınızı yazın..."}
+                      placeholder={cooldownLeft > 0 ? `${cooldownLeft}s bekle...` : replyTo ? `${replyName(replyTo)}'e yanıtla...` : "Mesaj... (@ ile etiketle)"}
                       disabled={cooldownLeft > 0}
                       maxLength={500}
                       className="flex-1 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-white/30 focus:outline-none disabled:opacity-50"

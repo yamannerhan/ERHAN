@@ -132,6 +132,8 @@ export function playNotificationBeep(): void {
 export function playPushSound(soundUrl?: string | null): void {
   try {
     if (localStorage.getItem("og_notif_sound") === "0") return;
+    // Arka plan tercihi açıksa ve UI görünürse ses çalma
+    if (localStorage.getItem("og_notif_bg_only") !== "0" && document.visibilityState === "visible") return;
   } catch { /* ignore */ }
   if (soundUrl) {
     try {

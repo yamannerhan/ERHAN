@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import sharp from "sharp";
 import { db, usersTable, listingsTable, listingFavoritesTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, or, desc, ilike } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
 
 const router = Router();
@@ -77,15 +77,43 @@ router.post("/users/avatar", authMiddleware, upload.single("avatar"), async (req
 
 // ── User search for @ mention ─────────────────────────────────────
 router.get("/users/search", async (req, res): Promise<void> => {
-  const q = String(req.query["q"] ?? "").trim().toLowerCase();
-  if (!q) { res.json([]); return; }
+  const q = String(req.query["q"] ?? "").trim();
 
-  const all = await db
-    .select({ id: usersTable.id, username: usersTable.username, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl, role: usersTable.role })
+  // Boş sorgu: son kayıtlı gerçek kullanıcılar (etiket listesi)
+  if (!q) {
+    const recent = await db
+      .select({
+        id: usersTable.id,
+        username: usersTable.username,
+        displayName: usersTable.displayName,
+        avatarUrl: usersTable.avatarUrl,
+        role: usersTable.role,
+      })
+      .from(usersTable)
+      .where(sql`${usersTable.role} IN ('user','moderator','admin')`)
+      .orderBy(desc(usersTable.id))
+      .limit(10);
+    res.json(recent);
+    return;
+  }
+
+  const pattern = `%${q}%`;
+  const filtered = await db
+    .select({
+      id: usersTable.id,
+      username: usersTable.username,
+      displayName: usersTable.displayName,
+      avatarUrl: usersTable.avatarUrl,
+      role: usersTable.role,
+    })
     .from(usersTable)
-    .limit(8);
+    .where(or(
+      ilike(usersTable.username, pattern),
+      sql`coalesce(${usersTable.displayName}, '') ILIKE ${pattern}`,
+    ))
+    .orderBy(desc(usersTable.id))
+    .limit(12);
 
-  const filtered = all.filter(u => u.username.toLowerCase().startsWith(q)).slice(0, 6);
   res.json(filtered);
 });
 
