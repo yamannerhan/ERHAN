@@ -41,6 +41,7 @@ export interface ElemanJobDetail extends ElemanListItem {
   description: string;
   phone: string;
   rawText: string;
+  postedAt?: Date | null;
 }
 
 function decodeHtml(value: string): string {
@@ -208,10 +209,17 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     return null;
   }
 
+  let postedAt: Date | null = null;
+  const dateRaw = job?.datePosted ?? job?.datePublished;
+  if (typeof dateRaw === "string") {
+    const d = new Date(dateRaw);
+    if (!Number.isNaN(d.getTime())) postedAt = d;
+  }
+
   const rawText = [title, companyName, description, `Telefon: ${phone}`]
     .filter(Boolean)
     .join("\n\n");
-  return { ...item, title, companyName, description, phone, rawText };
+  return { ...item, title, companyName, description, phone, rawText, postedAt };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {

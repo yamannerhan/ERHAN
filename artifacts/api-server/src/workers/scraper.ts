@@ -309,21 +309,20 @@ function bumpScanBackoffOnRateLimit(): void {
   logger.warn({ scanBackoffMinutes }, "scraper: rate limit — tarama aralığı artırıldı");
 }
 
-/** Süre = sitede eklendiği/görüldüğü andan itibaren 30 gün (Telegram post tarihi değil). */
-function listingExpiryFrom(_postedAt?: Date): Date {
-  return new Date(Date.now() + INITIAL_SCAN_MS);
+/** Süre = kaynak sitedeki yayın tarihi + 30 gün (şimdiki zamana +30 eklenmez). */
+function listingExpiryFrom(postedAt?: Date): Date {
+  const base = postedAt ?? new Date();
+  return new Date(base.getTime() + INITIAL_SCAN_MS);
 }
 
-/** Tekrar görülen bot ilanının süresini uzat. */
+/** Tekrar görülen ilan: lastSeen güncelle, yayın/bitiş tarihini değiştirme. */
 async function touchListingSeen(listingId: number): Promise<void> {
   const now = new Date();
   await db.update(listingsTable)
     .set({
       lastSeenAt: now,
-      expiresAt: listingExpiryFrom(),
       status: "active",
       isActive: true,
-      autoDeleteOnExpiry: true,
     })
     .where(eq(listingsTable.id, listingId));
 }
@@ -531,6 +530,7 @@ async function processMessage(
     firstSeenAt: now,
     lastSeenAt: now,
     rawText: text,
+    ...(postedAt ? { createdAt: postedAt } : {}),
   };
 
   if (!shouldAutoPublish(source)) {
@@ -567,7 +567,7 @@ async function processMessage(
     autoDeleteOnExpiry: true,
     sourceTag: source.platform,
     applyUrl: phone ? `tel:${phone}` : sourceUrl,
-    expiresAt: listingExpiryFrom(),
+    expiresAt: listingExpiryFrom(postedAt),
     ...listingMeta,
   }).returning();
   if (!newListing) return "skipped";
@@ -1268,6 +1268,7 @@ async function publishElemanJob(
     .replace(/İlan URL:\s*\S+/gi, "")
     .trim();
 
+  const postedAt = job.postedAt ?? now;
   const [newListing] = await db.insert(listingsTable).values({
     title: job.title || "Güvenlik Personeli Aranıyor",
     company: job.companyName ?? "Belirtilmemiş",
@@ -1284,11 +1285,12 @@ async function publishElemanJob(
     sourceUrl: job.url,
     sourceTag: "eleman",
     applyUrl: `tel:${job.phone}`,
-    publishedAt: now,
+    publishedAt: postedAt,
+    createdAt: postedAt,
     firstSeenAt: now,
     lastSeenAt: now,
     rawText: job.rawText,
-    expiresAt: listingExpiryFrom(),
+    expiresAt: listingExpiryFrom(postedAt),
   }).returning();
   if (!newListing) return "skipped";
 
@@ -1534,7 +1536,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     return stats;
   }
 
-  // İlk taramada 0 mesaj: done yapma (WA geçmişi henüz senkron olmamış olabilir)
+  // İlk taramada 0 mesaj: done yapma — ama mevcut imleci (lastTelegramMessageId) silme
   if (isInitialScan && messages.length === 0) {
     await patchSourceProgress(source.id, {
       lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek.",
@@ -1545,8 +1547,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       lastScanMessagesRead: 0,
       lastScanFound: 0,
       lastScanAdded: 0,
+      // lastTelegramMessageId korunur — baştan sıfırlanmaz
     });
-    logger.warn({ sourceId: source.id, name: source.name }, "scraper: wa 0 mesaj — initialScanDone=false bırakıldı");
+    logger.warn({ sourceId: source.id, name: source.name, lastTs }, "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek");
     return stats;
   }
 
@@ -2027,9 +2030,32 @@ async function scheduleScraperInterval(): Promise<void> {
 }
 
 export function startScraperWorker(): void {
-  void releaseStaleScanLocks(true);
+  // Sadece takılı isScanning kilidini aç — imleç/progress ASLA sıfırlanmaz (deploy sonrası kaldığı yerden devam)
+  void releaseStaleScanLocks(true).then(async (n) => {
+    if (n > 0) logger.info({ released: n }, "scraper: deploy sonrası scan kilitleri açıldı (imleçler korundu)");
+    const rows = await db.select({
+      id: sourcesTable.id,
+      platform: sourcesTable.platform,
+      name: sourcesTable.name,
+      initialScanDone: sourcesTable.initialScanDone,
+      initialScanOffsetId: sourcesTable.initialScanOffsetId,
+      lastTelegramMessageId: sourcesTable.lastTelegramMessageId,
+      initialScanProgress: sourcesTable.initialScanProgress,
+    }).from(sourcesTable).where(eq(sourcesTable.active, true));
+    for (const s of rows) {
+      logger.info({
+        id: s.id,
+        platform: s.platform,
+        name: s.name,
+        done: s.initialScanDone,
+        progress: s.initialScanProgress,
+        offset: s.initialScanOffsetId,
+        lastId: s.lastTelegramMessageId,
+      }, "scraper: kaynak kaldığı yerden devam edecek");
+    }
+  });
   void ensureTelegramConnected(5).then((ok) => {
-    logger.info(`scraper: GramJS ${ok ? "bağlı" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
+    logger.info(`scraper: GramJS ${ok ? "bağlı — kaldığı mesajdan devam" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
   });
   const mode = isClientConnected()
     ? "GramJS"
@@ -2115,27 +2141,27 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi gerçekten dolan ilanları sil (pasife alma). expiresAt < now şart. */
+/** Süresi gerçekten dolan ilanları sil. expiresAt = kaynak yayın tarihi + 30g. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
 
-  // Erken silmeyi düzelt: süre Telegram post tarihine göre yanlış hesaplanmışsa
-  // sitede ilk görülme + 30 güne çek (yalnızca henüz süresi gelmemiş aktif bot ilanları)
+  // expiresAt yoksa veya yayın tarihine göre tutarsızsa: publishedAt + 30 gün
   try {
     await db.execute(sql`
       UPDATE listings
       SET
-        expires_at = COALESCE(first_seen_at, last_seen_at, NOW()) + INTERVAL '30 days',
+        expires_at = COALESCE(published_at, created_at) + INTERVAL '30 days',
         auto_delete_on_expiry = true
       WHERE source_tag IS NOT NULL
         AND status = 'active'
         AND is_active = true
-        AND first_seen_at IS NOT NULL
         AND (
           expires_at IS NULL
-          OR expires_at < first_seen_at + INTERVAL '30 days' - INTERVAL '12 hours'
+          OR (
+            published_at IS NOT NULL
+            AND ABS(EXTRACT(EPOCH FROM (expires_at - (published_at + INTERVAL '30 days')))) > 86400
+          )
         )
-        AND COALESCE(first_seen_at, last_seen_at) > NOW() - INTERVAL '30 days'
     `);
   } catch (e) {
     logger.warn({ err: e }, "scraper: expiresAt düzeltmesi atlandı");

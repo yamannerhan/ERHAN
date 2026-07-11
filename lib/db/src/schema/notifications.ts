@@ -18,6 +18,9 @@ export const announcementsTable = pgTable("announcements", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  isPinned: boolean("is_pinned").notNull().default(false),
+  /** home = ana sayfa kayan yazı, chat = sohbet duyurusu */
+  placement: text("placement").notNull().default("home"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -32,6 +35,10 @@ export const adminSettingsTable = pgTable("admin_settings", {
   openaiApiKey: text("openai_api_key"),
   spamCooldown: integer("spam_cooldown").notNull().default(3),
   chatAnnounceListings: boolean("chat_announce_listings").notNull().default(true),
+  /** Sohbet kayan yazı duyurusu */
+  chatTickerMessage: text("chat_ticker_message"),
+  /** Sohbet sabit duyuru */
+  chatPinnedMessage: text("chat_pinned_message"),
   hiddenListingCities: text("hidden_listing_cities").notNull().default("[]"),
   botGuvenlikEnabled: boolean("bot_guvenlik_enabled").notNull().default(true),
   botBilgiEnabled: boolean("bot_bilgi_enabled").notNull().default(true),

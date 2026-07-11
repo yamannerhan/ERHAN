@@ -478,6 +478,8 @@ function settingsJson(s: typeof adminSettingsTable.$inferSelect) {
     maintenanceMode: s.maintenanceMode, welcomeMessage: s.welcomeMessage,
     hasOpenaiKey: !!s.openaiApiKey, spamCooldown: s.spamCooldown ?? 3,
     chatAnnounceListings: s.chatAnnounceListings ?? true,
+    chatTickerMessage: s.chatTickerMessage ?? null,
+    chatPinnedMessage: s.chatPinnedMessage ?? null,
     hiddenListingCities: parseHiddenListingCities(s.hiddenListingCities),
     botGuvenlikEnabled: s.botGuvenlikEnabled ?? true,
     botBilgiEnabled: s.botBilgiEnabled ?? true,
@@ -497,7 +499,7 @@ router.get("/admin/settings", authMiddleware, requireAdmin, async (_req, res): P
 });
 
 router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes } = req.body as Record<string, unknown>;
+  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, chatTickerMessage, chatPinnedMessage, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes } = req.body as Record<string, unknown>;
   const updates: Partial<typeof adminSettingsTable.$inferInsert> = {};
   if (chatLocked !== undefined) updates.chatLocked = Boolean(chatLocked);
   if (fakeOnlineBonus !== undefined) updates.fakeOnlineBonus = parseInt(String(fakeOnlineBonus), 10);
@@ -508,6 +510,8 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (openaiApiKey !== undefined) updates.openaiApiKey = openaiApiKey == null || openaiApiKey === "" ? null : String(openaiApiKey);
   if (spamCooldown !== undefined) updates.spamCooldown = Math.max(0, parseInt(String(spamCooldown), 10) || 0);
   if (chatAnnounceListings !== undefined) updates.chatAnnounceListings = Boolean(chatAnnounceListings);
+  if (chatTickerMessage !== undefined) updates.chatTickerMessage = chatTickerMessage == null || chatTickerMessage === "" ? null : String(chatTickerMessage);
+  if (chatPinnedMessage !== undefined) updates.chatPinnedMessage = chatPinnedMessage == null || chatPinnedMessage === "" ? null : String(chatPinnedMessage);
   if (botGuvenlikEnabled !== undefined) updates.botGuvenlikEnabled = Boolean(botGuvenlikEnabled);
   if (botBilgiEnabled !== undefined) updates.botBilgiEnabled = Boolean(botBilgiEnabled);
   if (botFakeEnabled !== undefined) updates.botFakeEnabled = Boolean(botFakeEnabled);

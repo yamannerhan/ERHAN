@@ -494,7 +494,6 @@ export default function Chat() {
           <div className="flex flex-col items-start max-w-[82%]">
             <div className="flex items-center gap-1.5 mb-1 ml-1">
               <span className="text-[11px] font-bold text-white/90">{botName}</span>
-              <span className="inline-flex px-1.5 py-0.5 rounded-md text-[8px] font-black bg-amber-400 text-black">BOT</span>
             </div>
             <div className="px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm" style={{ background: botBg, border: `1px solid ${botBdr}` }}>
               {isInfo ? (
@@ -720,7 +719,7 @@ export default function Chat() {
               {t.label}
             </button>
           ))}
-          <span className="ml-auto text-[10px] text-white/30 self-center">Sahte/bot mesajlar BOT rozetli</span>
+          <span className="ml-auto text-[10px] text-white/30 self-center">Üyeler = gerçek kullanıcılar</span>
         </div>
         {/* min-h-0: flex-1 + overflow-y-auto'nun çalışması için zorunlu */}
         <div ref={msgContainerRef} className="flex-1 min-h-0 overflow-y-auto py-4 space-y-3">

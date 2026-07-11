@@ -42,14 +42,8 @@ function renderMessageContent(content: string) {
   });
 }
 
-function RoleBadge({ role, isVip, isBot }: { role: string; isVip?: boolean; isBot?: boolean }) {
-  if (isBot || role === "bot") {
-    return (
-      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] font-black tracking-wider uppercase bg-amber-400 text-black">
-        BOT
-      </span>
-    );
-  }
+function RoleBadge({ role, isVip }: { role: string; isVip?: boolean; isBot?: boolean }) {
+  if (role === "bot") return null;
   if (role === "admin") return <span className="text-[7px] font-black tracking-widest uppercase text-red-400">YÖNETİCİ</span>;
   if (role === "moderator") return <span className="text-[7px] font-black tracking-widest uppercase text-blue-400">MODERATÖR</span>;
   if (isVip) {
@@ -166,6 +160,8 @@ export function ChatBubble() {
   const [sendError, setSendError] = useState("");
   const [onlineCount, setOnlineCount] = useState(0);
   const [feedMode, setFeedMode] = useState<"all" | "members">("all");
+  const [chatTicker, setChatTicker] = useState("Küfür, hakaret, reklam ve yanıltıcı ilan yasaktır.");
+  const [chatPinned, setChatPinned] = useState<string | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendErrorRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -276,6 +272,16 @@ export function ChatBubble() {
     }, 1000);
     return () => window.clearInterval(id);
   }, [syncLatestMessages]);
+
+  useEffect(() => {
+    fetch("/api/chat/announcements", { cache: "no-store" })
+      .then(r => r.json())
+      .then((d: { ticker?: string; pinned?: string | null }) => {
+        if (d?.ticker) setChatTicker(d.ticker);
+        setChatPinned(d?.pinned?.trim() || null);
+      })
+      .catch(() => {});
+  }, [open]);
 
   useEffect(() => {
     const s = io(window.location.origin, {
@@ -455,7 +461,6 @@ export function ChatBubble() {
               <div className="flex items-center gap-1.5 mb-1.5">
                 <Bot className="w-3 h-3 text-amber-400" />
                 <span className="text-[10px] font-bold text-amber-400">ÖzelGüvenlik Bot</span>
-                <span className="inline-flex px-1.5 py-0.5 rounded-md text-[8px] font-black bg-amber-400 text-black">BOT</span>
               </div>
               {msg.text}
             </div>
@@ -487,7 +492,6 @@ export function ChatBubble() {
           <div className="max-w-[82%] rounded-2xl rounded-tl-sm px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
             <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
               <span className="text-[11px] font-bold text-white/90">{botLabel}</span>
-              <RoleBadge role="bot" isBot />
               <span className="text-[9px] text-white/30 ml-auto">{formatTime(chatMsg.createdAt)}</span>
             </div>
             <p className="break-words text-white/75 leading-relaxed">{renderMessageContent(chatMsg.content)}</p>
@@ -619,12 +623,20 @@ export function ChatBubble() {
               </button>
             </div>
 
-            {/* Duyuru */}
-            <div className="flex items-center gap-2 px-3 py-2 shrink-0 text-[11px] font-medium text-black" style={{ background: "linear-gradient(90deg,#E8B923,#F5C518)" }}>
-              <Megaphone className="w-3.5 h-3.5 shrink-0" />
-              <span className="flex-1 truncate italic">Küfür, hakaret, reklam ve yanıltıcı ilan yasaktır.</span>
-              <span className="opacity-60">›</span>
+            {/* Duyuru — kayan yazı */}
+            <div className="shrink-0 overflow-hidden relative h-8 flex items-center" style={{ background: "linear-gradient(90deg,#E8B923,#F5C518)" }}>
+              <Megaphone className="w-3.5 h-3.5 shrink-0 ml-2 text-black z-10" />
+              <div className="flex-1 overflow-hidden mx-2">
+                <div className="animate-ticker whitespace-nowrap text-[11px] font-medium text-black italic inline-block">
+                  {chatTicker}&nbsp;&nbsp;&nbsp;•&nbsp;&nbsp;&nbsp;{chatTicker}
+                </div>
+              </div>
             </div>
+            {chatPinned && (
+              <div className="shrink-0 px-3 py-1.5 text-[11px] text-amber-200 bg-amber-400/10 border-b border-amber-400/20">
+                📌 {chatPinned}
+              </div>
+            )}
 
             {/* Üye / Tümü */}
             <div className="flex gap-1 px-3 py-2 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
@@ -642,7 +654,6 @@ export function ChatBubble() {
                   {t.label}
                 </button>
               ))}
-              <span className="ml-auto text-[9px] text-white/30 self-center">Botlar rozetle ayrılır</span>
             </div>
 
             {/* Messages */}

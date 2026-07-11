@@ -10,7 +10,7 @@ import {
   ToggleLeft, ToggleRight, Star, StarOff, CheckCircle, XCircle, Clock,
   ChevronDown, ChevronUp, Calendar, Infinity, Headphones, ChevronLeft, Send,
   Sparkles, Eye, RefreshCw, Phone, User, MapPin, Building2, Lock, Shield, Search,
-  MessageSquareDot, ListChecks, Eraser, Pin, Crown, Gem,
+  MessageSquareDot, ListChecks, Eraser, Pin, Crown, Gem, Megaphone,
   Link, Globe, Radio, AlertCircle, Edit2, ExternalLink, Filter, Zap,
   Cpu, TrendingUp, ShieldCheck, Activity, ArrowUpRight, Bell, BarChart3, PieChart as PieChartIcon, Server, Database, Bot, MessageCircle, Wrench, Terminal, Wifi,
   ChevronRight, Menu, Sun, Moon, FileText, CreditCard, ShieldAlert, LogOut, Globe2, FilePlus, UserCheck, Award,
@@ -683,6 +683,9 @@ function ChatManagementSection({ apiCall, toast }: {
   const [addingRule, setAddingRule] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [chatTicker, setChatTicker] = useState("");
+  const [chatPinned, setChatPinned] = useState("");
+  const [savingAnnounce, setSavingAnnounce] = useState(false);
 
   const loadRules = async () => {
     try {
@@ -691,7 +694,33 @@ function ChatManagementSection({ apiCall, toast }: {
     } catch {}
   };
 
-  useEffect(() => { loadRules(); }, []);
+  const loadChatAnnounce = async () => {
+    try {
+      const s = await apiCall("/admin/settings", "GET") as {
+        chatTickerMessage?: string | null;
+        chatPinnedMessage?: string | null;
+      };
+      setChatTicker(s.chatTickerMessage ?? "");
+      setChatPinned(s.chatPinnedMessage ?? "");
+    } catch {}
+  };
+
+  useEffect(() => { loadRules(); loadChatAnnounce(); }, []);
+
+  const saveChatAnnounce = async () => {
+    setSavingAnnounce(true);
+    try {
+      await apiCall("/admin/settings", "PATCH", {
+        chatTickerMessage: chatTicker.trim() || null,
+        chatPinnedMessage: chatPinned.trim() || null,
+      });
+      toast({ title: "Sohbet duyuruları kaydedildi" });
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingAnnounce(false);
+    }
+  };
 
   const clearChat = async () => {
     if (!confirm("Tüm sohbet mesajları silinecek. Devam?")) return;
@@ -736,6 +765,33 @@ function ChatManagementSection({ apiCall, toast }: {
   return (
     <Section title="Sohbet Yönetimi" icon={MessageSquareDot}>
       <div className="space-y-4">
+        <div className="bg-white/5 rounded-xl p-3 space-y-3 border border-amber-400/20">
+          <p className="text-xs font-semibold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Megaphone className="w-3.5 h-3.5" /> Sohbet Duyurusu
+          </p>
+          <div>
+            <label className="text-[10px] text-muted-foreground mb-1 block">Kayan yazı (sohbet üst şeridi)</label>
+            <Textarea
+              value={chatTicker}
+              onChange={e => setChatTicker(e.target.value)}
+              placeholder="Küfür, hakaret, reklam ve yanıltıcı ilan yasaktır."
+              className="border-white/[0.06] bg-[#0d1321]/80 min-h-[60px] text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground mb-1 block">Sabit duyuru (kayan yazının altında, boş = gizli)</label>
+            <Textarea
+              value={chatPinned}
+              onChange={e => setChatPinned(e.target.value)}
+              placeholder="Örn: Bugün 14:00 canlı yayın..."
+              className="border-white/[0.06] bg-[#0d1321]/80 min-h-[50px] text-sm"
+            />
+          </div>
+          <Button onClick={saveChatAnnounce} disabled={savingAnnounce} className="w-full text-sm bg-amber-500/90 hover:bg-amber-500 text-black font-bold">
+            {savingAnnounce ? "Kaydediliyor..." : "Duyuruları Kaydet"}
+          </Button>
+        </div>
+
         {/* Clear chat */}
         <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 flex items-center justify-between gap-3">
           <div>
@@ -3551,7 +3607,7 @@ export default function AdminDashboard() {
   }[]>("/admin/banners");
 
   const { data: announcementsData, refetch: refetchAnnouncements } = useAdminApi<{
-    id: number; content: string; isActive: boolean; createdAt: string;
+    id: number; content: string; isActive: boolean; isPinned?: boolean; createdAt: string;
   }[]>("/admin/announcements");
 
   const [scanning, setScanning] = useState(false);
@@ -3791,6 +3847,14 @@ export default function AdminDashboard() {
   const toggleAnnouncement = async (id: number, current: boolean) => {
     try {
       await apiCall(`/announcements/${id}`, "PATCH", { isActive: !current });
+      refetchAnnouncements();
+    } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
+  };
+
+  const toggleAnnouncementPin = async (id: number, current: boolean) => {
+    try {
+      await apiCall(`/announcements/${id}`, "PATCH", { isPinned: !current });
+      toast({ title: !current ? "Duyuru sabitlendi" : "Sabitleme kaldırıldı" });
       refetchAnnouncements();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
@@ -4240,10 +4304,16 @@ export default function AdminDashboard() {
                       </>
                     ) : (
                       <>
-                        <div className="text-sm text-foreground leading-relaxed">{a.content}</div>
+                        <div className="text-sm text-foreground leading-relaxed">
+                          {a.isPinned && <span className="inline-flex items-center gap-0.5 text-amber-400 text-[10px] font-bold mr-1.5"><Pin className="w-3 h-3" />SABİT</span>}
+                          {a.content}
+                        </div>
                         <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                           <span>{new Date(a.createdAt).toLocaleDateString("tr-TR")}</span>
                           <div className="flex items-center gap-2">
+                            <button onClick={() => toggleAnnouncementPin(a.id, !!a.isPinned)} className={a.isPinned ? "text-amber-400" : "text-muted-foreground"} title={a.isPinned ? "Sabiti kaldır" : "Sabitle"}>
+                              <Pin className="w-4 h-4" />
+                            </button>
                             <button onClick={() => toggleAnnouncement(a.id, a.isActive)} className={a.isActive ? "text-green-400" : "text-muted-foreground"} title={a.isActive ? "Aktif" : "Pasif"}>
                               {a.isActive ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
                             </button>
