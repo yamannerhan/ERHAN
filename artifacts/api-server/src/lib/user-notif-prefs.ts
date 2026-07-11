@@ -51,7 +51,7 @@ export function prefsAllowPushKind(prefs: UserNotifPrefs, kind: string): boolean
   if (kind === "listing") return prefs.notifListings !== false;
   if (kind === "join") return prefs.notifJoin !== false;
   if (kind === "campaign" || kind === "digest" || kind === "welcome") return prefs.notifSite !== false;
-  if (kind === "reply") return prefs.notifOther !== false;
+  if (kind === "reply" || kind === "chat") return prefs.notifOther !== false;
   return prefs.notifOther !== false;
 }
 

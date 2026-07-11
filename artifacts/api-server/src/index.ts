@@ -830,12 +830,11 @@ io.on("connection", (socket) => {
             const awayLong = !lastDisconnect || (Date.now() - lastDisconnect) >= JOIN_THRESHOLD_MS;
             if (awayLong) {
               const joinName = user.displayName || user.username;
+              // Sadece sohbet UI satırı — push YOK (reconnect spam olmasın; kayıt bildirimi register'da)
               io.emit("chat:join", {
                 username: joinName,
                 isVip: user.isVip && (!user.vipUntil || user.vipUntil > new Date()),
               });
-              // Gerçek kullanıcı katılımı → herkese push (bot değil)
-              void import("./lib/web-push").then((m) => m.maybePushUserJoin(joinName)).catch(() => {});
             }
           }
           // Kurallar spam olmasın: ilk girişte bir kez; sonra yalnızca 1 saat uzak kaldıktan sonra

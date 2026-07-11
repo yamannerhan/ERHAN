@@ -9,6 +9,7 @@ import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
 import { FramedAvatar } from "@/components/framed-avatar";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -156,6 +157,7 @@ function ChatFabIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
 export function ChatBubble() {
   const { user } = useAuth();
   const [location] = useLocation();
+  const keyboardInset = useKeyboardInset();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<AnyMsg[]>([]);
   const [content, setContent] = useState("");
@@ -698,11 +700,15 @@ export function ChatBubble() {
             transition={{ type: "spring", stiffness: 320, damping: 28 }}
             className="fixed right-4 z-50 w-[22rem] flex flex-col rounded-[18px] overflow-hidden"
             style={{
-              bottom: "calc(6rem + 56px)",
+              bottom: keyboardInset > 0
+                ? `calc(${keyboardInset}px + 0.75rem)`
+                : "calc(6rem + 56px)",
               background: "#12161f",
               border: "1px solid rgba(245,197,24,0.28)",
               boxShadow: "0 28px 64px rgba(0,0,0,0.65), 0 0 0 1px rgba(245,197,24,0.08)",
-              height: "min(520px, calc(100dvh - 11rem))",
+              height: keyboardInset > 0
+                ? `min(420px, calc(100dvh - ${keyboardInset}px - 5rem))`
+                : "min(520px, calc(100dvh - 11rem))",
             }}
           >
             {/* Header */}
@@ -984,6 +990,12 @@ export function ChatBubble() {
                       ref={inputRef}
                       value={content}
                       onChange={e => handleInputChange(e.target.value)}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          inputRef.current?.scrollIntoView({ block: "nearest" });
+                          scrollToBottom();
+                        }, 50);
+                      }}
                       onKeyDown={handleKey}
                       placeholder={cooldownLeft > 0 ? `${cooldownLeft}s bekle...` : replyTo ? `${replyName(replyTo)}'e yanıtla...` : "Mesaj... (@ ile etiketle)"}
                       disabled={cooldownLeft > 0}

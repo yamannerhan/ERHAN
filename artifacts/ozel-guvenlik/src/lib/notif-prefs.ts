@@ -20,9 +20,9 @@ export const DEFAULT_NOTIF_PREFS: NotifPrefs = {
 
 export const NOTIF_PREF_ITEMS: Array<{ key: keyof NotifPrefs; label: string; desc: string }> = [
   { key: "notifListings", label: "İş ilanı bildirimleri", desc: "Yeni üye ilanı paylaşılınca" },
-  { key: "notifJoin", label: "Kullanıcı katılım bildirimleri", desc: "Sohbete yeni üye girince" },
+  { key: "notifJoin", label: "Yeni üye kayıt bildirimleri", desc: "Yeni kayıt olunca" },
   { key: "notifSite", label: "Site bildirimleri", desc: "Kampanya, özet, hoşgeldin" },
-  { key: "notifOther", label: "Diğer / yanıt bildirimleri", desc: "Mesaj yanıtlandı, destek…" },
+  { key: "notifOther", label: "Sohbet / yanıt bildirimleri", desc: "Sohbete yazılınca, yanıtlanınca…" },
   { key: "notifChatSound", label: "Sohbet sesi", desc: "Gerçek kullanıcı mesajında bip" },
   { key: "notifSound", label: "Bildirim sesi", desc: "Push / zil sesi" },
   { key: "notifOnlyBackground", label: "Sadece arka planda bildir", desc: "Uygulama açıkken push/ses gitmez" },

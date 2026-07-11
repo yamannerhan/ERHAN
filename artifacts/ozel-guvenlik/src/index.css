@@ -869,6 +869,8 @@ html:not(.dark) body {
   background: rgba(10, 14, 28, 0.85);
   border-color: rgba(255,255,255,0.06);
   box-shadow: 0 2px 16px rgba(0,0,0,0.25);
+  /* iPhone saat / Dynamic Island ile menü üst üste binmesin */
+  padding-top: env(safe-area-inset-top, 0px);
 }
 html:not(.dark) .og-header {
   background: rgba(255, 255, 255, 0.92);
@@ -926,7 +928,7 @@ html:not(.dark) .og-drawer {
 }
 
 .og-drawer-header {
-  padding: 18px 16px 16px;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 16px 16px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   background: linear-gradient(135deg, rgba(250,204,21,0.08), rgba(245,158,11,0.04));
 }

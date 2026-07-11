@@ -214,7 +214,7 @@ async function sendToSub(
 
 export async function broadcastPush(
   payload: PushPayload,
-  opts?: { userIds?: number[]; force?: boolean },
+  opts?: { userIds?: number[]; excludeUserIds?: number[]; force?: boolean },
 ): Promise<{ sent: number; total: number; skippedForeground: number }> {
   await ensureVapidKeys();
   const s = await getOrCreateSettings();
@@ -227,7 +227,7 @@ export async function broadcastPush(
     payload.soundUrl
     ?? (kind === "listing" ? s.pushSoundListingUrl
       : kind === "join" ? s.pushSoundJoinUrl
-      : kind === "reply" ? s.pushSoundReplyUrl
+      : kind === "reply" || kind === "chat" ? s.pushSoundReplyUrl
       : s.pushSoundCampaignUrl)
     ?? null;
   const baseSoundUrl = sanitizeSoundUrl(rawSound) || (kind === "campaign" || kind === "digest" ? "/sounds/notify.wav" : null);
@@ -236,6 +236,10 @@ export async function broadcastPush(
   if (opts?.userIds?.length) {
     const set = new Set(opts.userIds);
     subs = subs.filter((x) => x.userId != null && set.has(x.userId));
+  }
+  if (opts?.excludeUserIds?.length) {
+    const ban = new Set(opts.excludeUserIds);
+    subs = subs.filter((x) => x.userId == null || !ban.has(x.userId));
   }
 
   const userIds = subs.map((x) => x.userId).filter((id): id is number => id != null);
@@ -297,20 +301,26 @@ export async function maybePushNewListing(listing: { id: number; title: string; 
   }
 }
 
-export async function maybePushUserJoin(displayName: string): Promise<void> {
+/** Yeni kayıt olan üye — herkese bir kez (sohbete yeniden girince değil) */
+export async function maybePushNewRegistration(displayName: string): Promise<void> {
   try {
     const s = await getOrCreateSettings();
     if (s.pushEnabled === false || s.pushOnUserJoin === false) return;
     await broadcastPush({
-      title: "Yeni üye sohbete katıldı",
+      title: "Yeni üye kaydoldu",
       body: `${displayName} aramıza katıldı`,
       url: "/sohbet",
-      tag: `join-${Date.now()}`,
+      tag: `register-${Date.now()}`,
       kind: "join",
     });
   } catch (e) {
-    logger.warn({ err: e }, "web-push: join push failed");
+    logger.warn({ err: e }, "web-push: registration push failed");
   }
+}
+
+/** @deprecated reconnect spam — yeni kayıt için maybePushNewRegistration kullan */
+export async function maybePushUserJoin(displayName: string): Promise<void> {
+  return maybePushNewRegistration(displayName);
 }
 
 export async function maybePushChatReply(userId: number, title: string, body: string): Promise<void> {
@@ -323,6 +333,31 @@ export async function maybePushChatReply(userId: number, title: string, body: st
     );
   } catch (e) {
     logger.warn({ err: e }, "web-push: chat reply push failed");
+  }
+}
+
+/** Gerçek kullanıcı sohbet mesajı — gönderen hariç herkese (uygulama arka plandayken) */
+export async function maybePushChatMessage(opts: {
+  senderUserId: number;
+  senderName: string;
+  preview: string;
+}): Promise<void> {
+  try {
+    const s = await getOrCreateSettings();
+    if (s.pushEnabled === false || s.pushOnChatReply === false) return;
+    const body = opts.preview.length > 100 ? `${opts.preview.slice(0, 100)}…` : opts.preview;
+    await broadcastPush(
+      {
+        title: `${opts.senderName} sohbette yazdı`,
+        body,
+        url: "/sohbet",
+        tag: "chat-message",
+        kind: "chat",
+      },
+      { excludeUserIds: [opts.senderUserId] },
+    );
+  } catch (e) {
+    logger.warn({ err: e }, "web-push: chat message push failed");
   }
 }
 

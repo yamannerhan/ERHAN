@@ -11,6 +11,7 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -164,6 +165,7 @@ function SwipeableMessage({ children, onReply }: { children: React.ReactNode; on
 
 export default function Chat() {
   const { user } = useAuth();
+  const keyboardInset = useKeyboardInset();
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -607,7 +609,12 @@ export default function Chat() {
           Inline style: calc içinde + etrafı boşluklu olmalı, yoksa CSS geçersiz sayar. */}
       <div
         className="fixed left-0 right-0 flex flex-col bg-background z-20"
-        style={{ top: "56px", bottom: "calc(70px + env(safe-area-inset-bottom))" }}
+        style={{
+          top: "calc(56px + env(safe-area-inset-top, 0px))",
+          bottom: keyboardInset > 0
+            ? `${keyboardInset}px`
+            : "calc(70px + env(safe-area-inset-bottom))",
+        }}
       >
         {/* Admin/Moderatör sohbet araçları + bildirim ayarı */}
         <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5 bg-background/60 backdrop-blur shrink-0">
@@ -806,6 +813,12 @@ export default function Chat() {
                   ref={inputRef}
                   value={content}
                   onChange={e => handleInputChange(e.target.value)}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      inputRef.current?.scrollIntoView({ block: "nearest" });
+                      scrollToBottom();
+                    }, 50);
+                  }}
                   onKeyDown={e => {
                     if (e.key === "Escape" && mentionQuery !== null) {
                       setMentionQuery(null);

@@ -114,6 +114,8 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       createdAt: new Date().toISOString(),
     });
     void import("../lib/web-push").then((m) => m.maybePushWelcome(user.id, name)).catch(() => {});
+    // Diğer üyelere: yeni kayıt bildirimi (sohbete girince değil)
+    void import("../lib/web-push").then((m) => m.maybePushNewRegistration(name)).catch(() => {});
   } catch {
     // bildirim hatası kaydı etkilemesin
   }

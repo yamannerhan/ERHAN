@@ -2730,8 +2730,8 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
         <div className="space-y-2">
           <Toggle on={stats?.pushEnabled !== false} label="Push bildirimleri" desc="Tüm canlı bildirimleri aç/kapat" onClick={() => void patch({ pushEnabled: !(stats?.pushEnabled !== false) }, "Push ayarı güncellendi")} />
           <Toggle on={stats?.pushOnNewListing !== false} label="Gerçek üye ilanı" desc="Üye ilan paylaşınca herkese push (botlar hariç)" onClick={() => void patch({ pushOnNewListing: !(stats?.pushOnNewListing !== false) }, "İlan bildirimi güncellendi")} />
-          <Toggle on={stats?.pushOnUserJoin !== false} label="Gerçek üye katılımı" desc="Sohbete gerçek kullanıcı girince push" onClick={() => void patch({ pushOnUserJoin: !(stats?.pushOnUserJoin !== false) }, "Katılım bildirimi güncellendi")} />
-          <Toggle on={stats?.pushOnChatReply !== false} label="Sohbet yanıt bildirimi" desc="Mesajına yanıt gelince kullanıcıya push" onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Yanıt bildirimi güncellendi")} />
+          <Toggle on={stats?.pushOnUserJoin !== false} label="Yeni üye kayıt bildirimi" desc="Sadece yeni kayıt olunca push (sohbete girince değil)" onClick={() => void patch({ pushOnUserJoin: !(stats?.pushOnUserJoin !== false) }, "Kayıt bildirimi güncellendi")} />
+          <Toggle on={stats?.pushOnChatReply !== false} label="Sohbet mesaj bildirimi" desc="Üye sohbete yazınca / yanıtlanınca push" onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Sohbet bildirimi güncellendi")} />
           <Toggle on={stats?.pushSoundEnabled !== false} label="Sesli bildirim" desc="Sistem sesi + titreşim + özel ses" onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")} />
         </div>
 

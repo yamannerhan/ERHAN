@@ -253,6 +253,16 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
         }
       }
     } catch { /* bildirim hatası mesajı engellemesin */ }
+  } else {
+    // Yanıt değilse: diğer üyelere sohbet mesajı push (gönderen hariç)
+    const senderName = (freshUser?.displayName || req.user!.username || "Üye").trim();
+    void import("../lib/web-push").then((m) =>
+      m.maybePushChatMessage({
+        senderUserId: req.user!.id,
+        senderName,
+        preview: filteredContent,
+      }),
+    ).catch(() => {});
   }
 
   // GuvenlikBot — kullanıcı mesajına anahtar kelime bazlı akıllı yanıt
