@@ -30,6 +30,12 @@ export const usersTable = pgTable("users", {
   lastDeviceId: text("last_device_id"),
   /** Kullanılan ücretsiz öne çıkarma hakkı (max 3) */
   freeFeatureUsed: integer("free_feature_used").notNull().default(0),
+  /** Kullanıcı bildirim tercihleri (push + site) */
+  notifListings: boolean("notif_listings").notNull().default(true),
+  notifJoin: boolean("notif_join").notNull().default(true),
+  notifSite: boolean("notif_site").notNull().default(true),
+  notifOther: boolean("notif_other").notNull().default(true),
+  notifSound: boolean("notif_sound").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

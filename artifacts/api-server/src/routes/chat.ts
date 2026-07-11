@@ -172,30 +172,34 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     try {
       const [orig] = await db.select().from(chatMessagesTable).where(eq(chatMessagesTable.id, replyToId)).limit(1);
       if (orig && orig.userId > 0 && orig.userId !== req.user!.id) {
-        const preview = filteredContent.length > 100 ? `${filteredContent.slice(0, 100)}…` : filteredContent;
-        const title = "Sohbete yanıt geldi";
-        const message = `${req.user!.username}: ${preview}`;
-        await db.insert(notificationsTable).values({
-          userId: orig.userId,
-          type: "message",
-          title,
-          message,
-          relatedId: msg.id,
-          linkUrl: "/sohbet",
-          isRead: false,
-        });
-        emitRealtimeToUser(orig.userId, "notification:new", {
-          type: "message",
-          title,
-          message,
-          relatedId: msg.id,
-          linkUrl: "/sohbet",
-          userId: orig.userId,
-          createdAt: new Date().toISOString(),
-        });
-        void import("../lib/web-push").then((m) =>
-          m.maybePushChatReply(orig.userId, title, message),
-        ).catch(() => {});
+        const { getUserNotifPrefs, prefsAllowInAppType } = await import("../lib/user-notif-prefs");
+        const prefs = await getUserNotifPrefs(orig.userId);
+        if (prefsAllowInAppType(prefs, "message")) {
+          const preview = filteredContent.length > 100 ? `${filteredContent.slice(0, 100)}…` : filteredContent;
+          const title = "Sohbete yanıt geldi";
+          const message = `${req.user!.username}: ${preview}`;
+          await db.insert(notificationsTable).values({
+            userId: orig.userId,
+            type: "message",
+            title,
+            message,
+            relatedId: msg.id,
+            linkUrl: "/sohbet",
+            isRead: false,
+          });
+          emitRealtimeToUser(orig.userId, "notification:new", {
+            type: "message",
+            title,
+            message,
+            relatedId: msg.id,
+            linkUrl: "/sohbet",
+            userId: orig.userId,
+            createdAt: new Date().toISOString(),
+          });
+          void import("../lib/web-push").then((m) =>
+            m.maybePushChatReply(orig.userId, title, message),
+          ).catch(() => {});
+        }
       }
     } catch { /* bildirim hatası mesajı engellemesin */ }
   }

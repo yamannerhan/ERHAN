@@ -9,10 +9,31 @@ import {
   ensurePushSchema,
   ensureVapidKeys,
 } from "../lib/web-push";
+import { getUserNotifPrefs, updateUserNotifPrefs, type UserNotifPrefs } from "../lib/user-notif-prefs";
 import { db, adminSettingsTable, pushCampaignsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 
 const router = Router();
+
+/** Kullanıcı bildirim tercihleri (profil) */
+router.get("/push/prefs", authMiddleware, async (req, res): Promise<void> => {
+  try {
+    const prefs = await getUserNotifPrefs(req.user!.id);
+    res.json(prefs);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : "Tercihler alınamadı" });
+  }
+});
+
+router.patch("/push/prefs", authMiddleware, async (req, res): Promise<void> => {
+  try {
+    const body = req.body as Partial<UserNotifPrefs>;
+    const prefs = await updateUserNotifPrefs(req.user!.id, body);
+    res.json(prefs);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : "Tercihler kaydedilemedi" });
+  }
+});
 
 router.get("/push/vapid-public-key", async (_req, res): Promise<void> => {
   try {

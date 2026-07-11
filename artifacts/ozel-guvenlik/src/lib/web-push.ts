@@ -130,6 +130,9 @@ export function playNotificationBeep(): void {
 
 /** Adminin verdiği özel ses URL'si (yoksa bip) */
 export function playPushSound(soundUrl?: string | null): void {
+  try {
+    if (localStorage.getItem("og_notif_sound") === "0") return;
+  } catch { /* ignore */ }
   if (soundUrl) {
     try {
       const audio = new Audio(soundUrl);

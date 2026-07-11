@@ -85,10 +85,11 @@ export default function Profile() {
   // Notification settings
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState({
-    likes: true,
-    replies: true,
-    listings: true,
-    support: true,
+    notifListings: true,
+    notifJoin: true,
+    notifSite: true,
+    notifOther: true,
+    notifSound: true,
   });
   const [notifLoading, setNotifLoading] = useState(false);
 
@@ -99,23 +100,56 @@ export default function Profile() {
     },
   });
 
-  // Load saved notification prefs from localStorage
+  // Sunucudan bildirim tercihlerini yükle
   useEffect(() => {
     if (!isMe) return;
-    try {
-      const raw = localStorage.getItem("notif_prefs");
-      if (raw) setNotifPrefs(prev => ({ ...prev, ...JSON.parse(raw) }));
-    } catch { /* ignore */ }
+    const token = getToken();
+    if (!token) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/push/prefs", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json() as typeof notifPrefs;
+        setNotifPrefs({
+          notifListings: data.notifListings !== false,
+          notifJoin: data.notifJoin !== false,
+          notifSite: data.notifSite !== false,
+          notifOther: data.notifOther !== false,
+          notifSound: data.notifSound !== false,
+        });
+        try {
+          localStorage.setItem("og_notif_sound", data.notifSound === false ? "0" : "1");
+        } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    })();
   }, [isMe]);
 
-  const saveNotifPrefs = () => {
+  const saveNotifPrefs = async () => {
     setNotifLoading(true);
     try {
-      localStorage.setItem("notif_prefs", JSON.stringify(notifPrefs));
+      const token = getToken();
+      const res = await fetch("/api/push/prefs", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(notifPrefs),
+      });
+      if (!res.ok) throw new Error("save failed");
+      const saved = await res.json() as typeof notifPrefs;
+      setNotifPrefs(saved);
+      try {
+        localStorage.setItem("og_notif_sound", saved.notifSound === false ? "0" : "1");
+        localStorage.setItem("notif_prefs", JSON.stringify(saved));
+      } catch { /* ignore */ }
       toast({ title: "Bildirim tercihleri kaydedildi" });
       setShowNotifSettings(false);
     } catch {
-      toast({ title: "Hata", variant: "destructive" });
+      toast({ title: "Kaydedilemedi", variant: "destructive" });
     } finally {
       setNotifLoading(false);
     }
@@ -684,24 +718,31 @@ export default function Profile() {
                   className="overflow-hidden"
                 >
                   <div className="og-setting-row flex-col items-stretch gap-2 p-4">
+                    <p className="text-[11px] og-text-muted mb-1">
+                      İstemediğiniz bildirimleri kapatın — rahatsız edilmezsiniz.
+                    </p>
                     {[
-                      { key: "likes" as const, label: "Beğeni bildirimleri" },
-                      { key: "replies" as const, label: "Yanıt / sohbet bildirimleri" },
-                      { key: "listings" as const, label: "Yeni ilan bildirimleri" },
-                      { key: "support" as const, label: "Destek bildirimleri" },
+                      { key: "notifListings" as const, label: "İş ilanı bildirimleri", desc: "Yeni üye ilanı paylaşılınca" },
+                      { key: "notifJoin" as const, label: "Kullanıcı katılım bildirimleri", desc: "Sohbete yeni üye girince" },
+                      { key: "notifSite" as const, label: "Site bildirimleri", desc: "Kampanya, özet ve admin duyuruları" },
+                      { key: "notifOther" as const, label: "Diğer bildirimler", desc: "Yanıt, destek ve diğer uyarılar" },
+                      { key: "notifSound" as const, label: "Bildirim sesi", desc: "Açıkken özel / sistem sesi çalar" },
                     ].map(item => (
-                      <label key={item.key} className="flex items-center justify-between py-2 cursor-pointer">
-                        <span className="text-sm">{item.label}</span>
+                      <label key={item.key} className="flex items-center justify-between gap-3 py-2 cursor-pointer">
+                        <span className="min-w-0">
+                          <span className="text-sm block">{item.label}</span>
+                          <span className="text-[10px] og-text-muted block">{item.desc}</span>
+                        </span>
                         <input
                           type="checkbox"
                           checked={notifPrefs[item.key]}
                           onChange={e => setNotifPrefs(p => ({ ...p, [item.key]: e.target.checked }))}
-                          className="w-4 h-4 accent-amber-400"
+                          className="w-4 h-4 accent-amber-400 shrink-0"
                         />
                       </label>
                     ))}
                     <Button
-                      onClick={saveNotifPrefs}
+                      onClick={() => void saveNotifPrefs()}
                       disabled={notifLoading}
                       className="w-full bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold mt-2"
                     >
@@ -718,7 +759,12 @@ export default function Profile() {
         {/* ── Senin İlanların ──────────────────────────────── */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="og-section-title">{isMe ? "Senin İlanların" : "İlanları"}</h2>
+            <div>
+              <h2 className="og-section-title">{isMe ? "Senin İlanların" : "İlanları"}</h2>
+              {isMe && (
+                <p className="text-[10px] text-amber-400/80 mt-0.5">İlk 3 ilan 3 gün ücretsiz öne çıkar · sonrası destekten satın alma</p>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {isMe && myListings.length > 0 && (
                 <button

@@ -83,13 +83,21 @@ export async function announceNewListing(
     : await db.select({ id: usersTable.id }).from(usersTable);
 
   if (users.length > 0) {
-    await db.insert(notificationsTable).values(users.map(user => ({
-      userId: user.id,
-      type: notifType,
-      message: notifMessage,
-      linkUrl,
-      isRead: false,
-    })));
+    const { getNotifPrefsMap, prefsAllowInAppType, DEFAULT_NOTIF_PREFS } = await import("./user-notif-prefs");
+    const prefsMap = await getNotifPrefsMap(users.map((u) => u.id));
+    const recipients = users.filter((u) => {
+      const prefs = prefsMap.get(u.id) ?? DEFAULT_NOTIF_PREFS;
+      return prefsAllowInAppType(prefs, notifType === "admin_listing" ? "admin" : "listing");
+    });
+    if (recipients.length > 0) {
+      await db.insert(notificationsTable).values(recipients.map(user => ({
+        userId: user.id,
+        type: notifType,
+        message: notifMessage,
+        linkUrl,
+        isRead: false,
+      })));
+    }
   }
 
   emitRealtime("notification:new", {

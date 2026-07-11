@@ -1,5 +1,5 @@
 /* ÖzelGüvenlik PWA Service Worker — Web Push + custom sounds */
-const CACHE_NAME = "ozelguvenlik-push-v2";
+const CACHE_NAME = "ozelguvenlik-push-v3";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -42,7 +42,8 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil((async () => {
     await self.registration.showNotification(data.title || "Özel Güvenlik", options);
-    // Açık sekmelerde özel ses çal
+    // Açık sekmelerde özel ses çal (ses kapalıysa gönderme)
+    if (data.sound === false) return;
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of clients) {
       c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" });

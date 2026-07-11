@@ -2,6 +2,11 @@ import webpush from "web-push";
 import { db, adminSettingsTable, pushSubscriptionsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { logger } from "./logger";
+import {
+  DEFAULT_NOTIF_PREFS,
+  getNotifPrefsMap,
+  prefsAllowPushKind,
+} from "./user-notif-prefs";
 
 export type PushPayload = {
   title: string;
@@ -174,9 +179,9 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
   const s = await getOrCreateSettings();
   if (s.pushEnabled === false) return { sent: 0, total: 0 };
 
-  const sound = s.pushSoundEnabled !== false && payload.sound !== false;
+  const adminSoundOn = s.pushSoundEnabled !== false && payload.sound !== false;
   const kind = payload.kind || "campaign";
-  const soundUrl =
+  const baseSoundUrl =
     payload.soundUrl
     ?? (kind === "listing" ? s.pushSoundListingUrl
       : kind === "join" ? s.pushSoundJoinUrl
@@ -184,19 +189,36 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
       : s.pushSoundCampaignUrl)
     ?? null;
 
-  const full: PushPayload = { ...payload, sound, kind, soundUrl };
-
   let subs = await db.select().from(pushSubscriptionsTable);
   if (opts?.userIds?.length) {
     const set = new Set(opts.userIds);
     subs = subs.filter((x) => x.userId != null && set.has(x.userId));
   }
 
+  const userIds = subs.map((x) => x.userId).filter((id): id is number => id != null);
+  const prefsMap = await getNotifPrefsMap(userIds);
+
   let sent = 0;
+  let eligible = 0;
   for (const sub of subs) {
+    const prefs = sub.userId != null
+      ? (prefsMap.get(sub.userId) ?? DEFAULT_NOTIF_PREFS)
+      : DEFAULT_NOTIF_PREFS;
+
+    // Giriş yapmış kullanıcı tercihi kapalıysa gönderme
+    if (sub.userId != null && !prefsAllowPushKind(prefs, kind)) continue;
+    eligible++;
+
+    const sound = adminSoundOn && prefs.notifSound !== false;
+    const full: PushPayload = {
+      ...payload,
+      kind,
+      sound,
+      soundUrl: sound ? baseSoundUrl : null,
+    };
     if (await sendToSub(sub, full)) sent++;
   }
-  return { sent, total: subs.length };
+  return { sent, total: eligible };
 }
 
 /** Sadece gerçek kullanıcı ilanı — bot/scraper çağırmaz */
