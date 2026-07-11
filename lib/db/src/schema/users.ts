@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -28,6 +28,8 @@ export const usersTable = pgTable("users", {
   mutedUntil: timestamp("muted_until", { withTimezone: true }),
   lastKnownIp: text("last_known_ip"),
   lastDeviceId: text("last_device_id"),
+  /** Kullanılan ücretsiz öne çıkarma hakkı (max 3) */
+  freeFeatureUsed: integer("free_feature_used").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

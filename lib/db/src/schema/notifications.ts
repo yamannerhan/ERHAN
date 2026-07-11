@@ -55,6 +55,13 @@ export const adminSettingsTable = pgTable("admin_settings", {
   pushDigestLastSentAt: timestamp("push_digest_last_sent_at", { withTimezone: true }),
   vapidPublicKey: text("vapid_public_key"),
   vapidPrivateKey: text("vapid_private_key"),
+  /** Gerçek kullanıcı sohbete katılınca push */
+  pushOnUserJoin: boolean("push_on_user_join").notNull().default(true),
+  /** Bildirim sesi URL'leri (tür bazlı; boşsa sistem sesi) */
+  pushSoundListingUrl: text("push_sound_listing_url"),
+  pushSoundJoinUrl: text("push_sound_join_url"),
+  pushSoundReplyUrl: text("push_sound_reply_url"),
+  pushSoundCampaignUrl: text("push_sound_campaign_url"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

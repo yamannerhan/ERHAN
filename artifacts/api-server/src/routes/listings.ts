@@ -252,6 +252,8 @@ function formatListing(listing: typeof listingsTable.$inferSelect, userId?: numb
     viewCount: listing.viewCount,
     likeCount: listing.likeCount,
     isFeatured: listing.isFeatured,
+    featuredUntil: listing.featuredUntil ? listing.featuredUntil.toISOString() : null,
+    featuredIsFree: listing.featuredIsFree ?? false,
     cardTheme: listing.cardTheme,
     applyUrl,
     contactInfoMasked: !isAuth && hasSensitiveInfo(rawDesc, rawApplyUrl),
@@ -434,6 +436,17 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
   }).returning();
 
+  // İlk 3 ilan → 3 gün ücretsiz öne çıkarma
+  try {
+    const { applyFreeFeatureIfAvailable } = await import("../lib/listing-feature");
+    await applyFreeFeatureIfAvailable(listing!.id, req.user!.id);
+  } catch { /* ignore */ }
+
+  // Gerçek kullanıcı ilanı → herkese Web Push
+  void import("../lib/web-push").then((m) =>
+    m.maybePushNewListing({ id: listing!.id, title: String(title), city: String(city) }),
+  ).catch(() => {});
+
   // Announce new listing in chat if enabled
   try {
     const settings = await db.select().from(adminSettingsTable).limit(1);
@@ -540,6 +553,12 @@ router.get("/listings/mine", authMiddleware, async (req, res): Promise<void> => 
     .where(eq(listingsTable.authorId, req.user!.id))
     .orderBy(desc(listingsTable.createdAt));
   res.json(myListings.map(l => formatListing(l, req.user!.id, new Set(), new Set(), req.user!.username)));
+});
+
+router.get("/listings/feature-quota", authMiddleware, async (req, res): Promise<void> => {
+  const { getFreeFeatureRemaining, FREE_FEATURE_LIMIT, FREE_FEATURE_DAYS } = await import("../lib/listing-feature");
+  const remaining = await getFreeFeatureRemaining(req.user!.id);
+  res.json({ remaining, limit: FREE_FEATURE_LIMIT, freeDays: FREE_FEATURE_DAYS });
 });
 
 router.get("/listings/:id", optionalAuthMiddleware, async (req, res): Promise<void> => {
@@ -722,6 +741,57 @@ router.post("/listings/:id/view", optionalAuthMiddleware, async (req, res): Prom
 
   await db.update(listingsTable).set({ viewCount: sql`${listingsTable.viewCount} + 1` }).where(eq(listingsTable.id, id));
   res.json({ success: true });
+});
+
+router.post("/listings/:id/feature-request", authMiddleware, async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+  const id = parseInt(rawId ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+
+  const [listing] = await db.select().from(listingsTable).where(eq(listingsTable.id, id)).limit(1);
+  if (!listing) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+  if (listing.authorId !== req.user!.id && req.user!.role !== "admin") {
+    res.status(403).json({ error: "Bu ilan size ait değil" });
+    return;
+  }
+
+  const {
+    applyFreeFeatureIfAvailable,
+    createFeaturePurchaseTicket,
+    getFreeFeatureRemaining,
+  } = await import("../lib/listing-feature");
+
+  const remaining = await getFreeFeatureRemaining(req.user!.id);
+  if (remaining > 0 && !listing.isFeatured) {
+    const result = await applyFreeFeatureIfAvailable(id, req.user!.id);
+    res.json({
+      success: true,
+      mode: "free",
+      message: `Ücretsiz öne çıkarma aktif — ${result.featuredUntil ? new Date(result.featuredUntil).toLocaleString("tr-TR") : "3 gün"}`,
+      remaining: result.remaining,
+      featuredUntil: result.featuredUntil?.toISOString() ?? null,
+    });
+    return;
+  }
+
+  if (listing.isFeatured) {
+    res.json({ success: true, mode: "already", message: "İlan zaten öne çıkarılmış." });
+    return;
+  }
+
+  const ticket = await createFeaturePurchaseTicket({
+    userId: req.user!.id,
+    username: req.user!.username,
+    listingId: id,
+    listingTitle: listing.title,
+  });
+
+  res.json({
+    success: true,
+    mode: "support",
+    ticketId: ticket.ticketId,
+    message: "Öne çıkarma satın alma talebiniz destek üzerinden admin'e iletildi. Destek sayfasından görüşmeyi sürdürebilirsiniz.",
+  });
 });
 
 // Admin: approve listing

@@ -771,10 +771,13 @@ io.on("connection", (socket) => {
             const lastDisconnect = userLastDisconnect.get(userId);
             const awayLong = !lastDisconnect || (Date.now() - lastDisconnect) >= JOIN_THRESHOLD_MS;
             if (awayLong) {
+              const joinName = user.displayName || user.username;
               io.emit("chat:join", {
-                username: user.displayName || user.username,
+                username: joinName,
                 isVip: user.isVip && (!user.vipUntil || user.vipUntil > new Date()),
               });
+              // Gerçek kullanıcı katılımı → herkese push (bot değil)
+              void import("./lib/web-push").then((m) => m.maybePushUserJoin(joinName)).catch(() => {});
             }
           }
           // Kurallar spam olmasın: ilk girişte bir kez; sonra yalnızca 1 saat uzak kaldıktan sonra
@@ -1003,7 +1006,8 @@ async function bootstrapWorkers(): Promise<void> {
     void initWhatsAppClient();
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
-    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push)");
+    void import("./lib/listing-feature").then((m) => m.startFeatureExpiryWorker()).catch(() => {});
+    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push; feature-expiry)");
   } catch (e) {
     logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
   }

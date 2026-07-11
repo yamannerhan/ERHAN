@@ -2100,9 +2100,14 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
     pushEnabled: boolean;
     pushOnNewListing: boolean;
     pushOnChatReply: boolean;
+    pushOnUserJoin: boolean;
     pushSoundEnabled: boolean;
     pushDigestMode: string;
     pushDigestLastSentAt: string | null;
+    pushSoundListingUrl: string | null;
+    pushSoundJoinUrl: string | null;
+    pushSoundReplyUrl: string | null;
+    pushSoundCampaignUrl: string | null;
     recent: Array<{ id: number; title: string; body: string; schedule: string; sentCount: number; createdAt: string; sentAt: string | null }>;
   } | null>(null);
   const [title, setTitle] = useState("");
@@ -2110,11 +2115,23 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
   const [url, setUrl] = useState("/");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [soundDraft, setSoundDraft] = useState({
+    pushSoundListingUrl: "",
+    pushSoundJoinUrl: "",
+    pushSoundReplyUrl: "",
+    pushSoundCampaignUrl: "",
+  });
 
   const refresh = async () => {
     try {
-      const r = await apiCall("/admin/push/stats", "GET") as typeof stats;
+      const r = await apiCall("/admin/push/stats", "GET") as NonNullable<typeof stats>;
       setStats(r);
+      setSoundDraft({
+        pushSoundListingUrl: r.pushSoundListingUrl ?? "",
+        pushSoundJoinUrl: r.pushSoundJoinUrl ?? "",
+        pushSoundReplyUrl: r.pushSoundReplyUrl ?? "",
+        pushSoundCampaignUrl: r.pushSoundCampaignUrl ?? "",
+      });
     } catch (e) {
       toast({ title: "Push istatistik alınamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
@@ -2132,6 +2149,20 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
       toast({ title: "Kaydedilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const previewSound = (src: string) => {
+    if (!src.trim()) {
+      toast({ title: "Önce ses linki girin", variant: "destructive" });
+      return;
+    }
+    try {
+      const a = new Audio(src.trim());
+      a.volume = 0.9;
+      void a.play().catch(() => toast({ title: "Ses çalınamadı", description: "Linki kontrol edin (HTTPS mp3/ogg)", variant: "destructive" }));
+    } catch {
+      toast({ title: "Ses çalınamadı", variant: "destructive" });
     }
   };
 
@@ -2171,11 +2202,18 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
     </div>
   );
 
+  const soundFields: Array<{ key: keyof typeof soundDraft; label: string; hint: string }> = [
+    { key: "pushSoundListingUrl", label: "İlan bildirimi sesi", hint: "Gerçek kullanıcı ilan paylaşınca" },
+    { key: "pushSoundJoinUrl", label: "Katılım sesi", hint: "Gerçek kullanıcı sohbete girince" },
+    { key: "pushSoundReplyUrl", label: "Yanıt sesi", hint: "Sohbet yanıtı" },
+    { key: "pushSoundCampaignUrl", label: "Kampanya / özet sesi", hint: "Anlık gönderim ve özet" },
+  ];
+
   return (
     <Section title="Canlı Push Bildirimleri (PWA / Tarayıcı)" icon={Bell} defaultOpen>
       <div className="space-y-4">
         <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-[11px] text-amber-100/80 leading-relaxed">
-          Siteye veya PWA’ya girenlerden bir kez bildirim izni istenir. İzin verenlere Android gibi canlı bildirim gider (sistem sesi + titreşim).
+          Sadece <b>gerçek üyeler</b> ilan paylaşınca veya sohbete katılınca push gider (bot/scraper değil). Ses linkleri mp3/ogg HTTPS olmalı; site açıkken özel ses çalar.
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -2190,30 +2228,45 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
         </div>
 
         <div className="space-y-2">
-          <Toggle
-            on={stats?.pushEnabled !== false}
-            label="Push bildirimleri"
-            desc="Tüm canlı bildirimleri aç/kapat"
-            onClick={() => void patch({ pushEnabled: !(stats?.pushEnabled !== false) }, "Push ayarı güncellendi")}
-          />
-          <Toggle
-            on={stats?.pushOnNewListing !== false}
-            label="Yeni ilan bildirimi"
-            desc="Her yeni ilan yayınlanınca abonelere gönder"
-            onClick={() => void patch({ pushOnNewListing: !(stats?.pushOnNewListing !== false) }, "İlan bildirimi güncellendi")}
-          />
-          <Toggle
-            on={stats?.pushOnChatReply !== false}
-            label="Sohbet yanıt bildirimi"
-            desc="Mesajına yanıt gelince kullanıcıya push"
-            onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Yanıt bildirimi güncellendi")}
-          />
-          <Toggle
-            on={stats?.pushSoundEnabled !== false}
-            label="Sesli bildirim"
-            desc="Sistem sesi + titreşim (sessiz mod kapalı)"
-            onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")}
-          />
+          <Toggle on={stats?.pushEnabled !== false} label="Push bildirimleri" desc="Tüm canlı bildirimleri aç/kapat" onClick={() => void patch({ pushEnabled: !(stats?.pushEnabled !== false) }, "Push ayarı güncellendi")} />
+          <Toggle on={stats?.pushOnNewListing !== false} label="Gerçek üye ilanı" desc="Üye ilan paylaşınca herkese push (botlar hariç)" onClick={() => void patch({ pushOnNewListing: !(stats?.pushOnNewListing !== false) }, "İlan bildirimi güncellendi")} />
+          <Toggle on={stats?.pushOnUserJoin !== false} label="Gerçek üye katılımı" desc="Sohbete gerçek kullanıcı girince push" onClick={() => void patch({ pushOnUserJoin: !(stats?.pushOnUserJoin !== false) }, "Katılım bildirimi güncellendi")} />
+          <Toggle on={stats?.pushOnChatReply !== false} label="Sohbet yanıt bildirimi" desc="Mesajına yanıt gelince kullanıcıya push" onClick={() => void patch({ pushOnChatReply: !(stats?.pushOnChatReply !== false) }, "Yanıt bildirimi güncellendi")} />
+          <Toggle on={stats?.pushSoundEnabled !== false} label="Sesli bildirim" desc="Sistem sesi + titreşim + özel ses (açık sekme)" onClick={() => void patch({ pushSoundEnabled: !(stats?.pushSoundEnabled !== false) }, "Ses ayarı güncellendi")} />
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+          <div className="text-sm font-bold text-white">Bildirim sesleri (link ile)</div>
+          <p className="text-[10px] text-slate-400">Her tür için farklı ses veya hepsine aynı link. Önizle → Kaydet.</p>
+          {soundFields.map((f) => (
+            <div key={f.key} className="space-y-1">
+              <div className="text-[11px] font-semibold text-slate-300">{f.label}</div>
+              <div className="text-[10px] text-slate-500">{f.hint}</div>
+              <div className="flex gap-2">
+                <Input
+                  value={soundDraft[f.key]}
+                  onChange={(e) => setSoundDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                  placeholder="https://.../ses.mp3"
+                  className="border-white/10 bg-white/5 text-xs"
+                />
+                <Button type="button" variant="outline" className="border-white/15 text-xs shrink-0" onClick={() => previewSound(soundDraft[f.key])}>
+                  Önizle
+                </Button>
+              </div>
+            </div>
+          ))}
+          <Button
+            disabled={loading}
+            onClick={() => void patch({
+              pushSoundListingUrl: soundDraft.pushSoundListingUrl.trim() || null,
+              pushSoundJoinUrl: soundDraft.pushSoundJoinUrl.trim() || null,
+              pushSoundReplyUrl: soundDraft.pushSoundReplyUrl.trim() || null,
+              pushSoundCampaignUrl: soundDraft.pushSoundCampaignUrl.trim() || null,
+            }, "Ses linkleri kaydedildi")}
+            className="w-full bg-sky-500/90 hover:bg-sky-400 text-white font-bold"
+          >
+            Sesleri Kaydet
+          </Button>
         </div>
 
         <div>
@@ -2235,9 +2288,6 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
               </button>
             ))}
           </div>
-          {stats?.pushDigestLastSentAt && (
-            <p className="text-[10px] text-slate-500 mt-1">Son özet: {new Date(stats.pushDigestLastSentAt).toLocaleString("tr-TR")}</p>
-          )}
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
@@ -2259,9 +2309,6 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
               <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
                 <div className="text-xs font-bold text-white">{c.title}</div>
                 <div className="text-[10px] text-slate-400 line-clamp-1">{c.body}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  {c.schedule} · {c.sentCount} cihaz · {new Date(c.createdAt).toLocaleString("tr-TR")}
-                </div>
               </div>
             ))}
           </div>

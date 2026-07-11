@@ -491,6 +491,11 @@ function settingsJson(s: typeof adminSettingsTable.$inferSelect) {
     pushSoundEnabled: s.pushSoundEnabled ?? true,
     pushDigestMode: s.pushDigestMode ?? "off",
     pushDigestLastSentAt: s.pushDigestLastSentAt?.toISOString() ?? null,
+    pushOnUserJoin: s.pushOnUserJoin ?? true,
+    pushSoundListingUrl: s.pushSoundListingUrl ?? null,
+    pushSoundJoinUrl: s.pushSoundJoinUrl ?? null,
+    pushSoundReplyUrl: s.pushSoundReplyUrl ?? null,
+    pushSoundCampaignUrl: s.pushSoundCampaignUrl ?? null,
   };
 }
 
@@ -505,7 +510,7 @@ router.get("/admin/settings", authMiddleware, requireAdmin, async (_req, res): P
 });
 
 router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, chatTickerMessage, chatPinnedMessage, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes, pushEnabled, pushOnNewListing, pushOnChatReply, pushSoundEnabled, pushDigestMode } = req.body as Record<string, unknown>;
+  const { chatLocked, fakeOnlineBonus, fakeOnlineMin, fakeOnlineMax, maintenanceMode, welcomeMessage, openaiApiKey, spamCooldown, chatAnnounceListings, chatTickerMessage, chatPinnedMessage, hiddenListingCities, botGuvenlikEnabled, botBilgiEnabled, botFakeEnabled, telegramScanIntervalMinutes, pushEnabled, pushOnNewListing, pushOnChatReply, pushSoundEnabled, pushDigestMode, pushOnUserJoin, pushSoundListingUrl, pushSoundJoinUrl, pushSoundReplyUrl, pushSoundCampaignUrl } = req.body as Record<string, unknown>;
   const updates: Partial<typeof adminSettingsTable.$inferInsert> = {};
   if (chatLocked !== undefined) updates.chatLocked = Boolean(chatLocked);
   if (fakeOnlineBonus !== undefined) updates.fakeOnlineBonus = parseInt(String(fakeOnlineBonus), 10);
@@ -525,6 +530,11 @@ router.patch("/admin/settings", authMiddleware, requireAdmin, async (req, res): 
   if (pushOnNewListing !== undefined) updates.pushOnNewListing = Boolean(pushOnNewListing);
   if (pushOnChatReply !== undefined) updates.pushOnChatReply = Boolean(pushOnChatReply);
   if (pushSoundEnabled !== undefined) updates.pushSoundEnabled = Boolean(pushSoundEnabled);
+  if (pushOnUserJoin !== undefined) updates.pushOnUserJoin = Boolean(pushOnUserJoin);
+  if (pushSoundListingUrl !== undefined) updates.pushSoundListingUrl = pushSoundListingUrl == null || pushSoundListingUrl === "" ? null : String(pushSoundListingUrl);
+  if (pushSoundJoinUrl !== undefined) updates.pushSoundJoinUrl = pushSoundJoinUrl == null || pushSoundJoinUrl === "" ? null : String(pushSoundJoinUrl);
+  if (pushSoundReplyUrl !== undefined) updates.pushSoundReplyUrl = pushSoundReplyUrl == null || pushSoundReplyUrl === "" ? null : String(pushSoundReplyUrl);
+  if (pushSoundCampaignUrl !== undefined) updates.pushSoundCampaignUrl = pushSoundCampaignUrl == null || pushSoundCampaignUrl === "" ? null : String(pushSoundCampaignUrl);
   if (pushDigestMode !== undefined) {
     const m = String(pushDigestMode);
     if (["off", "daily", "weekly", "monthly"].includes(m)) updates.pushDigestMode = m;

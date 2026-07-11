@@ -127,3 +127,29 @@ export function playNotificationBeep(): void {
     // ignore
   }
 }
+
+/** Adminin verdiği özel ses URL'si (yoksa bip) */
+export function playPushSound(soundUrl?: string | null): void {
+  if (soundUrl) {
+    try {
+      const audio = new Audio(soundUrl);
+      audio.volume = 0.85;
+      void audio.play().catch(() => playNotificationBeep());
+      return;
+    } catch {
+      // fall through
+    }
+  }
+  playNotificationBeep();
+}
+
+/** SW'den gelen özel ses mesajını dinle */
+export function listenForPushSounds(): () => void {
+  if (!("serviceWorker" in navigator)) return () => {};
+  const handler = (event: MessageEvent) => {
+    const data = event.data as { type?: string; soundUrl?: string | null } | null;
+    if (data?.type === "OG_PUSH_SOUND") playPushSound(data.soundUrl);
+  };
+  navigator.serviceWorker.addEventListener("message", handler);
+  return () => navigator.serviceWorker.removeEventListener("message", handler);
+}

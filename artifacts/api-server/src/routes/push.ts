@@ -74,6 +74,11 @@ router.get("/admin/push/stats", authMiddleware, requireAdmin, async (_req, res):
     pushSoundEnabled: settings?.pushSoundEnabled !== false,
     pushDigestMode: settings?.pushDigestMode ?? "off",
     pushDigestLastSentAt: settings?.pushDigestLastSentAt?.toISOString() ?? null,
+    pushOnUserJoin: settings?.pushOnUserJoin !== false,
+    pushSoundListingUrl: settings?.pushSoundListingUrl ?? null,
+    pushSoundJoinUrl: settings?.pushSoundJoinUrl ?? null,
+    pushSoundReplyUrl: settings?.pushSoundReplyUrl ?? null,
+    pushSoundCampaignUrl: settings?.pushSoundCampaignUrl ?? null,
     recent: recent.map((c) => ({
       id: c.id,
       title: c.title,
@@ -117,6 +122,7 @@ router.post("/admin/push/send", authMiddleware, requireAdmin, async (req, res): 
       body: campaign.body,
       url: campaign.url ?? "/",
       tag: `campaign-${campaign.id}`,
+      kind: "campaign",
     });
     await db.update(pushCampaignsTable)
       .set({ sentCount: result.sent, sentAt: new Date() })

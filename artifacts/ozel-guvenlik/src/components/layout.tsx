@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { io as socketIo } from "socket.io-client";
 import { useToast } from "@/hooks/use-toast";
 import { PushPermissionBanner } from "./push-permission-banner";
-import { playNotificationBeep } from "@/lib/web-push";
+import { playNotificationBeep, listenForPushSounds } from "@/lib/web-push";
 
 /* ── Theme hook ───────────────────────────────────────────── */
 function useTheme() {
@@ -289,6 +289,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   });
   const notifications = notifData ?? [];
+
+  useEffect(() => {
+    return listenForPushSounds();
+  }, []);
 
   /* Socket.io — online count + push notifications */
   useEffect(() => {

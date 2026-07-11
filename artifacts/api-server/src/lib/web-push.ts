@@ -9,6 +9,9 @@ export type PushPayload = {
   url?: string;
   tag?: string;
   sound?: boolean;
+  /** listing | join | reply | campaign | digest */
+  kind?: string;
+  soundUrl?: string | null;
 };
 
 let ensured = false;
@@ -51,6 +54,11 @@ export async function ensurePushSchema(): Promise<void> {
       ["push_digest_last_sent_at", "TIMESTAMPTZ"],
       ["vapid_public_key", "TEXT"],
       ["vapid_private_key", "TEXT"],
+      ["push_on_user_join", "BOOLEAN NOT NULL DEFAULT TRUE"],
+      ["push_sound_listing_url", "TEXT"],
+      ["push_sound_join_url", "TEXT"],
+      ["push_sound_reply_url", "TEXT"],
+      ["push_sound_campaign_url", "TEXT"],
     ];
     for (const [name, type] of cols) {
       await db.execute(sql.raw(
@@ -167,7 +175,16 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
   if (s.pushEnabled === false) return { sent: 0, total: 0 };
 
   const sound = s.pushSoundEnabled !== false && payload.sound !== false;
-  const full: PushPayload = { ...payload, sound };
+  const kind = payload.kind || "campaign";
+  const soundUrl =
+    payload.soundUrl
+    ?? (kind === "listing" ? s.pushSoundListingUrl
+      : kind === "join" ? s.pushSoundJoinUrl
+      : kind === "reply" ? s.pushSoundReplyUrl
+      : s.pushSoundCampaignUrl)
+    ?? null;
+
+  const full: PushPayload = { ...payload, sound, kind, soundUrl };
 
   let subs = await db.select().from(pushSubscriptionsTable);
   if (opts?.userIds?.length) {
@@ -182,19 +199,37 @@ export async function broadcastPush(payload: PushPayload, opts?: { userIds?: num
   return { sent, total: subs.length };
 }
 
+/** Sadece gerçek kullanıcı ilanı — bot/scraper çağırmaz */
 export async function maybePushNewListing(listing: { id: number; title: string; city?: string | null }): Promise<void> {
   try {
     const s = await getOrCreateSettings();
     if (s.pushEnabled === false || s.pushOnNewListing === false) return;
     const city = listing.city ? ` · ${listing.city}` : "";
     await broadcastPush({
-      title: "Yeni güvenlik ilanı",
+      title: "Yeni üye ilanı",
       body: `${listing.title}${city}`,
       url: `/ilan/${listing.id}`,
       tag: `listing-${listing.id}`,
+      kind: "listing",
     });
   } catch (e) {
     logger.warn({ err: e }, "web-push: listing push failed");
+  }
+}
+
+export async function maybePushUserJoin(displayName: string): Promise<void> {
+  try {
+    const s = await getOrCreateSettings();
+    if (s.pushEnabled === false || s.pushOnUserJoin === false) return;
+    await broadcastPush({
+      title: "Yeni üye sohbete katıldı",
+      body: `${displayName} aramıza katıldı`,
+      url: "/sohbet",
+      tag: `join-${Date.now()}`,
+      kind: "join",
+    });
+  } catch (e) {
+    logger.warn({ err: e }, "web-push: join push failed");
   }
 }
 
@@ -203,7 +238,7 @@ export async function maybePushChatReply(userId: number, title: string, body: st
     const s = await getOrCreateSettings();
     if (s.pushEnabled === false || s.pushOnChatReply === false) return;
     await broadcastPush(
-      { title, body, url: "/sohbet", tag: `chat-reply-${userId}-${Date.now()}` },
+      { title, body, url: "/sohbet", tag: `chat-reply-${userId}-${Date.now()}`, kind: "reply" },
       { userIds: [userId] },
     );
   } catch (e) {
@@ -242,6 +277,7 @@ export async function runPushDigestIfDue(): Promise<void> {
         : "Yeni ilanlar için siteyi ziyaret edin.",
       url: "/",
       tag: `digest-${mode}`,
+      kind: "campaign",
     });
     await db.update(adminSettingsTable)
       .set({ pushDigestLastSentAt: new Date() })

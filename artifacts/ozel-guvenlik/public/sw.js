@@ -1,9 +1,7 @@
-/* ÖzelGüvenlik PWA Service Worker — Web Push + cache bust */
-const CACHE_NAME = "ozelguvenlik-push-v1";
+/* ÖzelGüvenlik PWA Service Worker — Web Push + custom sounds */
+const CACHE_NAME = "ozelguvenlik-push-v2";
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
@@ -20,16 +18,13 @@ self.addEventListener("push", (event) => {
     url: "/",
     tag: "og-push",
     sound: true,
+    kind: "campaign",
+    soundUrl: null,
   };
   try {
-    if (event.data) {
-      const parsed = event.data.json();
-      data = { ...data, ...parsed };
-    }
+    if (event.data) data = { ...data, ...event.data.json() };
   } catch {
-    try {
-      data.body = event.data ? event.data.text() : data.body;
-    } catch { /* ignore */ }
+    try { data.body = event.data ? event.data.text() : data.body; } catch { /* ignore */ }
   }
 
   const options = {
@@ -41,11 +36,18 @@ self.addEventListener("push", (event) => {
     requireInteraction: false,
     silent: data.sound === false,
     vibrate: data.sound === false ? undefined : [120, 60, 120],
-    data: { url: data.url || "/" },
+    data: { url: data.url || "/", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" },
     actions: [{ action: "open", title: "Aç" }],
   };
 
-  event.waitUntil(self.registration.showNotification(data.title || "Özel Güvenlik", options));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(data.title || "Özel Güvenlik", options);
+    // Açık sekmelerde özel ses çal
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of clients) {
+      c.postMessage({ type: "OG_PUSH_SOUND", soundUrl: data.soundUrl || null, kind: data.kind || "campaign" });
+    }
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -56,7 +58,9 @@ self.addEventListener("notificationclick", (event) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ("focus" in client) {
-          client.navigate(target);
+          if ("navigate" in client && typeof client.navigate === "function") {
+            return client.navigate(target).then(() => client.focus());
+          }
           return client.focus();
         }
       }

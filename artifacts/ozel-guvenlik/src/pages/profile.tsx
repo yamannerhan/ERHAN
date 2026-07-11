@@ -128,7 +128,6 @@ export default function Profile() {
   const [republishingId, setRepublishingId] = useState<number | null>(null);
   const [themeUpdatingId, setThemeUpdatingId] = useState<number | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
-  const [selectedListingIds, setSelectedListingIds] = useState<Set<number>>(new Set());
 
   // Favorites count
   const { data: favData } = useGetMyFavorites({
@@ -163,6 +162,42 @@ export default function Profile() {
       toast({ title: "Hata", description: "İlan yeniden yayınlanamadı.", variant: "destructive" });
     } finally {
       setRepublishingId(null);
+    }
+  };
+
+  const requestFeature = async (listing: { id: number; title: string; isFeatured?: boolean }) => {
+    if (listing.isFeatured) {
+      toast({ title: "Zaten öne çıkarılmış" });
+      return;
+    }
+    setActionLoadingId(listing.id);
+    try {
+      const res = await fetch(`/api/listings/${listing.id}/feature-request`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json().catch(() => ({})) as {
+        mode?: string; message?: string; ticketId?: number; error?: string; featuredUntil?: string;
+      };
+      if (!res.ok) throw new Error(data.error || "İşlem başarısız");
+      if (data.mode === "free") {
+        setMyListings(prev => prev.map((l: any) => l.id === listing.id
+          ? { ...l, isFeatured: true, featuredUntil: data.featuredUntil ?? l.featuredUntil }
+          : l));
+        toast({ title: "Ücretsiz öne çıkarma aktif", description: data.message });
+      } else if (data.mode === "support") {
+        toast({
+          title: "Satın alma talebi açıldı",
+          description: data.message || `Destek #${data.ticketId} — admin ile konuşabilirsiniz.`,
+        });
+        window.location.href = data.ticketId ? `/destek` : "/destek";
+      } else {
+        toast({ title: data.message || "Tamam" });
+      }
+    } catch (e) {
+      toast({ title: "Hata", description: e instanceof Error ? e.message : "Öne çıkarma başarısız", variant: "destructive" });
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -232,49 +267,11 @@ export default function Profile() {
       });
       if (!res.ok) throw new Error("İlan silinemedi");
       setMyListings(prev => prev.filter((l: any) => l.id !== listingId));
-      setSelectedListingIds(prev => { const n = new Set(prev); n.delete(listingId); return n; });
       toast({ title: "İlan silindi" });
     } catch (err: any) {
       toast({ title: "Hata", description: err.message, variant: "destructive" });
     } finally {
       setActionLoadingId(null);
-    }
-  };
-
-  const toggleSelectListing = (id: number) => {
-    setSelectedListingIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAllListings = () => {
-    setSelectedListingIds(prev =>
-      prev.size === myListings.length ? new Set() : new Set(myListings.map((l: any) => l.id)),
-    );
-  };
-
-  const bulkDeleteSelected = async () => {
-    const ids = [...selectedListingIds];
-    if (ids.length === 0) return;
-    if (!window.confirm(`${ids.length} ilan kalıcı olarak silinsin mi?`)) return;
-    setMyListingsLoading(true);
-    try {
-      const res = await fetch("/api/listings/bulk-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ ids }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data as any).error || "Silme başarısız");
-      setMyListings(prev => prev.filter((l: any) => !selectedListingIds.has(l.id)));
-      setSelectedListingIds(new Set());
-      toast({ title: `${(data as any).deleted ?? ids.length} ilan silindi` });
-    } catch (err: any) {
-      toast({ title: "Hata", description: err.message, variant: "destructive" });
-    } finally {
-      setMyListingsLoading(false);
     }
   };
 
@@ -420,7 +417,7 @@ export default function Profile() {
   const profileDisplayName = (profile as any).displayName as string | null;
   const initials = profile.username.substring(0, 2).toUpperCase();
   const totalListings = isMe ? myListings.length : (profile as any).listingCount ?? userListings.length ?? 0;
-  const myShownListings = isMe ? myListings : userListings.slice(0, 5);
+  const myShownListings = (isMe ? myListings : userListings).slice(0, 5);
   const joinDate = new Date(profile.createdAt).toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
 
   return (
@@ -722,27 +719,36 @@ export default function Profile() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="og-section-title">{isMe ? "Senin İlanların" : "İlanları"}</h2>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-2">
               {isMe && myListings.length > 0 && (
-                <>
-                  <label className="text-[11px] text-muted-foreground flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedListingIds.size === myListings.length && myListings.length > 0}
-                      onChange={toggleSelectAllListings}
-                      className="w-3.5 h-3.5 rounded accent-amber-400"
-                    />
-                    Tümünü seç
-                  </label>
-                  {selectedListingIds.size > 0 && (
-                    <button
-                      onClick={() => void bulkDeleteSelected()}
-                      className="text-[11px] font-bold text-rose-400 hover:text-rose-300 inline-flex items-center gap-0.5"
-                    >
-                      <Trash2 className="w-3 h-3" /> Seçilenleri Sil ({selectedListingIds.size})
-                    </button>
-                  )}
-                </>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`${myListings.length} ilanınızı kalıcı olarak silmek istediğinize emin misiniz?`)) return;
+                    setMyListingsLoading(true);
+                    try {
+                      const token = getToken();
+                      const ids = myListings.map((l: any) => l.id);
+                      const results = await Promise.allSettled(
+                        ids.map((id: number) =>
+                          fetch(`/api/listings/${id}`, {
+                            method: "DELETE",
+                            headers: { Authorization: `Bearer ${token}` },
+                          })
+                        )
+                      );
+                      const deleted = results.filter(r => r.status === "fulfilled" && (r.value as Response).ok).length;
+                      setMyListings([]);
+                      toast({ title: `${deleted} ilan silindi` });
+                    } catch {
+                      toast({ title: "Silme işlemi başarısız", variant: "destructive" });
+                    } finally {
+                      setMyListingsLoading(false);
+                    }
+                  }}
+                  className="text-[11px] font-bold text-rose-400 hover:text-rose-300 inline-flex items-center gap-0.5"
+                >
+                  <Trash2 className="w-3 h-3" /> Tümünü Sil
+                </button>
               )}
               <Link
                 href={`/ilanlar?author=${profile.username}`}
@@ -765,7 +771,7 @@ export default function Profile() {
               myShownListings.map((listing: any, i: number) => {
                 const company = displayCompany(listing.company) || "Firma";
                 const initials2 = company.split(/\s+/).map((w: string) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "G";
-                const isExpired = listing.status === "expired" || listing.status === "inactive";
+                const isExpired = listing.status === "expired";
                 const isActive = listing.status === "active";
                 const daysLeft = listing.expiresAt
                   ? Math.ceil((new Date(listing.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
@@ -780,16 +786,6 @@ export default function Profile() {
                     transition={{ delay: Math.min(i * 0.04, 0.2) }}
                     className={`og-list-row-wrap ${isExpired ? "opacity-70" : ""}`}
                   >
-                    {isMe && (
-                      <div className="px-1 pb-1">
-                        <input
-                          type="checkbox"
-                          checked={selectedListingIds.has(listing.id)}
-                          onChange={() => toggleSelectListing(listing.id)}
-                          className="w-4 h-4 rounded accent-amber-400"
-                        />
-                      </div>
-                    )}
                     <Link href={`/ilan/${listing.id}`} className="og-list-row">
                       <div className="og-list-img">
                         {listing.companyLogoUrl ? (
@@ -808,8 +804,13 @@ export default function Profile() {
                           <span className={`og-status ${
                             isActive ? "og-status-new" : isExpired ? "og-status-urgent" : "og-status-featured"
                           }`}>
-                            {isActive ? "Yayında" : listing.status === "inactive" ? "Pasif" : isExpired ? "Süresi Doldu" : "Bekliyor"}
+                            {isActive ? "Yayında" : isExpired ? "Süresi Doldu" : "Bekliyor"}
                           </span>
+                          {listing.isFeatured && (
+                            <span className="og-status og-status-featured">
+                              <Star className="w-2.5 h-2.5" /> Öne çıkan
+                            </span>
+                          )}
                           {isActive && daysLeft !== null && daysLeft <= 3 && daysLeft > 0 && (
                             <span className="og-status og-status-urgent">
                               <Clock className="w-2.5 h-2.5" /> {daysLeft}g
@@ -846,7 +847,17 @@ export default function Profile() {
                     </Link>
 
                     {isMe && (
-                      <div className="mt-2 grid grid-cols-3 gap-2 px-1">
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 px-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-amber-400/40 text-amber-300 text-xs"
+                          disabled={actionLoadingId === listing.id || !!listing.isFeatured}
+                          onClick={() => void requestFeature(listing)}
+                        >
+                          <Star className="w-3.5 h-3.5 mr-1" />
+                          {listing.isFeatured ? "Öne çıkan" : "Öne çıkar"}
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -863,7 +874,7 @@ export default function Profile() {
                           disabled={actionLoadingId === listing.id}
                           onClick={() => toggleListingStatus(listing)}
                         >
-                          <Power className="w-3.5 h-3.5 mr-1" /> {listing.status === "active" ? "Pasif Yap" : "Yayınla"}
+                          <Power className="w-3.5 h-3.5 mr-1" /> {listing.status === "active" ? "Pasif" : "Yayınla"}
                         </Button>
                         <Button
                           size="sm"
@@ -894,7 +905,7 @@ export default function Profile() {
                       </div>
                     )}
 
-                    {isMe && !isActive && (
+                    {isMe && isExpired && (
                       <div className="mt-2 px-1">
                         <Button
                           size="sm"
@@ -908,7 +919,7 @@ export default function Profile() {
                           ) : (
                             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
                           )}
-                          Yeniden Yayınla (30 gün)
+                          Tekrar Yayınla
                         </Button>
                       </div>
                     )}
