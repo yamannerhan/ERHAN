@@ -1561,38 +1561,42 @@ const DEFAULT_BANNERS = [
   {
     title: "Türkiye geneli güncel özel güvenlik ilanlarını hemen incele",
     imageUrl: "https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1200&q=80",
-    linkUrl: "/ilanlar",
+    linkUrl: null as string | null,
     sortOrder: 1,
   },
   {
     title: "Silahlı ve silahsız güvenlik fırsatları tek ekranda",
     imageUrl: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=1200&q=80",
-    linkUrl: "/ilanlar",
+    linkUrl: null as string | null,
     sortOrder: 2,
   },
   {
     title: "Part-time güvenlik personeli ilanını ücretsiz oluştur",
     imageUrl: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
-    linkUrl: "/part-time",
+    linkUrl: null as string | null,
     sortOrder: 3,
   },
   {
     title: "Profilini tamamla, işverenlerin seni daha hızlı bulsun",
     imageUrl: "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80",
-    linkUrl: "/profil",
+    linkUrl: null as string | null,
     sortOrder: 4,
   },
   {
     title: "Sohbete katıl, sektördeki duyuruları ve fırsatları kaçırma",
     imageUrl: "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80",
-    linkUrl: "/sohbet",
+    linkUrl: null as string | null,
     sortOrder: 5,
   },
 ];
 
 async function ensureDefaultBanners(): Promise<void> {
   const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(bannersTable).where(eq(bannersTable.isActive, true));
-  if (count > 0) return;
+  if (count > 0) {
+    // Tıklanınca sayfa açılmasın — kalan linkleri bir kez temizle
+    await db.update(bannersTable).set({ linkUrl: null }).where(sql`${bannersTable.linkUrl} is not null`);
+    return;
+  }
   await db.insert(bannersTable).values(DEFAULT_BANNERS.map(b => ({ ...b, isActive: true })));
 }
 
@@ -1633,7 +1637,7 @@ router.delete("/admin/banners/:id", authMiddleware, requireAdmin, async (req, re
 router.get("/banners", async (_req, res): Promise<void> => {
   await ensureDefaultBanners();
   const banners = await db.select().from(bannersTable).where(eq(bannersTable.isActive, true)).orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
-  res.json(banners.map(b => ({ id: b.id, title: b.title, imageUrl: b.imageUrl, linkUrl: b.linkUrl })));
+  res.json(banners.map(b => ({ id: b.id, title: b.title, imageUrl: b.imageUrl, linkUrl: null })));
 });
 
 // ─── Akıllı İlan Yayınlama Yetkileri (Grant) ─────────────────────

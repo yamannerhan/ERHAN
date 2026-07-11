@@ -35,6 +35,18 @@ function isBotOrFake(msg: ExtMsg): boolean {
   return !isRealHuman(msg);
 }
 
+/** Yeni üye katılım duyurusu — Üyeler sekmesinde kalsın */
+function isJoinAnnounce(msg: ExtMsg): boolean {
+  return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
+}
+
+/** DB serial id (socket Date.now() id'lerini sayma) */
+function isDbMessageId(id: number): boolean {
+  return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
+}
+
+const STICKY_SKIP_KEY = "chat_skipped_sticky_id";
+
 function renderMessageContent(content: string) {
   const parts = content.split(/(\*\*[^*]+\*\*|@\w+|\/ilan\/\d+)/g);
   return parts.map((part, i) => {
@@ -243,7 +255,10 @@ export function ChatBubble() {
   const rememberMessageIds = (items: AnyMsg[]) => {
     const ids = items.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id);
     messageIdsRef.current = new Set(ids);
-    lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...ids, 0);
+    const dbIds = ids.filter(isDbMessageId);
+    if (dbIds.length > 0) {
+      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, ...dbIds);
+    }
   };
 
   const bumpUnreadIfHuman = (msg: ExtMsg) => {
@@ -266,14 +281,17 @@ export function ChatBubble() {
     } else {
       const id = (msg as ExtMsg).id;
       messageIdsRef.current.add(id);
-      lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, id);
+      if (isDbMessageId(id)) {
+        lastSeenMessageIdRef.current = Math.max(lastSeenMessageIdRef.current, id);
+      }
     }
 
     setMessages(prev => {
       if (!isSystem(msg) && prev.some(m => !isSystem(m) && (m as ExtMsg).id === (msg as ExtMsg).id)) {
         return prev;
       }
-      const next = [...prev.slice(-79), msg];
+      // Üye mesajları silinmesin diye en az 100 tut
+      const next = [...prev.slice(-199), msg];
       rememberMessageIds(next);
       return next;
     });
@@ -291,7 +309,9 @@ export function ChatBubble() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const url = after > 0 ? `/api/chat/messages?limit=25&after=${after}` : "/api/chat/messages?limit=50";
+      const url = after > 0 && isDbMessageId(after)
+        ? `/api/chat/messages?limit=100&after=${after}`
+        : "/api/chat/messages?limit=100";
       const res = await fetch(url, {
         headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
         cache: "no-store",
@@ -300,7 +320,7 @@ export function ChatBubble() {
       if (!Array.isArray(data)) return;
       setMessages(prev => {
         const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
-        const incoming = data.filter(m => !existingIds.has(m.id));
+        const incoming = data.filter(m => !existingIds.has(m.id) && isDbMessageId(m.id));
         if (incoming.length === 0) return prev;
         const humanIncoming = incoming.filter(isRealHuman);
         if (!openRef.current && humanIncoming.length > 0) {
@@ -308,7 +328,7 @@ export function ChatBubble() {
           setPulse(true);
           setTimeout(() => setPulse(false), 600);
         }
-        const next = [...prev, ...incoming].slice(-100);
+        const next = [...prev, ...incoming].slice(-200);
         rememberMessageIds(next);
         return next;
       });
@@ -398,7 +418,26 @@ export function ChatBubble() {
   }, [open, scrollToBottom]);
 
   // Son gerçek insan mesajı — altına bot yağsa bile sticky kalır
-  const [skippedStickyId, setSkippedStickyId] = useState<number | null>(null);
+  const [skippedStickyId, setSkippedStickyId] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem(STICKY_SKIP_KEY);
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const skipSticky = useCallback((id: number) => {
+    setSkippedStickyId(id);
+    try { localStorage.setItem(STICKY_SKIP_KEY, String(id)); } catch { /* ignore */ }
+  }, []);
+
+  const clearStickySkip = useCallback(() => {
+    setSkippedStickyId(null);
+    try { localStorage.removeItem(STICKY_SKIP_KEY); } catch { /* ignore */ }
+  }, []);
 
   const stickyHuman = useMemo(() => {
     const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
@@ -420,22 +459,27 @@ export function ChatBubble() {
     return null;
   }, [messages, skippedStickyId]);
 
-  // Yeni üye mesajı gelince “geç” sıfırlanır
+  // Yeni üye mesajı gelince “geç” sıfırlanır (eski id artık geçerli değil)
   useEffect(() => {
     const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
     for (let i = chatMsgs.length - 1; i >= 0; i--) {
       if (isRealHuman(chatMsgs[i]!)) {
         if (skippedStickyId != null && chatMsgs[i]!.id !== skippedStickyId) {
-          setSkippedStickyId(null);
+          clearStickySkip();
         }
         break;
       }
     }
-  }, [messages, skippedStickyId]);
+  }, [messages, skippedStickyId, clearStickySkip]);
 
   const visibleMessages = useMemo(() => {
     if (feedMode === "members") {
-      return messages.filter(m => isSystem(m) || isRealHuman(m as ExtMsg));
+      // Üyeler: gerçek insanlar + katılım duyuruları (yenilemede de kalsın)
+      return messages.filter(m => {
+        if (isSystem(m)) return true;
+        const msg = m as ExtMsg;
+        return isRealHuman(msg) || isJoinAnnounce(msg);
+      }).slice(-100);
     }
     return messages;
   }, [messages, feedMode]);
@@ -886,7 +930,7 @@ export function ChatBubble() {
                   <div className="text-[9px] font-bold text-amber-400 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
                   <button
                     type="button"
-                    onClick={() => setSkippedStickyId(stickyHuman.id)}
+                    onClick={() => skipSticky(stickyHuman.id)}
                     className="text-[10px] font-bold text-white/50 hover:text-white/90 px-2 py-0.5 rounded-md hover:bg-white/10"
                     title="Bu mesajı geç"
                   >

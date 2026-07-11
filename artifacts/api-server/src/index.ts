@@ -38,14 +38,35 @@ export async function saveChatMessage(userId: number, content: string): Promise<
 
 async function trimChatHistory(): Promise<void> {
   try {
-    const recent = await db
+    // Üye mesajları (gerçek userId > 0): son 100 korunur — Üyeler sekmesi için
+    // Bot/sahte (userId <= 0): son 80 korunur — Tümü sekmesi ayrı kalır
+    const realKept = await db
       .select({ id: chatMessagesTable.id })
       .from(chatMessagesTable)
+      .where(sql`${chatMessagesTable.userId} > 0`)
       .orderBy(desc(chatMessagesTable.createdAt))
       .limit(100);
-    if (recent.length < 100) return;
-    const minKeptId = Math.min(...recent.map(r => r.id));
-    await db.delete(chatMessagesTable).where(lt(chatMessagesTable.id, minKeptId));
+
+    const botKept = await db
+      .select({ id: chatMessagesTable.id })
+      .from(chatMessagesTable)
+      .where(sql`${chatMessagesTable.userId} <= 0`)
+      .orderBy(desc(chatMessagesTable.createdAt))
+      .limit(80);
+
+    if (realKept.length >= 100) {
+      const minRealId = Math.min(...realKept.map((r) => r.id));
+      await db
+        .delete(chatMessagesTable)
+        .where(and(sql`${chatMessagesTable.userId} > 0`, lt(chatMessagesTable.id, minRealId)));
+    }
+
+    if (botKept.length >= 80) {
+      const minBotId = Math.min(...botKept.map((r) => r.id));
+      await db
+        .delete(chatMessagesTable)
+        .where(and(sql`${chatMessagesTable.userId} <= 0`, lt(chatMessagesTable.id, minBotId)));
+    }
   } catch (e) {
     logger.error(e, "trimChatHistory error");
   }

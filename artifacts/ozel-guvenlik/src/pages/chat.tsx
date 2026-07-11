@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { useGetChatMessages } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,6 +36,10 @@ function isRealHuman(msg: ExtMsg): boolean {
 
 function isBotOrFake(msg: ExtMsg): boolean {
   return !isRealHuman(msg);
+}
+
+function isJoinAnnounce(msg: ExtMsg): boolean {
+  return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
 }
 
 function renderMessageContent(content: string) {
@@ -835,7 +839,8 @@ export default function Chat() {
             <div className="text-center py-10 text-muted-foreground">Henüz mesaj yok. İlk mesajı sen gönder!</div>
           ) : (
             messages
-              .filter(m => feedMode === "all" || isSystem(m) || isRealHuman(m as ExtMsg))
+              .filter(m => feedMode === "all" || isSystem(m) || isRealHuman(m as ExtMsg) || isJoinAnnounce(m as ExtMsg))
+              .slice(feedMode === "members" ? -100 : undefined)
               .map(msg => renderMsg(msg))
           )}
           <div ref={scrollRef} />

@@ -117,12 +117,10 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
                 )}
               </>
             );
-            return banner.linkUrl ? (
-              <a href={banner.linkUrl} className="block w-full h-full relative">
+            return (
+              <div className="w-full h-full relative pointer-events-none select-none">
                 {content}
-              </a>
-            ) : (
-              <div className="w-full h-full relative">{content}</div>
+              </div>
             );
           })()}
         </motion.div>
