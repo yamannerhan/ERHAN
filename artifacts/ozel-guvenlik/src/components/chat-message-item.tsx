@@ -163,7 +163,7 @@ export function ChatMessageItem({
       <div className="message-content">
         <div className="message-meta">
           <span className="message-username" title={name}>{name}</span>
-          <RankBadge rank={rank} level={level} />
+          {!bot && <RankBadge rank={rank} level={level} />}
           <span className="message-time">{formatTime(msg.createdAt)}</span>
         </div>
 

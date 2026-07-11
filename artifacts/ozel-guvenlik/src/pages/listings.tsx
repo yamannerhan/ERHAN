@@ -15,6 +15,7 @@ import { toSlug } from "@/lib/seo-cities";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import { JobListingCard } from "@/components/job-listing-card";
 
 const LISTINGS_STATE_KEY = "listings_page_state";
 
@@ -412,15 +413,6 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
               </div>
             ) : (
               displayListings.map((listing, idx) => {
-                const company = displayCompany(listing.company) || "Firma";
-                const initials = company.split(/\s+/).map(w => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "G";
-                const ageMs = Date.now() - new Date(listing.createdAt).getTime();
-                const isUrgent = /acil|urgent|hemen/i.test(listing.title) || /acil|urgent/i.test(listing.description ?? "");
-                const isNew = ageMs < 24 * 3600 * 1000;
-                const armedLabel = detectArmed(listing.title, listing.description, listing.requirements);
-                const img = getListingImage(listing.title, listing.company, listing.companyLogoUrl, listing.id);
-                const isFav = favIds.has(Number(listing.id));
-
                 return (
                   <motion.div
                     key={listing.id}
@@ -429,73 +421,10 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                     transition={{ delay: Math.min(idx * 0.02, 0.2) }}
                     className="og-list-row-wrap"
                   >
-                    <Link href={`/ilan/${listing.id}`} className="og-list-row">
-                      <div className="og-list-img">
-                        {listing.companyLogoUrl ? (
-                          <img src={listing.companyLogoUrl} alt={company} className="w-full h-full object-cover" />
-                        ) : img ? (
-                          <img src={img} alt={listing.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full grid place-items-center text-base font-black text-slate-900 bg-gradient-to-br from-amber-300 to-amber-500">
-                            {initials}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          {listing.isFeatured ? (
-                            <span className="og-status og-status-featured">
-                              <Star className="w-2.5 h-2.5 fill-current" /> Öne Çıkan
-                            </span>
-                          ) : isUrgent ? (
-                            <span className="og-status og-status-urgent">Acil</span>
-                          ) : isNew ? (
-                            <span className="og-status og-status-new">Yeni</span>
-                          ) : null}
-                        </div>
-
-                        <h3 className="og-list-title">{listing.title}</h3>
-
-                        <div className="flex items-center gap-1 text-[11px] og-text-muted mt-0.5">
-                          <MapPin className="w-3 h-3 shrink-0" />
-                          <span className="truncate">{listing.city}</span>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          <span className="og-mini-chip">{listing.workType || "Tam Zamanlı"}</span>
-                          <span className="og-mini-chip">{armedLabel}</span>
-                        </div>
-
-                        <div className="og-list-foot">
-                          <span className="og-text-muted text-[10px] truncate inline-flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {company} · {formatDate(listing.createdAt)}
-                          </span>
-                          <button
-                            onClick={(e) => handleToggleFav(e, listing.id)}
-                            className="og-bookmark-btn"
-                            aria-label="Favorilere ekle"
-                          >
-                            <Bookmark className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="og-list-salary text-right shrink-0">
-                        <div className="og-list-salary-amount">{listing.salary || "—"}</div>
-                        <div className="og-text-muted text-[10px] font-semibold">Aylık</div>
-                      </div>
-
-                      <span
-                        className="absolute top-2 right-2 z-10 rounded-full bg-amber-400/90 text-slate-900 px-1.5 py-0.5 text-[8px] font-black shadow-md"
-                        style={{ display: canQuickEditCity ? "none" : undefined }}
-                      >
-                        ▶
-                      </span>
-
-                      {canQuickEditCity && (
-                        <div className="absolute top-1 left-1 z-30 flex gap-1">
+                    <JobListingCard
+                      listing={listing}
+                      adminOverlay={canQuickEditCity ? (
+                        <>
                           <button
                             type="button"
                             onClick={(event) => {
@@ -518,9 +447,9 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                           >
                             Sil
                           </button>
-                        </div>
-                      )}
-                    </Link>
+                        </>
+                      ) : undefined}
+                    />
                   </motion.div>
                 );
               })

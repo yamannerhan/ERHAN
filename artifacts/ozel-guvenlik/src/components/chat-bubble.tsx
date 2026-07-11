@@ -8,6 +8,7 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
+import { FramedAvatar } from "@/components/framed-avatar";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -840,7 +841,15 @@ export function ChatBubble() {
                   </button>
                 </div>
                 <div className="flex items-start gap-2">
-                  <UserAvatar src={stickyHuman.userAvatarUrl} username={stickyHuman.username} role={stickyHuman.userRole ?? "user"} isVip={stickyHuman.isVip} online />
+                  <FramedAvatar
+                    src={stickyHuman.userAvatarUrl}
+                    name={stickyHuman.displayName || stickyHuman.username}
+                    role={stickyHuman.userRole ?? "user"}
+                    isVip={stickyHuman.isVip}
+                    frame={stickyHuman.avatarFrame}
+                    size={32}
+                    online
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="text-[11px] font-bold text-amber-300">{stickyHuman.displayName || stickyHuman.username}</div>
                     <div className="text-[11px] text-white/80 line-clamp-2">{stickyHuman.content}</div>

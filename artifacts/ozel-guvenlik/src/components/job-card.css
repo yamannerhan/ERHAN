@@ -1,0 +1,24 @@
+/* İş ilanı kartı — yalnızca .job-card* (sohbet ile ilgisi yok) */
+.job-card__divider {
+  height: 1px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 0;
+}
+.job-card {
+  position: static;
+}
+.job-card__header {
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+}
+.job-card__logo {
+  width: 48px;
+  height: 48px;
+}
+@media (max-width: 640px) {
+  .job-card__salary {
+    justify-self: start;
+    width: auto;
+    text-align: left;
+  }
+}
