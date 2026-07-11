@@ -747,9 +747,19 @@ export function ChatBubble() {
                 </p>
               </div>
               {(user?.role === "admin" || user?.role === "moderator") && (
-                <button onClick={handleClearChat} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Sohbeti Temizle">
-                  <Trash2 className="w-3.5 h-3.5 text-red-300" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowPollForm(v => !v)}
+                    className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center"
+                    title="Anket paylaş"
+                  >
+                    <BarChart2 className="w-3.5 h-3.5 text-sky-300" />
+                  </button>
+                  <button onClick={handleClearChat} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Sohbeti Temizle">
+                    <Trash2 className="w-3.5 h-3.5 text-red-300" />
+                  </button>
+                </>
               )}
               {user && (
                 <button onClick={() => setShowNotifSettings(v => !v)} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center" title="Bildirim ayarları">
@@ -785,6 +795,45 @@ export function ChatBubble() {
             {showNotifSettings && user && (
               <div className="shrink-0 px-3 py-2 max-h-48 overflow-y-auto border-b border-white/10 bg-black/40">
                 <NotifPrefsPanel compact onSaved={() => setShowNotifSettings(false)} />
+              </div>
+            )}
+
+            {showPollForm && user && (user.role === "admin" || user.role === "moderator") && (
+              <div className="shrink-0 px-3 py-2 space-y-1.5 border-b border-white/10 bg-black/40">
+                <input
+                  value={pollQuestion}
+                  onChange={(e) => setPollQuestion(e.target.value)}
+                  placeholder="Anket sorusu"
+                  className="w-full h-8 rounded-md bg-white/5 border border-white/10 px-2 text-[11px] text-white"
+                />
+                <textarea
+                  value={pollOptions}
+                  onChange={(e) => setPollOptions(e.target.value)}
+                  placeholder="Her satıra bir seçenek"
+                  className="w-full min-h-[56px] rounded-md bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white"
+                />
+                <button
+                  type="button"
+                  className="w-full h-8 rounded-md bg-sky-500 text-black text-[11px] font-bold"
+                  onClick={async () => {
+                    const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
+                    if (!pollQuestion.trim() || options.length < 2) return;
+                    const res = await fetch("/api/chat/polls", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+                      body: JSON.stringify({ question: pollQuestion.trim(), options }),
+                    });
+                    if (res.ok) {
+                      const sent = await res.json() as ExtMsg;
+                      addMsg(sent);
+                      setShowPollForm(false);
+                      setPollQuestion("");
+                      setPollOptions("Evet\nHayır");
+                    }
+                  }}
+                >
+                  Anketi Paylaş
+                </button>
               </div>
             )}
 
