@@ -1520,6 +1520,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let messages;
   let reachedCutoff = false;
   let fetchRounds = 0;
+  let oldestTs = Date.now();
   try {
     // İlk tarama: 30 güne geri git (loadEarlierMsgs + syncHistory + scroll)
     const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
@@ -1528,6 +1529,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
     fetchRounds = fetched.rounds;
+    oldestTs = fetched.oldestTs || Date.now();
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
@@ -1561,13 +1563,19 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let maxTs = lastTs;
   let processed = 0;
 
+  // Derinlik: en eski mesaj 30 güne ne kadar yaklaştı (geriye doğru %)
+  const depthMs = Math.max(0, Date.now() - oldestTs);
+  const depthPct = Math.min(95, Math.max(5, Math.round((depthMs / INITIAL_SCAN_MS) * 95)));
+  let liveProgress = Math.max(Number(source.initialScanProgress ?? 1), depthPct);
+
   await patchSourceProgress(source.id, {
     lastError: isInitialScan && !reachedCutoff
-      ? `Geçmiş yükleniyor… ${messages.length} mesaj (30 güne henüz ulaşılmadı, devam edecek)`
+      ? `Geçmiş yükleniyor… ${messages.length} mesaj · en eski ${Math.round(depthMs / 86400000)}g (hedef ${INITIAL_SCAN_DAYS}g)`
       : null,
-    initialScanPhase: isInitialScan ? "forward" : null,
-    initialScanProgress: isInitialScan ? Math.min(90, Math.max(5, Math.round((fetchRounds / 100) * 80))) : 100,
+    initialScanPhase: isInitialScan ? "backward" : null,
+    initialScanProgress: isInitialScan ? liveProgress : 100,
     lastScanMessagesRead: messages.length,
+    initialScanOldestAt: Number.isFinite(oldestTs) ? new Date(oldestTs) : null,
   });
 
   for (const m of messages) {
@@ -1594,9 +1602,10 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     }
     processed++;
     if (isInitialScan && processed % 10 === 0) {
-      const pct = Math.min(99, Math.round((processed / Math.max(messages.length, 1)) * 100));
+      const batchPct = Math.min(99, Math.round((processed / Math.max(messages.length, 1)) * 100));
+      liveProgress = Math.max(liveProgress, depthPct, Math.min(95, Math.round(batchPct * 0.85 + depthPct * 0.15)));
       await patchSourceProgress(source.id, {
-        initialScanProgress: Math.max(pct, 1),
+        initialScanProgress: liveProgress,
         lastScanMessagesRead: processed,
         lastScanAdded: stats.added,
         lastScanFound: stats.found,
@@ -1610,18 +1619,24 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   stats.maxId = maxTs;
 
   // 30 güne ulaşılmadan initialScanDone=true YAPMA — aksi halde az mesajla günlük moda düşer
-  const markDone = !isInitialScan || reachedCutoff || (messages.length >= 800 && fetchRounds >= 80);
+  // Derinlik ≥ %90 ise veya cutoff'a ulaşıldıysa bitir
+  const markDone = !isInitialScan
+    || reachedCutoff
+    || depthPct >= 90
+    || (messages.length >= 800 && fetchRounds >= 80);
+
+  liveProgress = markDone ? 100 : Math.min(95, Math.max(liveProgress, depthPct));
 
   await patchSourceProgress(source.id, {
     lastCheckedAt: new Date(),
     lastTelegramMessageId: maxTs > 0 ? String(maxTs) : source.lastTelegramMessageId,
     initialScanDone: markDone ? true : false,
-    initialScanProgress: markDone ? 100 : Math.min(95, Math.max(10, source.initialScanProgress ?? 10)),
+    initialScanProgress: liveProgress,
     initialScanPhase: markDone ? null : "backward",
     isScanning: false,
     lastError: markDone
       ? null
-      : `30 gün henüz tamamlanmadı (${messages.length} mesaj, ${fetchRounds} tur). Sonraki turda devam.`,
+      : `30 gün henüz tamamlanmadı (en eski ~${Math.round(depthMs / 86400000)}g, ${messages.length} mesaj, ${fetchRounds} tur). Sonraki turda devam.`,
     lastScanMessagesRead: messages.length,
     lastScanFound: stats.found,
     lastScanAdded: stats.added,
@@ -1629,6 +1644,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     lastScanErrors: stats.errors,
     lastScanPublished: stats.added,
     totalImported: (source.totalImported ?? 0) + stats.added,
+    initialScanOldestAt: Number.isFinite(oldestTs) ? new Date(oldestTs) : null,
   });
 
   logger.info(
@@ -1639,6 +1655,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       reachedCutoff,
       markDone,
       rounds: fetchRounds,
+      depthPct,
+      liveProgress,
+      oldestDays: Math.round(depthMs / 86400000),
       ...stats,
     },
     "scraper: whatsapp kaynak tarandı",
@@ -1649,6 +1668,16 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 /** Arka planda grup/kanalları sırayla 30 gün tara — tur tur round-robin (aynı kaynakta takılmaz). */
 let waSequentialRunning = false;
 let waScanGeneration = 0;
+
+/** WhatsApp bağlanınca / kaynak eklenince otomatik başlat (sıfırlama gerekmez) */
+export function onWhatsAppReady(): void {
+  logger.info("scraper: WhatsApp ready — bekleyen ilk taramalar başlatılıyor");
+  void runWhatsAppSequentialDeepScan();
+}
+
+export function kickWhatsAppDeepScan(): void {
+  void runWhatsAppSequentialDeepScan();
+}
 
 async function runWhatsAppSequentialDeepScan(): Promise<void> {
   const myGen = waScanGeneration;

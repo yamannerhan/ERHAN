@@ -109,6 +109,10 @@ function attachHandlers(c: any): void {
     reconnectAttempts = 0;
     manualStop = false;
     startWhatsAppWatchdog();
+    // Bağlanınca bekleyen ilk taramaları otomatik başlat (sıfırlama gerekmez)
+    void import("../workers/scraper").then((m) => {
+      if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
+    }).catch(() => {});
   });
 
   c.on("disconnected", (reason: string) => {
@@ -674,17 +678,17 @@ export async function fetchWhatsAppMessagesDetailed(
       if (info.done && !progressed) {
         stagnant++;
         // WA bazen geç yanıt verir — daha sabırlı ol
-        if (stagnant >= 25) {
+        if (stagnant >= 40) {
           logger.warn({ groupJid, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString() }, "wa: geçmiş yükleme tıkandı");
           break;
         }
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, 1500));
       } else {
         stagnant = 0;
       }
       lastHarvested = byId.size;
       lastOldest = oldest;
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 400));
     }
 
     // Son bir syncHistory + büyük fetch

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerWhatsAppScan, resetAllWhatsAppSources, resetSingleWhatsAppSource, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused, kickWhatsAppDeepScan } from "../workers/scraper";
 import { ensureTelegramConnected } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
@@ -331,12 +331,37 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     requireApproval: false,
     initialScanDone: false,
     initialScanProgress: 1,
-    initialScanPhase: "forward",
+    initialScanPhase: "backward",
     lastTelegramMessageId: null,
   }).returning();
 
   const kind = groupId.includes("@newsletter") ? "kanal" : "grup";
-  res.json({ success: true, source, message: `${kind} kaydedildi.` });
+  // Kaydetince otomatik tarama — sıfırlama gerekmez
+  if (isWhatsAppReady()) {
+    kickWhatsAppDeepScan();
+  }
+  res.json({ success: true, source, message: `${kind} kaydedildi. Tarama otomatik başlıyor.` });
+});
+
+/** Kayıtlı WA grubunu/kanalını listeden çıkar */
+router.delete("/admin/whatsapp/sources/:id", authMiddleware, requireAdmin, async (req, res) => {
+  const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+  const id = parseInt(rawId ?? "", 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Geçersiz ID" });
+    return;
+  }
+  const [src] = await db.select().from(sourcesTable)
+    .where(and(eq(sourcesTable.id, id), eq(sourcesTable.platform, "whatsapp")))
+    .limit(1);
+  if (!src) {
+    res.status(404).json({ error: "Kaynak bulunamadı" });
+    return;
+  }
+  // Tarama kilidini bırak, kaynağı sil (ilanlar kalır)
+  await db.update(sourcesTable).set({ active: false, isScanning: false }).where(eq(sourcesTable.id, id));
+  await db.delete(sourcesTable).where(eq(sourcesTable.id, id));
+  res.json({ success: true, message: `«${src.name}» listeden çıkarıldı.` });
 });
 
 router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req, res) => {

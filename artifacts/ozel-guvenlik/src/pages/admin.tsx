@@ -2597,10 +2597,24 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     setResettingSourceId(id);
     try {
       const r = await apiCall(`/admin/whatsapp/sources/${id}/reset`, "POST") as { message?: string };
-      toast({ title: "Grup sıfırlandı", description: r.message || "30 gün tarama başladı." });
+      toast({ title: "Kaynak sıfırlandı", description: r.message });
       await refresh();
     } catch (error) {
-      toast({ title: "Grup sıfırlanamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+      toast({ title: "Sıfırlama başarısız", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+    } finally {
+      setResettingSourceId(null);
+    }
+  };
+
+  const removeOneWa = async (id: number, name: string) => {
+    if (!window.confirm(`«${name}» kaydını listeden çıkarmak istiyor musunuz? (Yayındaki ilanlar silinmez)`)) return;
+    setResettingSourceId(id);
+    try {
+      const r = await apiCall(`/admin/whatsapp/sources/${id}`, "DELETE") as { message?: string };
+      toast({ title: "Kaynak çıkarıldı", description: r.message || name });
+      await refresh();
+    } catch (error) {
+      toast({ title: "Çıkarılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
       setResettingSourceId(null);
     }
@@ -2757,14 +2771,24 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   <span>Çift: {s.lastScanDuplicates}</span>
                   <span>Hata: {s.lastScanErrors}</span>
                   <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
-                  <button
-                    type="button"
-                    onClick={() => void resetOneWa(s.id, s.name)}
-                    disabled={resetting || resettingSourceId === s.id || !connected}
-                    className="ml-auto text-[10px] font-bold text-rose-300 hover:text-rose-200 disabled:opacity-40"
-                  >
-                    {resettingSourceId === s.id ? "Sıfırlanıyor…" : "Bu Kaynağı Sıfırla"}
-                  </button>
+                  <div className="ml-auto flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void removeOneWa(s.id, s.name)}
+                      disabled={resetting || resettingSourceId === s.id}
+                      className="text-[10px] font-bold text-slate-300 hover:text-white disabled:opacity-40"
+                    >
+                      Listeden Çıkar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void resetOneWa(s.id, s.name)}
+                      disabled={resetting || resettingSourceId === s.id || !connected}
+                      className="text-[10px] font-bold text-rose-300 hover:text-rose-200 disabled:opacity-40"
+                    >
+                      {resettingSourceId === s.id ? "İşleniyor…" : "Bu Kaynağı Sıfırla"}
+                    </button>
+                  </div>
                 </div>
                 {s.lastError && <div className="mt-1 text-[10px] text-rose-400 truncate">{s.lastError}</div>}
               </div>
