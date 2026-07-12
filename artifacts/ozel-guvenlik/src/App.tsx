@@ -22,6 +22,7 @@ import {
   ListingsWithSeo, SeoPathPage,
   BlogIndexPage, BlogPostPage,
 } from "@/pages/seo-pages";
+import { ViewportDebug } from "@/components/viewport-debug";
 
 function RequireAuth({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
@@ -71,6 +72,7 @@ function App() {
           <Router />
         </WouterRouter>
         <Toaster />
+        <ViewportDebug />
       </TooltipProvider>
     </AuthProvider>
   );

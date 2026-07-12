@@ -387,9 +387,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const onlineNum = liveCount ?? onlineData?.count ?? 0;
 
   return (
-    <div className="og-app min-h-screen bg-background text-foreground pb-24 lg:pb-10">
+    <div className="og-app min-h-screen bg-background text-foreground lg:pb-10">
       <header className="og-header sticky top-0 z-40 border-b">
-        <div className="flex items-center gap-2 px-3 h-14 max-w-md md:max-w-6xl mx-auto">
+        <div className="flex items-center gap-2 px-3 h-14 max-w-md md:max-w-6xl mx-auto" style={{ minHeight: "var(--mobile-header-height)" }}>
           {/* Hamburger */}
           <button
             type="button"
@@ -598,7 +598,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Hamburger drawer */}
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
-      <main className="max-w-md md:max-w-6xl mx-auto relative min-h-[calc(100vh-7rem)]">
+      <main className="og-main max-w-md md:max-w-6xl mx-auto relative">
         {children}
       </main>
 

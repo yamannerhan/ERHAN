@@ -50,7 +50,7 @@ export default function Login() {
 
   return (
     <Layout>
-      <div className="min-h-[calc(100vh-7rem)] flex items-center justify-center p-4 pb-20">
+      <div className="og-main flex items-center justify-center p-4 pb-20">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-primary/30 shadow-[0_0_20px_rgba(79,70,229,0.3)]">

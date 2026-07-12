@@ -610,10 +610,10 @@ export default function Chat() {
       <div
         className="fixed left-0 right-0 flex flex-col bg-background z-20"
         style={{
-          top: "calc(56px + env(safe-area-inset-top, 0px))",
+          top: "calc(var(--mobile-header-height) + var(--safe-top))",
           bottom: keyboardInset > 0
             ? `${keyboardInset}px`
-            : "calc(70px + env(safe-area-inset-bottom))",
+            : "calc(var(--mobile-bottom-nav-height) + var(--safe-bottom))",
         }}
       >
         {/* Admin/Moderatör sohbet araçları + bildirim ayarı */}

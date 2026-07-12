@@ -296,7 +296,7 @@ export default function ListingDetail() {
   if (!user) {
     return (
       <Layout>
-        <div className="min-h-[calc(100vh-7rem)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="og-main flex flex-col items-center justify-center p-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
