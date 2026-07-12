@@ -33,6 +33,15 @@ function safeGetDeviceId(): string | null {
 setAuthTokenGetter(safeGetToken);
 setDeviceIdGetter(safeGetDeviceId);
 
+// beforeinstallprompt React mount'tan önce gelebilir — kaçırma
+try {
+  (window as Window & { __ogDeferredInstall?: Event | null }).__ogDeferredInstall = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    (window as Window & { __ogDeferredInstall?: Event | null }).__ogDeferredInstall = e;
+  });
+} catch { /* ignore */ }
+
 const queryClient = new QueryClient();
 
 // PWA Service Worker — Web Push için kaydet (eski cache'leri temizle, SW kalsın)

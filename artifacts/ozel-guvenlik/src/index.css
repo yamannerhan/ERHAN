@@ -2931,6 +2931,16 @@ html:not(.dark) .og-pt-row {
   bottom: calc(6rem + var(--safe-bottom));
 }
 
+/* PWA geri bildirim — alt menünün üstünde, her cihazda ortalı */
+.og-pwa-toast {
+  bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom) + 12px);
+}
+@media (min-width: 1024px) {
+  .og-pwa-toast {
+    bottom: 1.5rem;
+  }
+}
+
 /* İlan detay «Hemen Başvur» — alt menü + iPhone home indicator üstünde */
 .og-apply-bar {
   bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom));
