@@ -872,6 +872,13 @@ html:not(.dark) body {
   /* iPhone saat / Dynamic Island ile menü üst üste binmesin */
   padding-top: env(safe-area-inset-top, 0px);
 }
+/* Blur yalnızca masaüstü — mobilde fixed/sticky + backdrop-filter Android’de tear üretir */
+@media (min-width: 769px) {
+  .og-header {
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+  }
+}
 html:not(.dark) .og-header {
   background: rgba(255, 255, 255, 0.92);
   border-color: rgba(15,23,42,0.08);
@@ -984,10 +991,14 @@ html:not(.dark) .og-drawer-divider {
   z-index: 40;
   padding-bottom: env(safe-area-inset-bottom);
   background: rgba(10, 14, 28, 0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid rgba(255,255,255,0.06);
   box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
+}
+@media (min-width: 769px) {
+  .og-bottom-nav {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
 }
 html:not(.dark) .og-bottom-nav {
   background: rgba(255,255,255,0.95);
@@ -2731,5 +2742,83 @@ html:not(.dark) .og-pt-row {
   .rank-badge__title { max-width: 5rem; font-size: 0.52rem; }
   .rank-badge { height: 1.4rem; }
   .rank-badge__hex { width: 1.12rem; height: 1.12rem; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Mobile GPU / Android scroll compositing
+   Sticky header + fixed bottom-nav + animated featured cards + FAB
+   filter/transform layers → yatay tear / ghost frames on some Android.
+   Desktop (>768) untouched. Layout, colors, sizes unchanged.
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .og-header,
+  .og-bottom-nav {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: rgba(10, 14, 28, 0.98);
+  }
+  html:not(.dark) .og-header,
+  html:not(.dark) .og-bottom-nav {
+    background: rgba(255, 255, 255, 0.98);
+  }
+
+  .og-chat-fab {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    filter: none;
+    will-change: auto;
+    /* Framer pulse scale promotes a sticky compositor layer while scrolling */
+    transform: none !important;
+  }
+  .og-chat-fab svg {
+    filter: none;
+  }
+
+  .featured-card-accent {
+    animation: none;
+    filter: none;
+    transform: none;
+  }
+  .animate-featured-scroll {
+    will-change: auto;
+  }
+  .featured-strip {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .featured-badge-soft {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .og-featured-card:hover {
+    transform: none;
+  }
+
+  .vip-frame {
+    animation: none;
+  }
+  .logo-glow-anim,
+  .animate-logo-glow {
+    animation: none;
+    filter: none;
+  }
+  .animate-pt-glow {
+    animation: none;
+  }
+
+  .listing-card-v2 {
+    isolation: auto;
+  }
+  .listing-card-v2:hover,
+  .listing-ref-card:hover {
+    transform: none;
+  }
+  .listing-ref-link {
+    isolation: auto;
+  }
+  .listing-card-glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 

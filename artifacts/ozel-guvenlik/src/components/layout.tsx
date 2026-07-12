@@ -388,7 +388,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="og-app min-h-screen bg-background text-foreground pb-24 lg:pb-10">
-      <header className="og-header sticky top-0 z-40 backdrop-blur-xl border-b">
+      <header className="og-header sticky top-0 z-40 border-b">
         <div className="flex items-center gap-2 px-3 h-14 max-w-md md:max-w-6xl mx-auto">
           {/* Hamburger */}
           <button

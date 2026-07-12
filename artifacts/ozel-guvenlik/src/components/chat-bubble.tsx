@@ -668,7 +668,7 @@ export function ChatBubble() {
         whileTap={{ scale: 0.94 }}
         animate={pulse && !open ? { scale: [1, 1.12, 1] } : {}}
         transition={{ duration: 0.28 }}
-        className="fixed bottom-24 right-4 z-50 flex items-center justify-center bg-transparent border-0 p-0"
+        className="og-chat-fab fixed bottom-24 right-4 z-50 flex items-center justify-center bg-transparent border-0 p-0"
         aria-label="Topluluk sohbeti"
       >
         <AnimatePresence mode="wait">
