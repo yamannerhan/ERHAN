@@ -237,7 +237,7 @@ function MobileBottomNav() {
     { icon: Headphones,  label: "Destek",       path: "/destek" },
   ];
   return (
-    <nav className="og-bottom-nav lg:hidden">
+    <nav className="og-bottom-nav" aria-label="Alt menü">
       <div className="og-bottom-nav-inner">
         {items.map((item) => {
           const active = location === item.path || (item.path !== "/" && location.startsWith(item.path));
@@ -387,7 +387,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const onlineNum = liveCount ?? onlineData?.count ?? 0;
 
   return (
-    <div className="og-app min-h-screen bg-background text-foreground lg:pb-10">
+    <div className="og-app min-h-screen bg-background text-foreground">
       <header className="og-header sticky top-0 z-40 border-b">
         <div className="og-header-inner og-shell flex items-center gap-2 px-3 h-14" style={{ minHeight: "var(--mobile-header-height)" }}>
           {/* Hamburger */}
@@ -422,7 +422,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-1 ml-6 mr-auto">
+          <nav className="hidden xl:flex items-center gap-1 ml-6 mr-auto">
             {[
               { label: "Ana Sayfa", path: "/" },
               { label: "İlanlar", path: "/ilanlar" },

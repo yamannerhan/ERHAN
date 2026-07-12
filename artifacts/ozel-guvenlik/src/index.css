@@ -84,6 +84,8 @@
   --mobile-bottom-nav-height: 68px;
   --app-bottom-pad: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom) + 28px);
   --og-shell-max: 28rem; /* telefon / Xiaomi */
+  /* <1280: telefon+tablet (alt menü + Başvur). ≥1280: masaüstü chrome */
+  --og-desktop: 1280px;
 }
 
 @layer base {
@@ -91,13 +93,15 @@
     @apply border-border outline-ring/50;
     box-sizing: border-box;
   }
-  html,
+  /* overflow yalnızca body — html+body clip fixed alt menüyü bazı tablette yok eder */
+  html {
+    width: 100%;
+    max-width: 100%;
+  }
   body {
     width: 100%;
     max-width: 100%;
     overflow-x: clip;
-  }
-  body {
     @apply bg-background text-foreground font-sans antialiased;
   }
   img,
@@ -901,9 +905,9 @@ html:not(.dark) body {
   min-height: 100dvh;
   padding-bottom: var(--app-bottom-pad);
 }
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .og-app {
-    padding-bottom: 2.5rem; /* lg:pb-10 */
+    padding-bottom: 2.5rem;
   }
 }
 
@@ -924,7 +928,10 @@ html:not(.dark) body {
 @media (min-width: 600px) {
   :root { --og-shell-max: 42rem; }
 }
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
+  :root { --og-shell-max: 52rem; }
+}
+@media (min-width: 1280px) {
   :root { --og-shell-max: 72rem; }
 }
 
@@ -1091,14 +1098,20 @@ html:not(.dark) .og-drawer-divider {
   right: 0;
   z-index: 40;
   padding-bottom: var(--safe-bottom);
-  background: rgba(10, 14, 28, 0.92);
+  background: rgba(10, 14, 28, 0.98);
   border-top: 1px solid rgba(255,255,255,0.06);
   box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
+  display: block;
 }
-@media (min-width: 769px) {
+@media (min-width: 1280px) {
   .og-bottom-nav {
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    display: none !important;
+  }
+}
+@media (min-width: 769px) and (max-width: 1279px) {
+  .og-bottom-nav {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 html:not(.dark) .og-bottom-nav {
@@ -1111,9 +1124,11 @@ html:not(.dark) .og-bottom-nav {
   align-items: stretch;
   justify-content: space-around;
   height: var(--mobile-bottom-nav-height);
-  max-width: 28rem;
+  width: 100%;
+  max-width: var(--og-shell-max);
   margin: 0 auto;
   padding: 0 8px;
+  box-sizing: border-box;
 }
 .og-bn-item {
   flex: 1;
@@ -2935,27 +2950,28 @@ html:not(.dark) .og-pt-row {
 .og-pwa-toast {
   bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom) + 12px);
 }
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .og-pwa-toast {
     bottom: 1.5rem;
   }
 }
 
-/* İlan detay «Hemen Başvur» — alt menü + iPhone home indicator üstünde */
+/* İlan detay «Hemen Başvur» — alt menü üstünde (tablet dahil <1280) */
 .og-apply-bar {
   bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom));
   z-index: 35;
+  left: 0;
+  right: 0;
 }
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .og-apply-bar {
-    bottom: 1rem; /* masaüstünde alt nav yok */
+    bottom: 1rem;
   }
 }
 .og-apply-page {
-  /* içerik: nav + safe + buton yüksekliği (~48) + padding */
   padding-bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom) + 5.5rem);
 }
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .og-apply-page {
     padding-bottom: 6rem;
   }
