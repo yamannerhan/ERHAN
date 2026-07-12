@@ -296,6 +296,7 @@ export default function ListingDetail() {
   if (!user) {
     return (
       <Layout>
+
         <div className="og-main flex flex-col items-center justify-center p-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
@@ -340,7 +341,7 @@ export default function ListingDetail() {
 
   return (
     <Layout>
-      <div className="pb-28">
+      <div className="og-apply-page">
         <div className="sticky top-14 z-30 bg-background/80 backdrop-blur-md border-b border-white/10 px-4 py-2.5 flex items-center justify-between">
           <button onClick={() => window.history.back()} className="flex items-center text-muted-foreground hover:text-foreground">
             <ArrowLeft className="w-5 h-5 mr-1" />
@@ -516,7 +517,7 @@ export default function ListingDetail() {
           )}
         </div>
 
-        <div className="fixed bottom-16 left-0 right-0 p-4 bg-gradient-to-t from-background via-background/90 to-transparent z-40">
+        <div className="og-apply-bar fixed left-0 right-0 p-4 bg-gradient-to-t from-background via-background/90 to-transparent">
           <div className="max-w-md mx-auto">
             {user ? (
               (() => {

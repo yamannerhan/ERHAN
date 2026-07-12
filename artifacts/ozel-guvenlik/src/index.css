@@ -2872,6 +2872,26 @@ html:not(.dark) .og-pt-row {
   bottom: calc(6rem + var(--safe-bottom));
 }
 
+/* İlan detay «Hemen Başvur» — alt menü + iPhone home indicator üstünde */
+.og-apply-bar {
+  bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom));
+  z-index: 35;
+}
+@media (min-width: 1024px) {
+  .og-apply-bar {
+    bottom: 1rem; /* masaüstünde alt nav yok */
+  }
+}
+.og-apply-page {
+  /* içerik: nav + safe + buton yüksekliği (~48) + padding */
+  padding-bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-bottom) + 5.5rem);
+}
+@media (min-width: 1024px) {
+  .og-apply-page {
+    padding-bottom: 6rem;
+  }
+}
+
 /* iOS Safari input zoom — yalnızca 390px altı (Xiaomi 13T ~393 dokunulmaz) */
 @media (max-width: 389px) {
   input,
