@@ -342,7 +342,7 @@ export default function ListingDetail() {
   return (
     <Layout>
       <div className="og-apply-page">
-        <div className="sticky top-14 z-30 bg-background/80 backdrop-blur-md border-b border-white/10 px-4 py-2.5 flex items-center justify-between">
+        <div className="og-subhead sticky z-30 bg-background/80 backdrop-blur-md border-b border-white/10 px-4 py-2.5 flex items-center justify-between">
           <button onClick={() => window.history.back()} className="flex items-center text-muted-foreground hover:text-foreground">
             <ArrowLeft className="w-5 h-5 mr-1" />
             <span className="text-sm font-medium">Geri</span>
@@ -434,21 +434,21 @@ export default function ListingDetail() {
 
           {canManageListing && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="mt-5">
-              <div className="glass-card rounded-2xl p-3 border border-primary/20">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div>
+              <div className="glass-card rounded-2xl p-3 border border-primary/20 overflow-visible">
+                <div className="og-toolbar mb-3">
+                  <div className="min-w-0">
                     <p className="text-xs font-black text-primary">Admin / Moderatör İşlemleri</p>
                     <p className="text-[10px] text-muted-foreground">İlan No: #{listing.id}</p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5 justify-end">
-                    <Button size="sm" variant="outline" onClick={changeCity} className="h-8 text-[10px] border-white/10 bg-white/5">
-                      <MapPin className="w-3 h-3 mr-1" /> İl Değiştir
+                  <div className="og-toolbar__actions">
+                    <Button size="sm" variant="outline" onClick={changeCity} className="h-9 text-[10px] border-white/10 bg-white/5">
+                      <MapPin className="w-3 h-3 mr-1 shrink-0" /> İl Değiştir
                     </Button>
-                    <Button size="sm" variant="outline" onClick={openEdit} className="h-8 text-[10px] border-white/10 bg-white/5">
-                      <Edit2 className="w-3 h-3 mr-1" /> Düzenle
+                    <Button size="sm" variant="outline" onClick={openEdit} className="h-9 text-[10px] border-white/10 bg-white/5">
+                      <Edit2 className="w-3 h-3 mr-1 shrink-0" /> Düzenle
                     </Button>
-                    <Button size="sm" onClick={deleteListing} className="h-8 text-[10px] bg-destructive/90 hover:bg-destructive text-white">
-                      <Trash2 className="w-3 h-3 mr-1" /> Sil
+                    <Button size="sm" onClick={deleteListing} className="h-9 text-[10px] bg-destructive/90 hover:bg-destructive text-white">
+                      <Trash2 className="w-3 h-3 mr-1 shrink-0" /> Sil
                     </Button>
                   </div>
                 </div>

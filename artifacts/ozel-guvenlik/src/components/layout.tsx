@@ -389,24 +389,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="og-app min-h-screen bg-background text-foreground lg:pb-10">
       <header className="og-header sticky top-0 z-40 border-b">
-        <div className="flex items-center gap-2 px-3 h-14 max-w-md md:max-w-6xl mx-auto" style={{ minHeight: "var(--mobile-header-height)" }}>
+        <div className="og-header-inner og-shell flex items-center gap-2 px-3 h-14" style={{ minHeight: "var(--mobile-header-height)" }}>
           {/* Hamburger */}
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="og-icon-btn p-2 -ml-1"
+            className="og-icon-btn p-2 -ml-1 shrink-0"
             aria-label="Menüyü Aç"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group min-w-0">
+          <Link href="/" className="flex items-center gap-2 group min-w-0 shrink">
             <div className="relative w-8 h-8 shrink-0 rounded-lg og-logo-shield flex items-center justify-center">
               <ShieldCheck className="w-5 h-5 text-slate-900" />
             </div>
             <div className="flex flex-col leading-none min-w-0">
-              <span className="font-extrabold text-sm tracking-tight whitespace-nowrap inline-flex items-baseline">
+              <span className="font-extrabold text-sm tracking-tight whitespace-nowrap inline-flex items-baseline truncate">
                 <span className="og-text">Özel</span>
                 <span className="og-gold-gradient">Güvenlik</span>
                 <span className="og-logo-tld">.online</span>
@@ -446,7 +446,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="og-header-actions">
             {isAdmin && (
               <Link href="/admin" className="hidden sm:inline-flex text-[10px] font-bold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/20">Admin</Link>
             )}
@@ -598,7 +598,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {/* Hamburger drawer */}
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
-      <main className="og-main max-w-md md:max-w-6xl mx-auto relative">
+      <main className="og-main og-shell relative">
         {children}
       </main>
 
