@@ -51,6 +51,8 @@ type Props = {
   canPin?: boolean;
   renderContent: (content: string) => React.ReactNode;
   onReply?: (msg: ChatMsgView) => void;
+  onGreet?: (msg: ChatMsgView) => void;
+  showGreet?: boolean;
   onDeleted?: (id: number) => void;
   onPinned?: (id: number, pinned: boolean) => void;
   onPollUpdate?: (id: number, poll: NonNullable<ChatMsgView["poll"]>) => void;
@@ -73,6 +75,8 @@ export function ChatMessageItem({
   canPin,
   renderContent,
   onReply,
+  onGreet,
+  showGreet,
   onDeleted,
   onPinned,
   onPollUpdate,
@@ -199,8 +203,18 @@ export function ChatMessageItem({
           </div>
         </div>
 
-        {(onReply || canModerate) && (
+        {(onReply || onGreet || canModerate) && (
           <div className="message-actions" onClick={(e) => e.stopPropagation()}>
+            {showGreet && onGreet && (
+              <button
+                type="button"
+                className="message-action-btn"
+                onClick={() => onGreet(msg)}
+                style={{ color: "#34d399" }}
+              >
+                👋 Selamla
+              </button>
+            )}
             {onReply && (
               <button
                 type="button"

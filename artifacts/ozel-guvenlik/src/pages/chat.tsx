@@ -5,13 +5,22 @@ import { useAuth } from "@/contexts/AuthContext";
 import { io, Socket } from "socket.io-client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, X, Bot, Zap, CornerUpLeft, Trash2, Settings, BarChart2 } from "lucide-react";
-import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
+import { Send, X, Bot, Zap, Trash2, Settings, BarChart2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
+import { SwipeableMessage } from "@/components/swipeable-message";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import {
+  fetchChatSyncPayload,
+  loadCachedHumans,
+  saveCachedHumans,
+  greetText,
+  extractJoinUsername,
+  isJoinAnnounce as isJoinAnnounceShared,
+} from "@/lib/chat-sync";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -51,7 +60,7 @@ function isSystemBot(msg: ExtMsg): boolean {
 }
 
 function isJoinAnnounce(msg: ExtMsg): boolean {
-  return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
+  return isJoinAnnounceShared(msg);
 }
 
 /** Son 100 üye + son 120 diğer mesajı koru (giriş/çıkışta üye mesajları silinmesin) */
@@ -68,6 +77,7 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   const humans = all.filter(isRealHuman).slice(-100);
   const others = all.filter((m) => !isRealHuman(m)).slice(-120);
   const keep = new Set<number>([...humans, ...others].map((m) => m.id));
+  saveCachedHumans(humans);
   return all.filter((m) => keep.has(m.id));
 }
 
@@ -83,86 +93,6 @@ function renderMessageContent(content: string) {
 
 interface UserSuggestion { id: number; username: string; displayName?: string | null; avatarUrl: string | null; role: string; }
 
-/* ── Swipeable row ────────────────────────────────────────────── */
-// React'ın synthetic onTouchMove olayı PWA'da passive geldiğinden
-// preventDefault() çalışmaz ve scroll swipe'ı yutar.
-// Çözüm: native addEventListener ile { passive: false } kullanmak.
-function SwipeableMessage({ children, onReply }: { children: React.ReactNode; onReply: () => void }) {
-  const x = useMotionValue(0);
-  const opacity = useTransform(x, [0, 50], [0, 1]);
-  const scale = useTransform(x, [0, 50, 80], [0.5, 1, 1.2]);
-  const iconBg = useTransform(x, [40, 65], ["rgba(79,70,229,0.6)", "rgba(79,70,229,1)"]);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const isHoriz = useRef<boolean | null>(null);
-  const swiped = useRef(false);
-  const vibrated = useRef(false);
-  const onReplyRef = useRef(onReply);
-  useEffect(() => { onReplyRef.current = onReply; }, [onReply]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const onStart = (e: TouchEvent) => {
-      startX.current = e.touches[0]!.clientX;
-      startY.current = e.touches[0]!.clientY;
-      isHoriz.current = null;
-      swiped.current = false;
-      vibrated.current = false;
-    };
-
-    const onMove = (e: TouchEvent) => {
-      const dx = e.touches[0]!.clientX - startX.current;
-      const dy = e.touches[0]!.clientY - startY.current;
-      // 2px eşiğinde yön belirle — iOS için erken tespit şart
-      if (isHoriz.current === null && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
-        isHoriz.current = Math.abs(dx) >= Math.abs(dy);
-      }
-      if (!isHoriz.current || dx <= 0) return;
-      e.preventDefault();
-      x.set(Math.min(dx, 90));
-      if (dx >= 60 && !vibrated.current) {
-        vibrated.current = true;
-        if (navigator.vibrate) navigator.vibrate(45);
-      }
-    };
-
-    const onEnd = () => {
-      if (isHoriz.current && x.get() >= 60 && !swiped.current) {
-        swiped.current = true;
-        onReplyRef.current();
-      }
-      animate(x, 0, { type: "spring", stiffness: 380, damping: 28 });
-      isHoriz.current = null;
-    };
-
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchmove", onMove, { passive: false }); // ← kritik
-    el.addEventListener("touchend", onEnd, { passive: true });
-    return () => {
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-    };
-  }, []);
-
-  return (
-    // touch-action:pan-y → tarayıcı dikey scroll'u kendi yönetir,
-    // yatay dokunuşları JS'e bırakır — iOS PWA için kritik
-    <div ref={containerRef} className="relative" style={{ touchAction: "pan-y" }}>
-      <motion.div
-        style={{ opacity, scale, backgroundColor: iconBg }}
-        className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center pointer-events-none z-10 shadow-lg"
-      >
-        <CornerUpLeft className="w-4 h-4 text-white" />
-      </motion.div>
-      <motion.div style={{ x }}>{children}</motion.div>
-    </div>
-  );
-}
-
 export default function Chat() {
   const { user } = useAuth();
   const keyboardInset = useKeyboardInset();
@@ -172,7 +102,7 @@ export default function Chat() {
   const msgContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [, setSocket] = useState<Socket | null>(null);
-  const [messages, setMessages] = useState<AnyMsg[]>([]);
+  const [messages, setMessages] = useState<AnyMsg[]>(() => loadCachedHumans() as ExtMsg[]);
   const [feedMode, setFeedMode] = useState<"all" | "members">("all");
   const [sending, setSending] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -259,28 +189,7 @@ export default function Chat() {
     try {
       const after = lastSeenMessageIdRef.current;
       const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
-      const fetchJson = async (url: string) => {
-        const res = await fetch(url, { headers, cache: "no-store" });
-        const data = await res.json().catch(() => null);
-        return Array.isArray(data) ? (data as ExtMsg[]) : [];
-      };
-
-      let incoming: ExtMsg[] = [];
-      if (after > 0 && isDbMessageId(after)) {
-        incoming = await fetchJson(`/api/chat/messages?limit=100&after=${after}`);
-      } else {
-        // İlk yükleme: karışık akış + ayrı son 100 üye (yenilemede üye mesajları kalsın)
-        const [mixed, humans] = await Promise.all([
-          fetchJson("/api/chat/messages?limit=100"),
-          fetchJson("/api/chat/messages?limit=100&humansOnly=1"),
-        ]);
-        const byId = new Map<number, ExtMsg>();
-        for (const m of [...mixed, ...humans]) {
-          if (isDbMessageId(m.id)) byId.set(m.id, m);
-        }
-        incoming = [...byId.values()].sort((a, b) => a.id - b.id);
-      }
-
+      const incoming = await fetchChatSyncPayload({ after, headers }) as ExtMsg[];
       if (incoming.length === 0) return;
       setMessages(prev => {
         const next = mergePreserveMessages(prev, incoming);
@@ -288,7 +197,6 @@ export default function Chat() {
         return next;
       });
     } catch {
-      // ignore transient network errors
     } finally {
       syncInFlightRef.current = false;
     }
@@ -478,6 +386,22 @@ export default function Chat() {
     } catch {} finally { setSending(false); }
   };
 
+  const sendGreet = async (username: string, replyToId?: number | null) => {
+    if (!user || !username) return;
+    const body = { content: greetText(username), replyToId: replyToId ?? null };
+    try {
+      const r = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        const sent = await r.json().catch(() => null) as ExtMsg | null;
+        if (sent?.id) window.setTimeout(() => { addMsg(sent); }, 400);
+      }
+    } catch {}
+  };
+
   // Show displayName (first name) if available, otherwise username
   function chatName(msg: ExtMsg): string {
     return (msg as any).displayName || msg.username;
@@ -489,6 +413,18 @@ export default function Chat() {
         <motion.div key={msg.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center my-1">
           <div className="flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-semibold px-3 py-1 rounded-full">
             <Zap className="w-2.5 h-2.5" />{msg.text}
+            {user && (
+              <button
+                type="button"
+                onClick={() => {
+                  const u = extractJoinUsername(msg.text) || msg.text.split(/\s+/)[0] || "";
+                  void sendGreet(u, null);
+                }}
+                className="ml-1 text-emerald-300 hover:text-emerald-200 underline underline-offset-2"
+              >
+                Selamla
+              </button>
+            )}
           </div>
         </motion.div>
       );
@@ -539,6 +475,11 @@ export default function Chat() {
         memberStyle={!isSystemBot(chatMsg)}
         onActivate={() => setActiveMsg(isActive ? null : chatMsg.id)}
         onReply={user ? (m) => { setReplyTo(m as ExtMsg); setActiveMsg(null); } : undefined}
+        showGreet={!!user && isJoinAnnounce(chatMsg)}
+        onGreet={(m) => {
+          const u = extractJoinUsername(m.content) || m.username;
+          void sendGreet(u, isRealHuman(m as ExtMsg) ? m.id : null);
+        }}
         onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
         onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
           !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m

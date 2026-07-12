@@ -45,6 +45,7 @@ export async function saveChatMessage(userId: number, content: string): Promise<
 
 async function trimChatHistory(): Promise<void> {
   try {
+    // Keep last 200 real (human) messages — well above the 100 client cache floor.
     // Sadece görünür (silinmemiş) mesajları say — soft-delete trim penceresini kirletmesin
     const realKept = await db
       .select({ id: chatMessagesTable.id })

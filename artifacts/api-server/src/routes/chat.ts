@@ -253,8 +253,49 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
         }
       }
     } catch { /* bildirim hatası mesajı engellemesin */ }
-  } else {
-    // Yanıt değilse: diğer üyelere sohbet mesajı push (gönderen hariç)
+  }
+
+  // @etiket bildirimi + ses (sohbet mesajı push)
+  const mentionNames = extractMentions(filteredContent);
+  if (mentionNames.length > 0) {
+    try {
+      const { getUserNotifPrefs, prefsAllowInAppType } = await import("../lib/user-notif-prefs");
+      const mentionedUsers = allUsers.filter(
+        (u) => u.id > 0 && u.id !== req.user!.id && mentionNames.some((n) => n.toLowerCase() === u.username.toLowerCase()),
+      );
+      const preview = filteredContent.length > 100 ? `${filteredContent.slice(0, 100)}…` : filteredContent;
+      const title = "Sohbette etiketlendiniz";
+      const message = `${req.user!.username}: ${preview}`;
+      for (const target of mentionedUsers) {
+        const prefs = await getUserNotifPrefs(target.id);
+        if (!prefsAllowInAppType(prefs, "message")) continue;
+        await db.insert(notificationsTable).values({
+          userId: target.id,
+          type: "message",
+          title,
+          message,
+          relatedId: msg.id,
+          linkUrl: "/sohbet",
+          isRead: false,
+        });
+        emitRealtimeToUser(target.id, "notification:new", {
+          type: "message",
+          title,
+          message,
+          relatedId: msg.id,
+          linkUrl: "/sohbet",
+          userId: target.id,
+          createdAt: new Date().toISOString(),
+        });
+        void import("../lib/web-push").then((m) =>
+          m.maybePushChatReply(target.id, title, message),
+        ).catch(() => {});
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!replyToId && mentionNames.length === 0) {
+    // Yanıt/etiket değilse: diğer üyelere sohbet mesajı push (gönderen hariç)
     const senderName = (freshUser?.displayName || req.user!.username || "Üye").trim();
     void import("../lib/web-push").then((m) =>
       m.maybePushChatMessage({

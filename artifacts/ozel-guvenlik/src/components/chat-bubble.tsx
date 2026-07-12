@@ -8,8 +8,17 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
+import { SwipeableMessage } from "@/components/swipeable-message";
 import { FramedAvatar } from "@/components/framed-avatar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import {
+  fetchChatSyncPayload,
+  loadCachedHumans,
+  saveCachedHumans,
+  greetText,
+  extractJoinUsername,
+  isJoinAnnounce as isJoinAnnounceShared,
+} from "@/lib/chat-sync";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -53,7 +62,7 @@ function isSystemBot(msg: ExtMsg): boolean {
 
 /** Yeni üye katılım duyurusu — Üyeler sekmesinde kalsın */
 function isJoinAnnounce(msg: ExtMsg): boolean {
-  return /aramıza katıldı|hoşgeldin/i.test(msg.content ?? "");
+  return isJoinAnnounceShared(msg);
 }
 
 /** DB serial id (socket Date.now() id'lerini sayma) */
@@ -75,6 +84,7 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   const humans = all.filter(isRealHuman).slice(-100);
   const others = all.filter((m) => !isRealHuman(m)).slice(-120);
   const keep = new Set<number>([...humans, ...others].map((m) => m.id));
+  saveCachedHumans(humans);
   return all.filter((m) => keep.has(m.id));
 }
 
@@ -159,7 +169,7 @@ export function ChatBubble() {
   const [location] = useLocation();
   const keyboardInset = useKeyboardInset();
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<AnyMsg[]>([]);
+  const [messages, setMessages] = useState<AnyMsg[]>(() => loadCachedHumans() as ExtMsg[]);
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -272,28 +282,7 @@ export function ChatBubble() {
     try {
       const after = lastSeenMessageIdRef.current;
       const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
-      const fetchJson = async (url: string) => {
-        const res = await fetch(url, { headers, cache: "no-store" });
-        const data = await res.json().catch(() => null);
-        return Array.isArray(data) ? (data as ExtMsg[]) : [];
-      };
-
-      let incoming: ExtMsg[] = [];
-      if (after > 0 && isDbMessageId(after)) {
-        incoming = await fetchJson(`/api/chat/messages?limit=100&after=${after}`);
-      } else {
-        // İlk yükleme: karışık akış + ayrı son 100 üye (yenilemede üye mesajları kalsın)
-        const [mixed, humans] = await Promise.all([
-          fetchJson("/api/chat/messages?limit=100"),
-          fetchJson("/api/chat/messages?limit=100&humansOnly=1"),
-        ]);
-        const byId = new Map<number, ExtMsg>();
-        for (const m of [...mixed, ...humans]) {
-          if (isDbMessageId(m.id)) byId.set(m.id, m);
-        }
-        incoming = [...byId.values()].sort((a, b) => a.id - b.id);
-      }
-
+      const incoming = await fetchChatSyncPayload({ after, headers }) as ExtMsg[];
       if (incoming.length === 0) return;
       setMessages(prev => {
         const existingIds = new Set(prev.filter(m => !isSystem(m)).map(m => (m as ExtMsg).id));
@@ -538,6 +527,22 @@ export function ChatBubble() {
     } finally { setSending(false); }
   };
 
+  const sendGreet = async (username: string, replyToId?: number | null) => {
+    if (!user || !username) return;
+    const body = { content: greetText(username), replyToId: replyToId ?? null };
+    try {
+      const r = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        const sent = await r.json().catch(() => null) as ExtMsg | null;
+        if (sent?.id) window.setTimeout(() => { addMsg(sent); }, 400);
+      }
+    } catch {}
+  };
+
   const handleClearChat = async () => {
     if (!window.confirm("Tüm sohbet mesajları silinecek. Emin misiniz?")) return;
     try {
@@ -615,6 +620,18 @@ export function ChatBubble() {
             <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               {msg.text}
+              {user && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = extractJoinUsername(msg.text) || msg.text.split(/\s+/)[0] || "";
+                    void sendGreet(u, null);
+                  }}
+                  className="ml-1 text-emerald-300 hover:text-emerald-200 underline underline-offset-2"
+                >
+                  Selamla
+                </button>
+              )}
             </div>
           ) : (
             <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed bg-amber-400/10 border border-amber-400/20">
@@ -633,28 +650,47 @@ export function ChatBubble() {
     const isMe = user?.id === chatMsg.userId;
     const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
 
+    const row = (
+      <ChatMessageItem
+        msg={chatMsg}
+        isOwn={!!isMe && !isBotOrFake(chatMsg)}
+        currentUsername={user?.username}
+        token={getToken()}
+        canModerate={canMod && isDbMessageId(chatMsg.id)}
+        canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
+        renderContent={renderMessageContent}
+        active={activeMsgId === chatMsg.id}
+        memberStyle={!isSystemBot(chatMsg)}
+        onActivate={() => setActiveMsgId((id) => (id === chatMsg.id ? null : chatMsg.id))}
+        onReply={user ? (m) => startReply(m as ExtMsg) : undefined}
+        showGreet={!!user && isJoinAnnounce(chatMsg)}
+        onGreet={(m) => {
+          const u = extractJoinUsername(m.content) || m.username;
+          void sendGreet(u, isRealHuman(m as ExtMsg) ? m.id : null);
+        }}
+        onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
+        onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
+          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
+        ))}
+        onPollUpdate={(id, p) => setMessages((prev) => prev.map((m) =>
+          !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), poll: p } : m
+        ))}
+      />
+    );
+
+    if (user) {
+      return (
+        <SwipeableMessage key={chatMsg.id} onReply={() => startReply(chatMsg)}>
+          <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
+            {row}
+          </motion.div>
+        </SwipeableMessage>
+      );
+    }
+
     return (
       <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
-        <ChatMessageItem
-          msg={chatMsg}
-          isOwn={!!isMe && !isBotOrFake(chatMsg)}
-          currentUsername={user?.username}
-          token={getToken()}
-          canModerate={canMod && isDbMessageId(chatMsg.id)}
-          canPin={user?.role === "admin" && isDbMessageId(chatMsg.id)}
-          renderContent={renderMessageContent}
-          active={activeMsgId === chatMsg.id}
-          memberStyle={!isSystemBot(chatMsg)}
-          onActivate={() => setActiveMsgId((id) => (id === chatMsg.id ? null : chatMsg.id))}
-          onReply={user ? (m) => startReply(m as ExtMsg) : undefined}
-          onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
-          onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
-            !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
-          ))}
-          onPollUpdate={(id, p) => setMessages((prev) => prev.map((m) =>
-            !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), poll: p } : m
-          ))}
-        />
+        {row}
       </motion.div>
     );
   };
