@@ -1,23 +1,54 @@
-import { useMemo, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useLiteMarquee } from "@/hooks/use-lite-marquee";
 import "@/styles/lite-marquee.css";
 import "./home-news-ticker.css";
 
 type HomeNewsTickerProps = {
   lines: string[];
+  /** Pro: kayan şerit | Lite: sabit, ekrana sığan, döngülü */
+  variant?: "marquee" | "static";
 };
 
-export function HomeNewsTicker({ lines }: HomeNewsTickerProps) {
+const FALLBACK = "Özel güvenlik iş ilanları — ozelguvenlik.online";
+
+export function HomeNewsTicker({ lines, variant = "marquee" }: HomeNewsTickerProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const items = useMemo(() => {
-    const list = lines.length > 0 ? lines : ["Özel güvenlik iş ilanları — ozelguvenlik.online"];
-    return [...list, ...list];
+  const [staticIdx, setStaticIdx] = useState(0);
+
+  const sourceLines = useMemo(() => {
+    const list = lines.length > 0 ? lines : [FALLBACK];
+    return list;
   }, [lines]);
 
-  useLiteMarquee(trackRef, items.length > 0, [items.join("|")], {
+  const marqueeItems = useMemo(() => [...sourceLines, ...sourceLines], [sourceLines]);
+
+  useLiteMarquee(trackRef, variant === "marquee" && marqueeItems.length > 0, [marqueeItems.join("|")], {
     speedPxPerSec: 18,
     minDurationSec: 45,
   });
+
+  useEffect(() => {
+    setStaticIdx(0);
+  }, [sourceLines.join("|")]);
+
+  useEffect(() => {
+    if (variant !== "static" || sourceLines.length < 2) return;
+    const id = window.setInterval(() => {
+      setStaticIdx((i) => (i + 1) % sourceLines.length);
+    }, 6000);
+    return () => window.clearInterval(id);
+  }, [variant, sourceLines.length]);
+
+  if (variant === "static") {
+    return (
+      <div className="og-home-ticker og-home-ticker--static" role="status" aria-live="polite">
+        <p key={staticIdx} className="og-home-ticker__static-text">
+          <span className="og-home-ticker__dot" aria-hidden>●</span>
+          {sourceLines[staticIdx]}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="og-home-ticker lite-marquee-viewport" role="marquee" aria-live="off">
@@ -27,7 +58,7 @@ export function HomeNewsTicker({ lines }: HomeNewsTickerProps) {
         className="og-home-ticker__track lite-marquee-track"
         style={{ "--lite-marquee-duration": "48s" } as CSSProperties}
       >
-        {items.map((text, i) => (
+        {marqueeItems.map((text, i) => (
           <span key={`${i}-${text.slice(0, 24)}`} className="og-home-ticker__item">
             <span className="og-home-ticker__dot" aria-hidden>●</span>
             {text}

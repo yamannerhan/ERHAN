@@ -18,11 +18,13 @@ import { toSlug } from "@/lib/seo-cities";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { useQueryClient } from "@tanstack/react-query";
 import { JobListingCard } from "@/components/job-listing-card";
-import { FeaturedJobCarousel } from "@/components/featured-job-card";
+import { FeaturedJobCarousel, rotateFeaturedListings, nextFeaturedRotation } from "@/components/featured-job-card";
 import { LiveSupportBar } from "@/components/live-support-bar";
 import { HomeQuickCards } from "@/components/home-quick-cards";
 import { HomeNewsTicker } from "@/components/home-news-ticker";
 import { getHomeTickerLines } from "@/lib/home-ticker";
+import { DisplayModeToggle } from "@/components/display-mode-toggle";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 const BASE_URL = "https://ozelguvenlik.online";
 
@@ -74,63 +76,79 @@ const bannerFallbacks = [
 function BannerCarousel({ banners }: { banners: Banner[] }) {
   const [current, setCurrent] = useState(0);
   const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
+  const { isLite } = useDisplayMode();
   const gpuSafeMode = useGpuSafeMode();
+  const reduceMotion = isLite || gpuSafeMode;
 
   const next = useCallback(() => {
     setCurrent(c => (c + 1) % banners.length);
   }, [banners.length]);
 
   useEffect(() => {
-    if (banners.length < 2) return;
+    if (isLite || banners.length < 2) return;
     const id = setInterval(next, 4000);
     return () => clearInterval(id);
-  }, [next, banners.length]);
+  }, [next, banners.length, isLite]);
 
   if (banners.length === 0) return null;
 
-  const banner = banners[current]!;
+  const slideIndex = isLite ? 0 : current;
+  const banner = banners[slideIndex]!;
   const imageFailed = failedImages.has(banner.id);
+
+  const slideContent = (
+    <div className="og-banner-carousel__media pointer-events-none select-none">
+      {imageFailed ? (
+        <div
+          className="absolute inset-0"
+          style={{ background: bannerFallbacks[slideIndex % bannerFallbacks.length] }}
+        />
+      ) : (
+        <img
+          src={banner.imageUrl}
+          alt={banner.title ?? "Banner"}
+          decoding="async"
+          loading={isLite ? "eager" : "lazy"}
+          onError={() => setFailedImages(prev => new Set(prev).add(banner.id))}
+        />
+      )}
+      {banner.title && (
+        <>
+          <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/20 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 px-4 py-3">
+            <p className="text-white text-sm font-extrabold leading-snug drop-shadow md:text-base">{banner.title}</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  if (isLite) {
+    return (
+      <div className="og-banner-carousel">
+        <div className="og-banner-carousel__slide">{slideContent}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="og-banner-carousel">
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={current}
-          initial={gpuSafeMode ? { opacity: 0 } : { opacity: 0, x: 36 }}
-          animate={gpuSafeMode ? { opacity: 1 } : { opacity: 1, x: 0 }}
-          exit={gpuSafeMode ? { opacity: 0 } : { opacity: 0, x: -36 }}
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 36 }}
+          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, x: 0 }}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -36 }}
           transition={{ duration: 0.45, ease: "easeInOut" }}
           className="og-banner-carousel__slide"
         >
-          <div className="og-banner-carousel__media pointer-events-none select-none">
-            {imageFailed ? (
-              <div
-                className="absolute inset-0"
-                style={{ background: bannerFallbacks[current % bannerFallbacks.length] }}
-              />
-            ) : (
-              <img
-                src={banner.imageUrl}
-                alt={banner.title ?? "Banner"}
-                decoding="async"
-                onError={() => setFailedImages(prev => new Set(prev).add(banner.id))}
-              />
-            )}
-            {banner.title && (
-              <>
-                <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/20 to-transparent" />
-                <div className="absolute inset-x-0 bottom-0 px-4 py-3">
-                  <p className="text-white text-sm font-extrabold leading-snug drop-shadow md:text-base">{banner.title}</p>
-                </div>
-              </>
-            )}
-          </div>
+          {slideContent}
         </motion.div>
       </AnimatePresence>
 
       {banners.length > 1 && (
         <>
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+          <div className="og-banner-carousel__dots absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
             {banners.map((_, i) => (
               <button key={i} onClick={() => setCurrent(i)}
                 className={`h-1.5 rounded-full transition-all ${i === current ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
@@ -213,11 +231,14 @@ export default function Home() {
   });
 
   const { user } = useAuth();
+  const { isLite } = useDisplayMode();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: announcementsData } = useGetAnnouncements();
   const announcements = Array.isArray(announcementsData) ? announcementsData : [];
   const tickerLines = useMemo(() => getHomeTickerLines(announcements), [announcements]);
+  const [featuredRot] = useState(() => nextFeaturedRotation());
+  const [liteTickerLines, setLiteTickerLines] = useState<string[]>([]);
 
   const savedHome = getSavedHomeState();
   const [page, setPage] = useState(savedHome.page);
@@ -230,6 +251,7 @@ export default function Home() {
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
   const gpuSafeMode = useGpuSafeMode();
+  const reduceMotion = isLite || gpuSafeMode;
 
   useEffect(() => {
     fetch("/api/listings/cities")
@@ -237,6 +259,25 @@ export default function Home() {
       .then(data => { if (Array.isArray(data)) setCityFilters(data); })
       .catch(() => setCityFilters([]));
   }, []);
+
+  useEffect(() => {
+    if (!isLite) return;
+    fetch("/api/announcements/lite-home")
+      .then(r => r.json())
+      .then((data: { content?: string }[]) => {
+        const lines = Array.isArray(data)
+          ? data.map(a => a.content?.trim()).filter((c): c is string => Boolean(c))
+          : [];
+        setLiteTickerLines(lines);
+      })
+      .catch(() => setLiteTickerLines([]));
+  }, [isLite]);
+
+  const liteTickerDisplay = useMemo(() => {
+    if (liteTickerLines.length > 0) return liteTickerLines;
+    const home = getHomeTickerLines(announcements);
+    return home.length > 0 ? [home[0]!] : ["Özel güvenlik iş ilanları — ozelguvenlik.online"];
+  }, [liteTickerLines, announcements]);
 
   const cityFilter = useMemo(() => {
     if (activePill === "other" && otherCity) return otherCity;
@@ -356,6 +397,10 @@ export default function Home() {
   }, [filtered, sortNewest]);
 
   const featuredList = useMemo(() => featuredData?.listings ?? [], [featuredData]);
+  const displayFeaturedList = useMemo(
+    () => (isLite ? rotateFeaturedListings(featuredList, featuredRot) : featuredList),
+    [featuredList, featuredRot, isLite],
+  );
   const totalCount = apiTotal;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -417,9 +462,15 @@ export default function Home() {
 
   return (
     <Layout>
-      <HomeNewsTicker lines={tickerLines} />
+      <HomeNewsTicker
+        lines={isLite ? liteTickerDisplay : tickerLines}
+        variant={isLite ? "static" : "marquee"}
+      />
+      <div className="og-home-mode-row px-4">
+        <DisplayModeToggle />
+      </div>
 
-      {banners.length > 0 && (
+      {!isLite && banners.length > 0 && (
         <div className="px-4 pt-4 w-full box-border">
           <BannerCarousel banners={banners} />
         </div>
@@ -523,7 +574,7 @@ export default function Home() {
 
         {/* ── Öne çıkan + canlı destek + tüm ilanlar (sıkı aralık) ── */}
         <div className="flex flex-col gap-1">
-        {featuredList.length > 0 && (
+        {displayFeaturedList.length > 0 && (
           <section className="space-y-1">
             <div className="featured-section-head">
               <h2 className="og-section-title flex items-center gap-1.5 text-sm mb-0">
@@ -536,7 +587,8 @@ export default function Home() {
               </Link>
             </div>
             <FeaturedJobCarousel
-              listings={featuredList}
+              listings={displayFeaturedList}
+              isLite={isLite}
               onNavigate={saveHomeScroll}
               savedIds={favIds}
               onToggleSave={handleToggleFav}
@@ -611,7 +663,7 @@ export default function Home() {
                   />
                 );
 
-                if (gpuSafeMode) {
+                if (reduceMotion) {
                   return (
                     <div key={listing.id} className="og-list-row-wrap">
                       {card}

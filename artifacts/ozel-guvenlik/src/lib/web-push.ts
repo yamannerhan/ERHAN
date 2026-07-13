@@ -1,4 +1,6 @@
 /** Web Push aboneliği — PWA / Chrome / Android */
+import { isLiteMode } from "@/lib/display-mode";
+
 const LS_ASKED = "og_push_asked_v1";
 const LS_DENIED = "og_push_denied_v1";
 
@@ -130,6 +132,7 @@ export function playNotificationBeep(): void {
 
 /** Adminin verdiği özel ses URL'si (yoksa bip) */
 export function playPushSound(soundUrl?: string | null): void {
+  if (isLiteMode()) return;
   try {
     if (localStorage.getItem("og_notif_sound") === "0") return;
   } catch { /* ignore */ }
@@ -153,7 +156,7 @@ export function playPushSound(soundUrl?: string | null): void {
 
 /** SW'den gelen özel ses mesajını dinle */
 export function listenForPushSounds(): () => void {
-  if (!("serviceWorker" in navigator)) return () => {};
+  if (isLiteMode() || !("serviceWorker" in navigator)) return () => {};
   const handler = (event: MessageEvent) => {
     const data = event.data as { type?: string; soundUrl?: string | null } | null;
     if (data?.type === "OG_PUSH_SOUND") playPushSound(data.soundUrl);

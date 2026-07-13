@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from
 import { useGetChatMessages } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { io, Socket } from "socket.io-client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -98,6 +99,7 @@ interface UserSuggestion { id: number; username: string; displayName?: string | 
 
 export default function Chat() {
   const { user } = useAuth();
+  const { isLite } = useDisplayMode();
   const keyboardInset = useKeyboardInset();
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
@@ -517,6 +519,7 @@ export default function Chat() {
       >
         {/* Admin/Moderatör sohbet araçları + bildirim ayarı */}
         <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/5 bg-background/60 backdrop-blur shrink-0">
+          {!isLite && (
           <button
             type="button"
             onClick={() => setShowNotifSettings(v => !v)}
@@ -525,7 +528,8 @@ export default function Chat() {
             <Settings className="w-3.5 h-3.5" />
             Bildirimler
           </button>
-          <div className="flex items-center gap-1">
+          )}
+          <div className={`flex items-center gap-1${isLite ? " ml-auto" : ""}`}>
             {user && (user.role === "admin" || user.role === "moderator") && (
               <>
                 <button
@@ -546,7 +550,7 @@ export default function Chat() {
             )}
           </div>
         </div>
-        {showNotifSettings && user && (
+        {showNotifSettings && !isLite && user && (
           <div className="px-4 py-3 border-b border-white/5 bg-black/40 shrink-0 max-h-64 overflow-y-auto">
             <NotifPrefsPanel compact onSaved={() => setShowNotifSettings(false)} />
           </div>

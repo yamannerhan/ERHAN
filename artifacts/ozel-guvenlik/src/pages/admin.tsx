@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Redirect, Link as WouterLink, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -4463,7 +4463,7 @@ export default function AdminDashboard() {
   }>("/admin/settings");
 
   const { data: announcementsData, refetch: refetchAnnouncements } = useAdminApi<{
-    id: number; content: string; isActive: boolean; isPinned?: boolean; createdAt: string;
+    id: number; content: string; isActive: boolean; isPinned?: boolean; placement?: string; createdAt: string;
   }[]>("/admin/announcements");
 
   const [scanning, setScanning] = useState(false);
@@ -4527,6 +4527,7 @@ export default function AdminDashboard() {
   }, [settings]);
 
   const [newAnnouncement, setNewAnnouncement] = useState("");
+  const [newLiteAnnouncement, setNewLiteAnnouncement] = useState("");
   const [editingAnnouncementId, setEditingAnnouncementId] = useState<number | null>(null);
   const [editingAnnouncementContent, setEditingAnnouncementContent] = useState("");
   const [newListing, setNewListing] = useState({
@@ -4688,9 +4689,23 @@ export default function AdminDashboard() {
   const addAnnouncement = async () => {
     if (!newAnnouncement.trim()) { toast({ title: "Kayan yazı içeriği zorunludur", variant: "destructive" }); return; }
     try {
-      await apiCall("/announcements", "POST", { content: newAnnouncement.trim() });
+      await apiCall("/announcements", "POST", { content: newAnnouncement.trim(), placement: "home" });
       toast({ title: "Kayan yazı eklendi" });
       setNewAnnouncement("");
+      refetchAnnouncements();
+    } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
+  };
+
+  const addLiteAnnouncement = async () => {
+    if (!newLiteAnnouncement.trim()) { toast({ title: "Lite yazı içeriği zorunludur", variant: "destructive" }); return; }
+    if (newLiteAnnouncement.trim().length > 120) {
+      toast({ title: "Lite yazı çok uzun", description: "Ekrana sığması için en fazla 120 karakter kullanın.", variant: "destructive" });
+      return;
+    }
+    try {
+      await apiCall("/announcements", "POST", { content: newLiteAnnouncement.trim(), placement: "lite_home" });
+      toast({ title: "Lite sabit yazı eklendi" });
+      setNewLiteAnnouncement("");
       refetchAnnouncements();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
@@ -5130,14 +5145,14 @@ export default function AdminDashboard() {
         {activeTab === "push" && <PushNotificationsSection apiCall={apiCall} toast={toast} />}
 
         {activeTab === "bildirimler" && (
-        <Section title="Kayan Yazı Yönetimi" icon={MessageSquare}>
+        <Section title="Kayan Yazı Yönetimi (Pro)" icon={MessageSquare}>
           <div className="space-y-3">
             <div className="bg-white/5 rounded-xl p-3 space-y-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Yeni Kayan Yazı Ekle</p>
               <Textarea
                 value={newAnnouncement}
                 onChange={e => setNewAnnouncement(e.target.value)}
-                placeholder="Ana sayfa ve Part Time sayfasında kayacak duyuru metni..."
+                placeholder="Pro modda ana sayfada kayacak duyuru metni..."
                 className="border-white/[0.06] bg-[#0d1321]/80 backdrop-blur-xl rounded-xl px-3 py-2 text-sm text-white placeholder:placeholder-slate-500 focus:outline-none focus:border-violet-500/30 focus:ring-1 focus:ring-violet-500/20 transition-all} min-h-[70px]"
               />
               <Button onClick={addAnnouncement} className="w-full text-sm bg-primary/80 hover:bg-primary">
@@ -5145,9 +5160,9 @@ export default function AdminDashboard() {
               </Button>
             </div>
 
-            {announcementsData && announcementsData.length > 0 ? (
+            {announcementsData && announcementsData.filter(a => (a.placement ?? "home") === "home").length > 0 ? (
               <div className="space-y-2">
-                {announcementsData.map(a => (
+                {announcementsData.filter(a => (a.placement ?? "home") === "home").map(a => (
                   <div key={a.id} className="bg-white/5 rounded-xl p-3 space-y-2">
                     {editingAnnouncementId === a.id ? (
                       <>
@@ -5191,6 +5206,79 @@ export default function AdminDashboard() {
               </div>
             ) : (
               <p className="text-xs text-muted-foreground text-center py-2">Henüz kayan yazı yok</p>
+            )}
+          </div>
+        </Section>
+        )}
+
+        {activeTab === "bildirimler" && (
+        <Section title="Lite Sabit Yazı (Anasayfa)" icon={MessageSquare}>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Lite modda kayan şerit yerine ekrana sığan sabit metin gösterilir. Metinler 6 saniyede bir döner; her yenilemede baştan başlar.
+            </p>
+            <div className="bg-white/5 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Yeni Lite Yazı (max 120 karakter)</p>
+              <Textarea
+                value={newLiteAnnouncement}
+                onChange={e => setNewLiteAnnouncement(e.target.value)}
+                maxLength={120}
+                placeholder="Örn: Güncel özel güvenlik ilanları — hemen başvurun"
+                className="border-white/[0.06] bg-[#0d1321]/80 backdrop-blur-xl rounded-xl px-3 py-2 text-sm text-white placeholder:placeholder-slate-500 focus:outline-none focus:border-violet-500/30 focus:ring-1 focus:ring-violet-500/20 transition-all} min-h-[56px]"
+              />
+              <p className="text-[10px] text-muted-foreground text-right">{newLiteAnnouncement.length}/120</p>
+              <Button onClick={addLiteAnnouncement} className="w-full text-sm bg-amber-500/80 hover:bg-amber-500 text-slate-900">
+                <Plus className="w-4 h-4 mr-1" /> Lite Yazı Ekle
+              </Button>
+            </div>
+
+            {announcementsData && announcementsData.filter(a => a.placement === "lite_home").length > 0 ? (
+              <div className="space-y-2">
+                {announcementsData.filter(a => a.placement === "lite_home").map(a => (
+                  <div key={a.id} className="bg-white/5 rounded-xl p-3 space-y-2">
+                    {editingAnnouncementId === a.id ? (
+                      <>
+                        <Textarea
+                          value={editingAnnouncementContent}
+                          onChange={e => setEditingAnnouncementContent(e.target.value)}
+                          maxLength={120}
+                          className="border-white/[0.06] bg-[#0d1321]/80 backdrop-blur-xl rounded-xl px-3 py-2 text-sm text-white placeholder:placeholder-slate-500 focus:outline-none focus:border-violet-500/30 focus:ring-1 focus:ring-violet-500/20 transition-all} min-h-[56px]"
+                        />
+                        <div className="flex gap-2">
+                          <Button onClick={saveAnnouncementEdit} size="sm" className="flex-1 text-xs">Kaydet</Button>
+                          <Button onClick={() => { setEditingAnnouncementId(null); setEditingAnnouncementContent(""); }} size="sm" variant="outline" className="flex-1 text-xs">Vazgeç</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-sm text-foreground leading-relaxed">
+                          {a.isPinned && <span className="inline-flex items-center gap-0.5 text-amber-400 text-[10px] font-bold mr-1.5"><Pin className="w-3 h-3" />SABİT</span>}
+                          {a.content}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                          <span>{new Date(a.createdAt).toLocaleDateString("tr-TR")}</span>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => toggleAnnouncementPin(a.id, !!a.isPinned)} className={a.isPinned ? "text-amber-400" : "text-muted-foreground"} title={a.isPinned ? "Sabiti kaldır" : "Sabitle"}>
+                              <Pin className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => toggleAnnouncement(a.id, a.isActive)} className={a.isActive ? "text-green-400" : "text-muted-foreground"} title={a.isActive ? "Aktif" : "Pasif"}>
+                              {a.isActive ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+                            </button>
+                            <button onClick={() => startEditAnnouncement(a.id, a.content)} className="text-blue-400 hover:text-blue-300" title="Düzenle">
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => deleteAnnouncement(a.id)} className="text-destructive hover:text-destructive/80" title="Sil">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-2">Henüz Lite yazı yok</p>
             )}
           </div>
         </Section>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLogout, useGetUnreadNotificationCount, getGetUnreadNotificationCountQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +37,7 @@ function roleLabel(user: { role?: string } | null | undefined): string {
 
 export function HamburgerDrawer({ open, onClose }: DrawerProps) {
   const { user, isAdmin, isModerator } = useAuth();
+  const { isLite } = useDisplayMode();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const logout = useLogout();
@@ -128,10 +130,181 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
     { icon: <FileText className="og-hd-ico" />, label: "CV Oluştur", href: "/cv-olustur" },
     { icon: <Clock className="og-hd-ico" />, label: "Part Time", href: "/part-time" },
     { icon: <MessageSquare className="og-hd-ico" />, label: "Sohbet", href: "/sohbet", only: "auth" as const },
-    { icon: <Bell className="og-hd-ico" />, label: "Bildirimler", href: "/bildirimler", only: "auth" as const, badge: unreadCount },
+    ...(!isLite ? [{ icon: <Bell className="og-hd-ico" />, label: "Bildirimler", href: "/bildirimler", only: "auth" as const, badge: unreadCount }] : []),
     { icon: <Bookmark className="og-hd-ico" />, label: "Favoriler", href: "/favoriler", only: "auth" as const },
     { icon: <Headphones className="og-hd-ico" />, label: "Destek", href: "/destek" },
   ];
+
+  const drawerInner = (
+    <>
+      <button type="button" className="og-hd-close" onClick={onClose} aria-label="Menüyü kapat">
+        <X className="w-[18px] h-[18px]" strokeWidth={2.2} />
+      </button>
+
+      <div className="og-hd-scroll">
+        <div className="og-hd-profile">
+          <div className="og-hd-profile-mark" aria-hidden />
+          <div className="og-hd-avatar-wrap">
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt="" className="og-hd-avatar" />
+            ) : (
+              <div className="og-hd-avatar og-hd-avatar-fallback">
+                {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <span className="og-hd-avatar-badge" aria-hidden>
+              <Shield className="w-2.5 h-2.5" />
+            </span>
+          </div>
+          <div className="og-hd-profile-meta">
+            <div className="og-hd-name">{user?.username ?? "Misafir"}</div>
+            <div className="og-hd-role">{roleLabel(user)}</div>
+            {user ? (
+              <Link href={`/profil/${user.username}`} onClick={onClose} className="og-hd-profile-link">
+                Profili Gör <ChevronRight className="w-3 h-3" />
+              </Link>
+            ) : (
+              <Link href="/giris" onClick={onClose} className="og-hd-profile-link">
+                Giriş Yap <ChevronRight className="w-3 h-3" />
+              </Link>
+            )}
+          </div>
+        </div>
+
+        <nav className="og-hd-nav" aria-label="Menü bağlantıları">
+          {navItems.map((item) => {
+            if (item.only === "auth" && !user) return null;
+            return (
+              <Link key={item.href} href={item.href} onClick={onClose} className="og-hd-item">
+                <span className="og-hd-item-left">
+                  {item.icon}
+                  <span>{item.label}</span>
+                </span>
+                {item.badge && item.badge > 0 ? (
+                  <span className="og-hd-badge">{item.badge > 99 ? "99+" : item.badge}</span>
+                ) : null}
+              </Link>
+            );
+          })}
+
+          {isAdmin && (
+            <Link href="/admin" onClick={onClose} className="og-hd-item og-hd-item-admin">
+              <span className="og-hd-item-left">
+                <span className="og-hd-admin-ico" aria-hidden>
+                  <Shield className="og-hd-ico" />
+                  <Crown className="og-hd-admin-crown" />
+                </span>
+                <span>Admin Paneli</span>
+              </span>
+              <ChevronRight className="og-hd-chevron" />
+            </Link>
+          )}
+          {!isAdmin && isModerator && (
+            <Link href="/moderator" onClick={onClose} className="og-hd-item og-hd-item-admin">
+              <span className="og-hd-item-left">
+                <Shield className="og-hd-ico" />
+                <span>Moderatör Paneli</span>
+              </span>
+              <ChevronRight className="og-hd-chevron" />
+            </Link>
+          )}
+
+          {user ? (
+            <button type="button" onClick={() => void handleLogout()} className="og-hd-item og-hd-item-danger">
+              <span className="og-hd-item-left">
+                <LogOut className="og-hd-ico" />
+                <span>Çıkış Yap</span>
+              </span>
+            </button>
+          ) : (
+            <>
+              <Link href="/giris" onClick={onClose} className="og-hd-item">
+                <span className="og-hd-item-left">
+                  <User className="og-hd-ico" />
+                  <span>Giriş Yap</span>
+                </span>
+              </Link>
+              <Link href="/kayit" onClick={onClose} className="og-hd-item">
+                <span className="og-hd-item-left">
+                  <PlusCircle className="og-hd-ico" />
+                  <span>Kayıt Ol</span>
+                </span>
+              </Link>
+            </>
+          )}
+        </nav>
+
+        {team.length > 0 && (
+          <section className="og-hd-team" aria-label="Yönetim Ekibi">
+            <div className="og-hd-team-title">
+              <Users className="w-3 h-3" />
+              <span>YÖNETİM EKİBİ</span>
+              <span className="og-hd-team-line" />
+            </div>
+            <ul className="og-hd-team-list">
+              {team.map((m) => {
+                const href = m.profileUrl || "#";
+                const inner = (
+                  <>
+                    {m.avatarPath ? (
+                      <img src={m.avatarPath} alt="" className="og-hd-team-avatar" />
+                    ) : (
+                      <div className="og-hd-team-avatar og-hd-team-avatar-fallback" style={{ color: m.nameColor }}>
+                        {m.displayName.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="og-hd-team-meta">
+                      <span className="og-hd-team-name" style={{ color: m.nameColor }}>{m.displayName}</span>
+                      <span className="og-hd-team-badge" style={{ color: m.badgeColor, borderColor: `${m.badgeColor}55` }}>
+                        {m.roleName}
+                      </span>
+                    </div>
+                    {m.isOnlineVisible && <span className="og-hd-team-online" title="Çevrimiçi" />}
+                  </>
+                );
+                return (
+                  <li key={m.id}>
+                    {m.profileUrl ? (
+                      <Link href={href} onClick={onClose} className="og-hd-team-row">{inner}</Link>
+                    ) : (
+                      <div className="og-hd-team-row">{inner}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {teamTotal > 3 && (
+              <Link href="/destek" onClick={onClose} className="og-hd-team-more">
+                Tüm Ekibi Gör
+              </Link>
+            )}
+          </section>
+        )}
+
+        <footer className="og-hd-footer">
+          <div className="og-hd-footer-text">ÖZEL GÜVENLİK TOPLULUĞU</div>
+        </footer>
+      </div>
+    </>
+  );
+
+  /* Lite: animasyonsuz sabit menü — og-lite CSS framer-motion'ı bozuyor */
+  if (isLite) {
+    if (!open) return null;
+    return (
+      <>
+        <div className="og-hd-overlay og-hd-overlay--lite" onClick={onClose} aria-hidden />
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ana menü"
+          className="og-hd-drawer og-hd-drawer--lite"
+        >
+          {drawerInner}
+        </aside>
+      </>
+    );
+  }
 
   return (
     <AnimatePresence>
@@ -156,160 +329,7 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
             transition={{ type: "spring", damping: 30, stiffness: 320 }}
             className="og-hd-drawer"
           >
-            <button type="button" className="og-hd-close" onClick={onClose} aria-label="Menüyü kapat">
-              <X className="w-[18px] h-[18px]" strokeWidth={2.2} />
-            </button>
-
-            <div className="og-hd-scroll">
-              {/* Profil kartı */}
-              <div className="og-hd-profile">
-                <div className="og-hd-profile-mark" aria-hidden />
-                <div className="og-hd-avatar-wrap">
-                  {user?.avatarUrl ? (
-                    <img src={user.avatarUrl} alt="" className="og-hd-avatar" />
-                  ) : (
-                    <div className="og-hd-avatar og-hd-avatar-fallback">
-                      {(user?.username ?? "?").slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <span className="og-hd-avatar-badge" aria-hidden>
-                    <Shield className="w-2.5 h-2.5" />
-                  </span>
-                </div>
-                <div className="og-hd-profile-meta">
-                  <div className="og-hd-name">{user?.username ?? "Misafir"}</div>
-                  <div className="og-hd-role">{roleLabel(user)}</div>
-                  {user ? (
-                    <Link href={`/profil/${user.username}`} onClick={onClose} className="og-hd-profile-link">
-                      Profili Gör <ChevronRight className="w-3 h-3" />
-                    </Link>
-                  ) : (
-                    <Link href="/giris" onClick={onClose} className="og-hd-profile-link">
-                      Giriş Yap <ChevronRight className="w-3 h-3" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-
-              {/* Menü */}
-              <nav className="og-hd-nav" aria-label="Menü bağlantıları">
-                {navItems.map((item) => {
-                  if (item.only === "auth" && !user) return null;
-                  return (
-                    <Link key={item.href} href={item.href} onClick={onClose} className="og-hd-item">
-                      <span className="og-hd-item-left">
-                        {item.icon}
-                        <span>{item.label}</span>
-                      </span>
-                      {item.badge && item.badge > 0 ? (
-                        <span className="og-hd-badge">{item.badge > 99 ? "99+" : item.badge}</span>
-                      ) : null}
-                    </Link>
-                  );
-                })}
-
-                {isAdmin && (
-                  <Link href="/admin" onClick={onClose} className="og-hd-item og-hd-item-admin">
-                    <span className="og-hd-item-left">
-                      <span className="og-hd-admin-ico" aria-hidden>
-                        <Shield className="og-hd-ico" />
-                        <Crown className="og-hd-admin-crown" />
-                      </span>
-                      <span>Admin Paneli</span>
-                    </span>
-                    <ChevronRight className="og-hd-chevron" />
-                  </Link>
-                )}
-                {!isAdmin && isModerator && (
-                  <Link href="/moderator" onClick={onClose} className="og-hd-item og-hd-item-admin">
-                    <span className="og-hd-item-left">
-                      <Shield className="og-hd-ico" />
-                      <span>Moderatör Paneli</span>
-                    </span>
-                    <ChevronRight className="og-hd-chevron" />
-                  </Link>
-                )}
-
-                {user ? (
-                  <button type="button" onClick={() => void handleLogout()} className="og-hd-item og-hd-item-danger">
-                    <span className="og-hd-item-left">
-                      <LogOut className="og-hd-ico" />
-                      <span>Çıkış Yap</span>
-                    </span>
-                  </button>
-                ) : (
-                  <>
-                    <Link href="/giris" onClick={onClose} className="og-hd-item">
-                      <span className="og-hd-item-left">
-                        <User className="og-hd-ico" />
-                        <span>Giriş Yap</span>
-                      </span>
-                    </Link>
-                    <Link href="/kayit" onClick={onClose} className="og-hd-item">
-                      <span className="og-hd-item-left">
-                        <PlusCircle className="og-hd-ico" />
-                        <span>Kayıt Ol</span>
-                      </span>
-                    </Link>
-                  </>
-                )}
-              </nav>
-
-              {/* Yönetim Ekibi */}
-              {team.length > 0 && (
-                <section className="og-hd-team" aria-label="Yönetim Ekibi">
-                  <div className="og-hd-team-title">
-                    <Users className="w-3 h-3" />
-                    <span>YÖNETİM EKİBİ</span>
-                    <span className="og-hd-team-line" />
-                  </div>
-                  <ul className="og-hd-team-list">
-                    {team.map((m) => {
-                      const href = m.profileUrl || "#";
-                      const inner = (
-                        <>
-                          {m.avatarPath ? (
-                            <img src={m.avatarPath} alt="" className="og-hd-team-avatar" />
-                          ) : (
-                            <div className="og-hd-team-avatar og-hd-team-avatar-fallback" style={{ color: m.nameColor }}>
-                              {m.displayName.slice(0, 1).toUpperCase()}
-                            </div>
-                          )}
-                          <div className="og-hd-team-meta">
-                            <span className="og-hd-team-name" style={{ color: m.nameColor }}>{m.displayName}</span>
-                            <span className="og-hd-team-badge" style={{ color: m.badgeColor, borderColor: `${m.badgeColor}55` }}>
-                              {m.roleName}
-                            </span>
-                          </div>
-                          {m.isOnlineVisible && <span className="og-hd-team-online" title="Çevrimiçi" />}
-                        </>
-                      );
-                      return (
-                        <li key={m.id}>
-                          {m.profileUrl ? (
-                            <Link href={href} onClick={onClose} className="og-hd-team-row">{inner}</Link>
-                          ) : (
-                            <div className="og-hd-team-row">{inner}</div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {teamTotal > 3 && (
-                    <Link href="/destek" onClick={onClose} className="og-hd-team-more">
-                      Tüm Ekibi Gör
-                    </Link>
-                  )}
-                </section>
-              )}
-
-              <footer className="og-hd-footer">
-                <div className="og-hd-footer-shield" aria-hidden>
-                  <Shield className="w-5 h-5" />
-                </div>
-                <div className="og-hd-footer-text">ÖZEL GÜVENLİK TOPLULUĞU</div>
-              </footer>
-            </div>
+            {drawerInner}
           </motion.aside>
         </>
       )}

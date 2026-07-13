@@ -383,7 +383,7 @@ export default function ListingDetail() {
                 </div>
                 <div className="og-ld-company-box">
                   <div className="og-ld-company-logo">
-                    {logoUrl ? <img src={logoUrl} alt={companyName} /> : companyName.charAt(0)}
+                    <img src={logoUrl} alt={companyName} />
                   </div>
                   <div className="og-ld-company-name">{companyName}</div>
                   {ext?.companyVerified && (
@@ -482,7 +482,7 @@ export default function ListingDetail() {
               <h2 className="og-ld-side-title">Firma Bilgileri</h2>
               <div className="og-ld-side-company">
                 <div className="og-ld-side-logo">
-                  {logoUrl ? <img src={logoUrl} alt="" /> : companyName.charAt(0)}
+                  <img src={logoUrl} alt="" />
                 </div>
                 <div>
                   <div className="og-ld-side-company-name">

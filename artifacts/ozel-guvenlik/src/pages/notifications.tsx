@@ -13,11 +13,13 @@ import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { asArray, normalizeAppPath } from "@/lib/safe";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
 export default function Notifications() {
   const { user, isLoading: isAuthLoading } = useAuth();
+  const { isLite } = useDisplayMode();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, navigate] = useLocation();
@@ -62,6 +64,7 @@ export default function Notifications() {
 
   if (isAuthLoading) return null;
   if (!user) return <Redirect to="/giris" />;
+  if (isLite) return <Redirect to="/ilanlar" />;
 
   const getIcon = (type: string) => {
     switch (type) {

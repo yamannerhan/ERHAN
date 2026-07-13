@@ -4,8 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import "./index.css";
 import "./styles/lite-marquee.css";
+import "./styles/og-lite.css";
 import "./cmc-layout.css";
+import { initDisplayModeEarly, isLiteMode, markSlowBoot } from "./lib/display-mode";
+import { DisplayModeProvider } from "./contexts/DisplayModeContext";
 import { setAuthTokenGetter, setDeviceIdGetter } from "@workspace/api-client-react";
+
+const __OG_BOOT_START = typeof performance !== "undefined" ? performance.now() : 0;
+initDisplayModeEarly();
 
 declare global {
   interface Window {
@@ -87,7 +93,7 @@ function schedulePushRegistration() {
   setTimeout(run, 15_000);
 }
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !isLiteMode()) {
   schedulePushRegistration();
 }
 
@@ -136,10 +142,12 @@ const rootEl = document.getElementById("root");
 if (rootEl) {
   createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <BootSplashMarker />
-        <App />
-      </ErrorBoundary>
+      <DisplayModeProvider>
+        <ErrorBoundary>
+          <BootSplashMarker />
+          <App />
+        </ErrorBoundary>
+      </DisplayModeProvider>
     </QueryClientProvider>,
   );
 }

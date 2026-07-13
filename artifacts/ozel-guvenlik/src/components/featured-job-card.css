@@ -46,6 +46,20 @@
   }
 }
 
+/* Lite: 3 kart yan yana, elle kaydırma */
+.featured-rail--lite .featured-rail__track > .og-job {
+  flex: 0 0 calc((100cqw - 2 * var(--featured-gap)) / 3);
+  width: calc((100cqw - 2 * var(--featured-gap)) / 3);
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+.featured-rail--lite {
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
 .featured-rail__track > .og-job {
   flex-shrink: 0;
   margin: 0;
@@ -229,6 +243,18 @@
   .featured-rail-wrap .og-job--compact .og-job__btn-apply {
     min-height: 30px;
     font-size: 8.5px;
+  }
+  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__logo {
+    width: 36px;
+    height: 36px;
+  }
+  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__title {
+    font-size: 9.5px;
+  }
+  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__btn-detail,
+  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__btn-apply {
+    min-height: 28px;
+    font-size: 8px;
   }
 }
 

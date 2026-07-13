@@ -1,4 +1,5 @@
 import * as React from "react";
+import { isLiteMode } from "@/lib/display-mode";
 import { subscribeMediaQuery } from "@/lib/match-media-subscribe";
 
 const MOBILE_MAX = 768;
@@ -7,6 +8,7 @@ const MOBILE_MAX = 768;
 export function readGpuSafeMode(): boolean {
   try {
     if (typeof window === "undefined") return false;
+    if (isLiteMode()) return true;
     const narrow = window.innerWidth < MOBILE_MAX;
     const reducedMotion =
       typeof window.matchMedia === "function"

@@ -17,9 +17,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { displayCompany } from "@/lib/utils";
-import { getListingImage } from "@/lib/listing-image";
+import { resolveCompanyLogo } from "@/lib/brand-logo";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ProfileBadgesRow } from "@/components/chat-user-identity";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -65,6 +66,7 @@ const CARD_THEME_OPTIONS = [
 export default function Profile() {
   const { username } = useParams();
   const { user } = useAuth();
+  const { isLite } = useDisplayMode();
   const isMe = user?.username === username;
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -881,7 +883,8 @@ export default function Profile() {
               )}
             </AnimatePresence>
 
-            {/* Bildirim ayarları */}
+            {/* Bildirim ayarları — Lite modda kapalı */}
+            {!isLite && (
             <button onClick={() => setShowNotifSettings(v => !v)} className="og-setting-row">
               <div className="og-setting-icon"><Bell className="w-5 h-5" /></div>
               <div className="flex-1 min-w-0 text-left">
@@ -890,6 +893,8 @@ export default function Profile() {
               </div>
               <ChevronRight className={`w-4 h-4 og-text-muted transition-transform ${showNotifSettings ? "rotate-90" : ""}`} />
             </button>
+            )}
+            {!isLite && (
             <AnimatePresence>
               {showNotifSettings && (
                 <motion.div
@@ -902,6 +907,7 @@ export default function Profile() {
                 </motion.div>
               )}
             </AnimatePresence>
+            )}
           </section>
         )}
 
@@ -965,14 +971,13 @@ export default function Profile() {
             ) : (
               myShownListings.map((listing: any, i: number) => {
                 const company = displayCompany(listing.company) || "Firma";
-                const initials2 = company.split(/\s+/).map((w: string) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "G";
                 const isExpired = listing.status === "expired";
                 const isActive = listing.status === "active";
                 const daysLeft = listing.expiresAt
                   ? Math.ceil((new Date(listing.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
                   : null;
                 const armedLabel = detectArmed(listing.title, listing.description, listing.requirements);
-                const img = getListingImage(listing.title, listing.company, listing.companyLogoUrl, listing.id);
+                const img = resolveCompanyLogo(listing.companyLogoUrl);
                 return (
                   <motion.div
                     key={listing.id}
@@ -983,15 +988,7 @@ export default function Profile() {
                   >
                     <Link href={`/ilan/${listing.id}`} className="og-list-row">
                       <div className="og-list-img">
-                        {listing.companyLogoUrl ? (
-                          <img src={listing.companyLogoUrl} alt={company} className="w-full h-full object-cover" />
-                        ) : img ? (
-                          <img src={img} alt={listing.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full grid place-items-center text-base font-black text-slate-900 bg-gradient-to-br from-amber-300 to-amber-500">
-                            {initials2}
-                          </div>
-                        )}
+                        <img src={img} alt={company} className="w-full h-full object-contain p-1" />
                       </div>
 
                       <div className="flex-1 min-w-0">

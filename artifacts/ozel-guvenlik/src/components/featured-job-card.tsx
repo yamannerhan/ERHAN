@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, type CSSProperties } from "react";
 import { JobListingCard, type JobCardListing } from "@/components/job-listing-card";
 import { useLiteMarquee } from "@/hooks/use-lite-marquee";
 import "@/styles/lite-marquee.css";
@@ -11,18 +11,21 @@ type CarouselProps = {
   onNavigate?: () => void;
   savedIds?: Set<number>;
   onToggleSave?: (e: React.MouseEvent, id: number) => void;
+  /** Lite: elle kaydırma, 3 kart yan yana, otomatik kayma yok */
+  isLite?: boolean;
 };
 
-/** Normal ilan kartı — yan yana 2'li, soldan sağa sürekli kayar */
+/** Pro: otomatik kayan şerit | Lite: elle kaydırma, 3'lü sıra */
 export function FeaturedJobCarousel({
   listings,
   onNavigate,
   savedIds,
   onToggleSave,
+  isLite = false,
 }: CarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
-  const animated = listings.length > 1;
+  const animated = !isLite && listings.length > 1;
   const loopItems = animated ? [...listings, ...listings] : listings;
   const durationSec = Math.max(32, listings.length * 10);
 
@@ -41,8 +44,8 @@ export function FeaturedJobCarousel({
   }, [animated, listings.length, durationSec]);
 
   return (
-    <div className="featured-rail-wrap">
-      <div className={`featured-rail lite-marquee-viewport${animated ? " featured-rail--auto" : ""}`}>
+    <div className={`featured-rail-wrap${isLite ? " featured-rail-wrap--lite" : ""}`}>
+      <div className={`featured-rail lite-marquee-viewport${animated ? " featured-rail--auto" : ""}${isLite ? " featured-rail--lite" : ""}`}>
         <div
           ref={trackRef}
           className={`featured-rail__track${animated ? " lite-marquee-track" : ""}`}
@@ -72,4 +75,22 @@ export function FeaturedJobCarousel({
       )}
     </div>
   );
+}
+
+/** Her ziyarette farklı başlangıç sırası */
+export function rotateFeaturedListings<T extends { id: number }>(list: T[], offset: number): T[] {
+  if (list.length <= 1) return list;
+  const o = ((offset % list.length) + list.length) % list.length;
+  return [...list.slice(o), ...list.slice(0, o)];
+}
+
+export function nextFeaturedRotation(): number {
+  try {
+    const key = "og_featured_rot";
+    const n = (parseInt(sessionStorage.getItem(key) || "0", 10) + 1) % 1_000_000;
+    sessionStorage.setItem(key, String(n));
+    return n;
+  } catch {
+    return 0;
+  }
 }

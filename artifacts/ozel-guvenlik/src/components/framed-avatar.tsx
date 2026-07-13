@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { frameRoleLabel } from "@/lib/chat-cosmetics";
 
+import { isLiteMode } from "@/lib/display-mode";
+
 type Props = {
   src?: string | null;
   name: string;
@@ -23,7 +25,8 @@ export function FramedAvatar({
 }: Props) {
   const [failed, setFailed] = useState(false);
   const show = !!src && !failed;
-  const f = frame && frame !== "none" ? frame : null;
+  const lite = typeof window !== "undefined" && isLiteMode();
+  const f = lite ? null : (frame && frame !== "none" ? frame : null);
   const label = f ? frameRoleLabel(f, role) : null;
   const pad = f ? Math.max(3, Math.round(size * 0.12)) : 0;
 
@@ -69,6 +72,9 @@ export function FramedAvatar({
 }
 
 export function chatBubbleClass(style: string | null | undefined, isMe: boolean): string {
+  if (typeof window !== "undefined" && isLiteMode()) {
+    return `og-chat-bubble og-bubble-default${isMe ? " og-bubble-me" : ""}`;
+  }
   const key = style && style !== "default" ? style : "default";
   return `og-chat-bubble og-bubble-${key}${isMe ? " og-bubble-me" : ""}`;
 }

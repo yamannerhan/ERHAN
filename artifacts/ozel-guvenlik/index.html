@@ -16,6 +16,29 @@
         }
       })();
     </script>
+    <script>
+      // Düşük cihaz: paint öncesi lite sınıfı (kullanıcı Pro seçmediyse)
+      (function () {
+        try {
+          var pref = localStorage.getItem("og_display_mode");
+          if (pref === "full") return;
+          if (pref === "lite") {
+            document.documentElement.classList.add("og-lite");
+            return;
+          }
+          var lite = false;
+          if (localStorage.getItem("og_boot_slow") === "1") lite = true;
+          var mem = navigator.deviceMemory;
+          if (mem && mem <= 2) lite = true;
+          var cores = navigator.hardwareConcurrency;
+          if (cores && cores <= 2) lite = true;
+          if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) lite = true;
+          var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+          if (conn && (conn.saveData || conn.effectiveType === "slow-2g" || conn.effectiveType === "2g" || conn.effectiveType === "3g")) lite = true;
+          if (lite) document.documentElement.classList.add("og-lite");
+        } catch (e) {}
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />

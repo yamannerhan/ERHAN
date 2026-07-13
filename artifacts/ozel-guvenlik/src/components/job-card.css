@@ -112,6 +112,10 @@
   object-fit: contain;
   display: block;
 }
+.og-job__logo-brand {
+  padding: 2px;
+  background: transparent;
+}
 .og-job__logo-shield {
   width: 28px;
   height: 28px;
@@ -392,16 +396,41 @@
 }
 
 @media (max-width: 768px) {
+  /* Android scroll tear: düz katman, gölge/gradient/transform yok */
+  .og-list-row-wrap {
+    contain: layout paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+    transform: none !important;
+    will-change: auto;
+  }
   .og-job {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+    background: var(--og-job-bg-2);
+    box-shadow: none;
+    contain: layout paint;
+    isolation: auto;
   }
   .og-job:hover {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+    box-shadow: none;
+    transform: none;
   }
   .og-job.is-read {
     filter: none;
+    opacity: 0.72;
   }
+  .og-job__btn-detail,
+  .og-job__btn-apply {
+    transition: none;
+  }
+  .og-job__btn-apply {
+    background: var(--og-job-gold);
+    box-shadow: none;
+    filter: none;
+  }
+  .og-job__btn-apply:hover,
   .og-job__btn-apply:active {
-    transform: scale(0.98);
+    transform: none;
+    filter: none;
+    box-shadow: none;
   }
 }

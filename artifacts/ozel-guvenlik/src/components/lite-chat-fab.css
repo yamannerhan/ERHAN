@@ -1,0 +1,30 @@
+.og-lite-chat-fab {
+  position: fixed;
+  right: 1rem;
+  bottom: var(--chat-fab-bottom);
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffd54a 0%, #f5c518 100%);
+  color: #0a0e14;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.35);
+}
+
+.og-lite-chat-fab__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1280px) {
+  .og-lite-chat-fab {
+    bottom: 1.5rem;
+  }
+}

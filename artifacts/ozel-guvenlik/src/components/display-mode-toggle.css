@@ -1,0 +1,78 @@
+.og-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 197, 24, 0.28);
+  background: rgba(10, 14, 20, 0.85);
+}
+
+.og-mode-toggle__btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.og-mode-toggle__btn--active {
+  background: linear-gradient(180deg, #ffd54a 0%, #f5c518 100%);
+  color: #0a0e14;
+  box-shadow: 0 1px 6px rgba(245, 197, 24, 0.35);
+}
+
+.og-home-mode-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 2px;
+}
+
+.og-mode-switch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  background: #0f172a;
+  opacity: 0;
+  pointer-events: all;
+  transition: opacity 0.45s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.og-mode-switch-overlay__inner {
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.og-mode-switch-overlay__text {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #f5c518;
+}
+
+.og-mode-switch-overlay__sub {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.og-mode-switch-overlay.is-active {
+  opacity: 1;
+}
+
+html.og-lite .og-mode-switch-overlay {
+  transition-duration: 0.38s !important;
+}
+
+html.og-lite .og-home-ticker__static-text {
+  animation-duration: 0.35s !important;
+}

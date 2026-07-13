@@ -1,0 +1,208 @@
+/* ── Lite mod: düşük cihaz / otomatik sade görünüm ─────────── */
+
+html.og-lite *,
+html.og-lite *::before,
+html.og-lite *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html.og-lite .og-lite-hide {
+  display: none !important;
+}
+
+html.og-lite .og-banner-carousel {
+  display: none !important;
+}
+
+html.og-lite .featured-rail--auto {
+  overflow-x: auto !important;
+  scroll-snap-type: x mandatory !important;
+}
+
+html.og-lite .featured-rail--auto .lite-marquee-track {
+  animation: none !important;
+  transform: none !important;
+}
+
+html.og-lite .featured-rail__dots {
+  display: none !important;
+}
+
+html.og-lite .og-home-news-ticker {
+  animation: none !important;
+}
+
+html.og-lite .og-banner-carousel img {
+  image-rendering: auto;
+}
+
+html.og-lite .og-bottom-nav .og-bn-arch-line {
+  display: none;
+}
+
+/* Alt menü + FAB — lite: düz renk, tek gölge, blur yok */
+html.og-lite .og-bottom-nav .og-bn-arch {
+  display: none;
+}
+
+html.og-lite .og-bottom-nav-shell {
+  background: #0d1628 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32) !important;
+}
+
+html.og-lite .og-bn-fab {
+  isolation: auto !important;
+  background: #f5c518 !important;
+  border: 4px solid #091425 !important;
+  outline: 1px solid #c98f00 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.38) !important;
+  filter: none !important;
+}
+
+html.og-lite .og-bn-fab::before,
+html.og-lite .og-bn-fab::after {
+  display: none !important;
+  content: none !important;
+  filter: none !important;
+  box-shadow: none !important;
+}
+
+html.og-lite .og-bn-active-indicator {
+  background: #ffbe0b !important;
+  box-shadow: none !important;
+}
+
+/* Gölgeleri hafiflet — GPU yükünü azalt */
+html.og-lite .og-list-card,
+html.og-lite .og-lp-card-wrap,
+html.og-lite .og-pt-profile,
+html.og-lite .og-ld-card {
+  box-shadow: none !important;
+}
+
+/* ── Sohbet: düz metin, çerçevesiz, animasyonsuz ─────────── */
+html.og-lite .name-admin,
+html.og-lite .name-mod,
+html.og-lite .name-vip,
+html.og-lite .animate-rainbow,
+html.og-lite .badge-admin,
+html.og-lite .badge-mod,
+html.og-lite .badge-vip {
+  background: none !important;
+  -webkit-text-fill-color: #e2e8f0 !important;
+  color: #e2e8f0 !important;
+  animation: none !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+html.og-lite .cmc--admin .cmc-name,
+html.og-lite .cmc--moderator .cmc-name,
+html.og-lite .cmc--vip .cmc-name {
+  color: #e2e8f0 !important;
+}
+
+html.og-lite .og-avatar-frame:not(.og-frame-none) {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  border: 0 !important;
+}
+
+html.og-lite .og-avatar-frame:not(.og-frame-none) .og-avatar-frame-inner {
+  margin: 0 !important;
+}
+
+html.og-lite .og-frame-role-label {
+  display: none !important;
+}
+
+html.og-lite .og-chat-bubble,
+html.og-lite .cmc-bubble {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+  animation: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.og-lite .cmc--own .cmc-bubble {
+  border-color: rgba(245, 197, 24, 0.35) !important;
+}
+
+html.og-lite .og-lite-chat-plain .cmc-role-pill,
+html.og-lite .cmc-role-pill {
+  display: none !important;
+}
+
+/* Hamburger menü — lite animasyon kısıtından muaf */
+html.og-lite .og-hd-overlay--lite,
+html.og-lite .og-hd-drawer--lite,
+html.og-lite .og-hd-drawer--lite * {
+  animation-duration: unset !important;
+  animation-iteration-count: unset !important;
+  transition-duration: unset !important;
+}
+
+html.og-lite .og-hd-overlay--lite {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── Kaydırma: ilan kartları düz katman (ghost/tear önleme) ── */
+html.og-lite .og-list-row-wrap {
+  contain: layout paint !important;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+  transform: none !important;
+  will-change: auto !important;
+  isolation: auto !important;
+}
+
+html.og-lite .og-job {
+  background: #121620 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+  contain: layout paint;
+  isolation: auto !important;
+}
+
+html.og-lite .og-job.is-read {
+  filter: none !important;
+  opacity: 0.72;
+}
+
+html.og-lite .og-job__btn-detail,
+html.og-lite .og-job__btn-apply {
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+  transition: none !important;
+}
+
+html.og-lite .og-job__btn-apply {
+  background: #f5c518 !important;
+}
+
+html.og-lite .og-job__actions {
+  isolation: auto !important;
+}
+
+html.og-lite .og-header {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.og-lite .og-lite-chat-fab {
+  background: #f5c518 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.32) !important;
+  filter: none !important;
+}

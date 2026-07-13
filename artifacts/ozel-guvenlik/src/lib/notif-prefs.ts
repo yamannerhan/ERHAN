@@ -1,3 +1,5 @@
+import { isLiteMode } from "@/lib/display-mode";
+
 export type NotifPrefs = {
   notifListings: boolean;
   notifJoin: boolean;
@@ -83,6 +85,7 @@ export async function saveNotifPrefsApi(prefs: NotifPrefs): Promise<NotifPrefs> 
 }
 
 export function isChatSoundEnabled(): boolean {
+  if (liteDisablesNotif()) return false;
   try {
     return localStorage.getItem("og_chat_sound") !== "0";
   } catch {
@@ -91,6 +94,7 @@ export function isChatSoundEnabled(): boolean {
 }
 
 export function isNotifSoundEnabled(): boolean {
+  if (liteDisablesNotif()) return false;
   try {
     return localStorage.getItem("og_notif_sound") !== "0";
   } catch {
@@ -112,8 +116,12 @@ export function isAppForeground(): boolean {
   return document.visibilityState === "visible";
 }
 
+function liteDisablesNotif(): boolean {
+  return isLiteMode();
+}
+
 export function playChatMessageSound(): void {
-  if (!isChatSoundEnabled()) return;
+  if (liteDisablesNotif() || !isChatSoundEnabled()) return;
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;

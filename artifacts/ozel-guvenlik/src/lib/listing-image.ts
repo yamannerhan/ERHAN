@@ -1,3 +1,5 @@
+import { BRAND_LOGO_URL, isRealCompanyLogo } from "@/lib/brand-logo";
+
 const CATEGORIES: Array<{ keys: string[]; label: string; icon: string }> = [
   { keys: ["metro", "metrobüs", "marmaray", "istasyon"], label: "METRO", icon: "M" },
   { keys: ["avm", "alışveriş", "magaza", "mağaza", "market"], label: "AVM", icon: "A" },
@@ -141,16 +143,7 @@ function sceneIllustration(label: string, palette: string[], hash: number): stri
 }
 
 function isUploadedCustom(url?: string | null) {
-  if (!url) return false;
-  return (
-    url.startsWith("/api/listing-images/") ||
-    url.startsWith("/api/company-logos/") ||
-    url.startsWith("blob:") ||
-    url.startsWith("data:image/png") ||
-    url.startsWith("data:image/jpeg") ||
-    url.startsWith("data:image/webp") ||
-    url.startsWith("data:image/gif")
-  );
+  return isRealCompanyLogo(url);
 }
 
 function buildUniqueSvg(title: string, company: string, seed: string): string {
@@ -233,5 +226,5 @@ export function getListingImage(
   seed?: string | number | null,
 ): string {
   if (isUploadedCustom(customUrl)) return customUrl!;
-  return buildUniqueSvg(title, company, String(seed ?? `${title}|${company}`));
+  return BRAND_LOGO_URL;
 }

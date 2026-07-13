@@ -24,6 +24,15 @@ router.get("/announcements", async (_req, res): Promise<void> => {
   res.json(announcements.map(announcementJson));
 });
 
+/** Lite mod — sabit döngülü anasayfa şeridi */
+router.get("/announcements/lite-home", async (_req, res): Promise<void> => {
+  const announcements = await db.select().from(announcementsTable)
+    .where(and(eq(announcementsTable.isActive, true), eq(announcementsTable.placement, "lite_home")))
+    .orderBy(desc(announcementsTable.isPinned), desc(announcementsTable.createdAt));
+
+  res.json(announcements.map(announcementJson));
+});
+
 /** Sohbet kayan yazı + sabit duyuru (herkese açık) */
 router.get("/chat/announcements", async (_req, res): Promise<void> => {
   const settings = await db.select().from(adminSettingsTable).limit(1);
@@ -48,7 +57,7 @@ router.post("/announcements", authMiddleware, requireAdmin, async (req, res): Pr
     res.status(400).json({ error: "İçerik zorunludur" });
     return;
   }
-  const place = placement === "chat" ? "chat" : "home";
+  const place = placement === "chat" ? "chat" : placement === "lite_home" ? "lite_home" : "home";
   const [announcement] = await db.insert(announcementsTable).values({
     content: content.trim(),
     isActive: true,
@@ -79,7 +88,9 @@ router.patch("/announcements/:id", authMiddleware, requireAdmin, async (req, res
       await db.update(announcementsTable).set({ isPinned: false }).where(eq(announcementsTable.isPinned, true));
     }
   }
-  if (placement !== undefined) updates.placement = placement === "chat" ? "chat" : "home";
+  if (placement !== undefined) {
+    updates.placement = placement === "chat" ? "chat" : placement === "lite_home" ? "lite_home" : "home";
+  }
 
   const [announcement] = await db.update(announcementsTable).set(updates).where(eq(announcementsTable.id, id)).returning();
   if (!announcement) { res.status(404).json({ error: "Kayan yazı bulunamadı" }); return; }

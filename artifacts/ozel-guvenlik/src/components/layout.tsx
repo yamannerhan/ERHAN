@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy, useMemo } from "react";
 import { PwaInstall } from "./pwa-install";
 import { HamburgerDrawer } from "./hamburger-drawer";
+import { BrandLogo } from "./brand-logo";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useLocation } from "wouter";
 import {
   Bell, X, Heart, MessageCircle, Info, Briefcase, CheckCheck, ChevronRight, ChevronLeft,
-  Menu, Sun, Moon, ShieldCheck, Home as HomeIcon, Tag, Plus, Clock3, Search,
+  Menu, Sun, Moon, Home as HomeIcon, Tag, Plus, Clock3, Search,
   FileText, User as UserIcon, Bookmark,
 } from "lucide-react";
 import "./mobile-bottom-nav.css";
@@ -22,6 +23,9 @@ import { PushPermissionBanner } from "./push-permission-banner";
 import { playNotificationBeep, listenForPushSounds } from "@/lib/web-push";
 import { isBackgroundOnlyEnabled, isNotifSoundEnabled } from "@/lib/notif-prefs";
 import { asArray, normalizeAppPath } from "@/lib/safe";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
+import { LiteChatFab } from "./lite-chat-fab";
+import { countLiteUnread, findFirstLiteUnread } from "@/lib/lite-notifications";
 
 const ChatBubble = lazy(() => import("./chat-bubble").then((m) => ({ default: m.ChatBubble })));
 
@@ -150,6 +154,7 @@ export function Layout({
   headerVariant?: "default" | "listings" | "parttime" | "create-listing";
 }) {
   const { user, isAdmin, isModerator } = useAuth();
+  const { isLite } = useDisplayMode();
   const [location, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -160,32 +165,45 @@ export function Layout({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const { data: onlineData } = useGetOnlineCount({
-    query: { queryKey: getGetOnlineCountQueryKey(), refetchInterval: 60000 }
+    query: {
+      queryKey: getGetOnlineCountQueryKey(),
+      enabled: !isLite,
+      refetchInterval: isLite ? false : 60000,
+    }
   });
 
   const { data: unreadData, refetch: refetchUnread } = useGetUnreadNotificationCount({
     query: {
       queryKey: getGetUnreadNotificationCountQueryKey(),
-      enabled: !!user,
-      refetchInterval: 30000,
+      enabled: !!user && !isLite,
+      refetchInterval: isLite ? false : 30000,
     }
   });
-  const unreadCount = user ? (unreadData?.count ?? 0) : 0;
 
   const { data: notifData, refetch: refetchNotifs } = useGetNotifications({
     query: {
       queryKey: getGetNotificationsQueryKey(),
-      enabled: showPanel && !!user,
+      enabled: !!user && (showPanel || isLite),
+      refetchInterval: isLite && user ? 60000 : undefined,
     }
   });
   const notifications = asArray(notifData);
+  const liteUnreadCount = useMemo(() => countLiteUnread(notifications), [notifications]);
+  const unreadCount = user ? (isLite ? liteUnreadCount : (unreadData?.count ?? 0)) : 0;
 
   useEffect(() => {
+    if (isLite) return;
     return listenForPushSounds();
-  }, []);
+  }, [isLite]);
 
-  /* Socket.io — online count + push notifications + presence */
   useEffect(() => {
+    if (!isLite) return;
+    document.documentElement.classList.add("dark");
+  }, [isLite]);
+
+  /* Socket.io — online count + push notifications + presence (lite modda kapalı) */
+  useEffect(() => {
+    if (isLite) return;
     const socket = socketIo(window.location.origin, {
       path: "/ws",
       transports: ["websocket", "polling"],
@@ -227,7 +245,7 @@ export function Layout({
       socket.off("connect", authenticate);
       socket.disconnect();
     };
-  }, [refetchNotifs, refetchUnread, user]);
+  }, [refetchNotifs, refetchUnread, user, isLite]);
 
   /* Click outside notification panel */
   useEffect(() => {
@@ -241,8 +259,20 @@ export function Layout({
     return () => document.removeEventListener("mousedown", handler);
   }, [showPanel]);
 
-  const handleBellClick = () => {
+  const handleBellClick = async () => {
     if (!user) { navigate("/giris"); return; }
+    if (isLite) {
+      const result = await refetchNotifs();
+      const list = asArray(result.data);
+      const target = findFirstLiteUnread(list);
+      if (target?.linkUrl) {
+        if (target.id != null) await markNotificationRead(target.id);
+        navigate(normalizeAppPath(target.linkUrl, "/ilanlar"));
+      } else if (countLiteUnread(list) > 0) {
+        navigate("/ilanlar");
+      }
+      return;
+    }
     const next = !showPanel;
     setShowPanel(next);
     if (next) refetchNotifs();
@@ -298,8 +328,8 @@ export function Layout({
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <div className="w-8 h-8 shrink-0 rounded-lg og-logo-shield flex items-center justify-center">
-                  <ShieldCheck className="w-5 h-5 text-slate-900" />
+                <div className="w-[42px] h-[42px] shrink-0 rounded-lg og-logo-shield og-logo-shield--brand flex items-center justify-center overflow-hidden">
+                  <BrandLogo size={42} />
                 </div>
                 <div className="flex flex-col leading-none min-w-0">
                   <span className={`font-extrabold text-[15px] tracking-tight text-white${customHeader.titleLower ? " lowercase" : ""}`}>
@@ -328,15 +358,16 @@ export function Layout({
 
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 group min-w-0 shrink">
-            <div className="relative w-8 h-8 shrink-0 rounded-lg og-logo-shield flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5 text-slate-900" />
+            <div className="relative w-[42px] h-[42px] shrink-0 rounded-lg og-logo-shield og-logo-shield--brand flex items-center justify-center overflow-hidden">
+              <BrandLogo size={42} />
             </div>
             <div className="flex flex-col leading-none min-w-0">
-              <span className="font-extrabold text-sm tracking-tight whitespace-nowrap inline-flex items-baseline truncate">
+              <span className={`font-extrabold text-sm tracking-tight whitespace-nowrap inline-flex items-baseline truncate${!isLite ? " og-header-brand" : ""}`}>
                 <span className="og-text">Özel</span>
                 <span className="og-gold-gradient">Güvenlik</span>
                 <span className="og-logo-tld">.online</span>
               </span>
+              {!isLite && (
               <span className="flex items-center gap-1 text-[10px] mt-0.5">
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
@@ -344,6 +375,7 @@ export function Layout({
                 </span>
                 <span className="font-semibold text-green-400/90 tabular-nums">{onlineNum} Aktif</span>
               </span>
+              )}
             </div>
           </Link>
             </>
@@ -396,8 +428,8 @@ export function Layout({
 
             {!customHeader && <PwaInstall />}
 
-            {/* Theme toggle */}
-            {!customHeader && (
+            {/* Theme toggle — Lite modda kapalı */}
+            {!customHeader && !isLite && (
             <button
               type="button"
               onClick={toggleTheme}
@@ -429,7 +461,7 @@ export function Layout({
               </button>
 
               <AnimatePresence>
-                {showPanel && (
+                {showPanel && !isLite && (
                   <motion.div
                     initial={{ opacity: 0, y: -8, scaleY: 0.95 }}
                     animate={{ opacity: 1, y: 0, scaleY: 1 }}
@@ -545,10 +577,13 @@ export function Layout({
       </main>
 
       <MobileBottomNav />
-      <Suspense fallback={null}>
-        <ChatBubble />
-      </Suspense>
-      <PushPermissionBanner />
+      {!isLite && (
+        <Suspense fallback={null}>
+          <ChatBubble />
+        </Suspense>
+      )}
+      {isLite && <LiteChatFab />}
+      {!isLite && <PushPermissionBanner />}
     </div>
   );
 }

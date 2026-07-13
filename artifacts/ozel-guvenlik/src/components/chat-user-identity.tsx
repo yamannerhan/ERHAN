@@ -1,5 +1,6 @@
 import React from "react";
 import { Crown } from "lucide-react";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 export type ChatBadge = {
   id: number;
@@ -117,11 +118,22 @@ export function ChatUserIdentity({
   align?: "start" | "end";
   showMemberLabel?: boolean;
 }) {
+  const { isLite } = useDisplayMode();
   const role = msg.userRole ?? "user";
   const level = Math.max(1, msg.level ?? 1);
   const badges = msg.badges ?? [];
   const isStaff = role === "admin" || role === "moderator";
   const color = msg.userNameColor || (isStaff || msg.isVip ? undefined : levelColor(level));
+
+  if (isLite) {
+    return (
+      <div className={`flex flex-col gap-0.5 min-w-0 ${align === "end" ? "items-end" : "items-start"}`}>
+        <span className="text-[11px] font-semibold text-slate-200 leading-tight">{name}</span>
+        {role === "admin" && <span className="text-[9px] text-slate-400">Yönetici</span>}
+        {role === "moderator" && <span className="text-[9px] text-slate-400">Moderatör</span>}
+      </div>
+    );
+  }
 
   let nameClass = "text-[12px] font-extrabold leading-tight tracking-wide";
   if (role === "admin") nameClass += " name-admin";

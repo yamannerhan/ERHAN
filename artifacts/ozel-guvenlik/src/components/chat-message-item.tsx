@@ -3,6 +3,7 @@ import {
   CornerUpLeft, Pin, PinOff, Trash2, Bot, MoreHorizontal,
 } from "lucide-react";
 import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { resolveRankKey, type RankKey } from "@/components/rank-badge";
 import { ChatPollCard } from "@/components/chat-poll-card";
 import { Link } from "wouter";
@@ -120,6 +121,7 @@ export function ChatMessageItem({
   onActivate,
   memberStyle,
 }: Props) {
+  const { isLite } = useDisplayMode();
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -142,14 +144,14 @@ export function ChatMessageItem({
   });
   const level = msg.level != null && msg.level > 0 ? Math.max(1, msg.level) : null;
   const pill = ROLE_PILL[tone];
-  const showRolePill = pill.show;
+  const showRolePill = !isLite && pill.show;
   /* Korunan animasyon class'ları — silinmez / yeniden yazılmaz */
-  const nameAnimClass =
+  const nameAnimClass = isLite ? "" :
     tone === "admin" ? "name-admin" :
     tone === "moderator" ? "name-mod" :
     tone === "vip" ? "name-vip" :
     "";
-  const bubbleStyle =
+  const bubbleStyle = isLite ? null :
     msg.chatBubble ||
     (tone === "admin" ? "admin" : tone === "moderator" ? "mod" : msg.isVip ? "vip" : systemBot ? "neon" : null);
 
@@ -207,6 +209,7 @@ export function ChatMessageItem({
         bot ? "cmc--bot" : "",
         msg.isPinned ? "cmc--pinned" : "",
         active ? "cmc--active" : "",
+        isLite ? "og-lite-chat-plain" : "",
       ].filter(Boolean).join(" ")}
       onClick={() => onActivate?.()}
       data-rank={rank}

@@ -1,11 +1,12 @@
 import React from "react";
 import { Link } from "wouter";
 import {
-  MapPin, Clock, BadgeCheck, Bookmark, Eye, Send, Shield, Users, CalendarDays,
+  MapPin, Clock, BadgeCheck, Bookmark, Eye, Send, Users, CalendarDays,
 } from "lucide-react";
 import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
+import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -28,16 +29,7 @@ export type JobCardListing = {
 };
 
 function isRealLogo(url?: string | null): boolean {
-  if (!url) return false;
-  const u = url.trim();
-  if (!u || u.startsWith("data:image/svg")) return false;
-  if (/unsplash\.com|randomuser\.me|picsum/i.test(u)) return false;
-  return (
-    u.startsWith("/api/company-logos/") ||
-    u.startsWith("/api/listing-images/") ||
-    u.startsWith("data:image/") ||
-    u.startsWith("http")
-  );
+  return isRealCompanyLogo(url);
 }
 
 function splitCity(city: string): { city: string; district: string | null } {
@@ -110,8 +102,9 @@ export function JobListingCard({
   const blob = `${listing.title} ${listing.description ?? ""} ${listing.requirements ?? ""}`;
   const { city, district } = splitCity(listing.city);
   const location = district ? `${city} / ${district}` : city;
-  const logo = isRealLogo(listing.companyLogoUrl) ? listing.companyLogoUrl! : null;
-  const verified = !!listing.companyVerified || !!logo;
+  const logo = resolveCompanyLogo(listing.companyLogoUrl);
+  const hasOwnLogo = isRealLogo(listing.companyLogoUrl);
+  const verified = !!listing.companyVerified || hasOwnLogo;
   const shiftLabel = detectShift(blob);
   const genderLabel = detectGender(blob);
   const workType = (listing.workType || "").trim() || null;
@@ -146,14 +139,7 @@ export function JobListingCard({
       <div className="og-job__inner">
         <div className="og-job__head">
           <div className="og-job__logo">
-            {logo ? (
-              <img src={logo} alt="" loading="lazy" />
-            ) : (
-              <>
-                <Shield className="og-job__logo-shield" aria-hidden />
-                <span className="og-job__logo-label">FİRMA</span>
-              </>
-            )}
+            <img src={logo} alt="" loading="lazy" className={hasOwnLogo ? "" : "og-job__logo-brand"} />
           </div>
 
           <div className="og-job__main">
