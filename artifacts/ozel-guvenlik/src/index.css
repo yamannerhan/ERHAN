@@ -113,6 +113,30 @@
     max-width: 100%;
     height: auto;
   }
+
+  /* Uzun basma: Google Kaydet/Paylaş menüsü çıkmasın (inputlar hariç) */
+  html,
+  body,
+  #root {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [contenteditable=""],
+  .og-allow-select {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  img,
+  a {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+  }
 }
 
 /* â”€â”€ Ticker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
