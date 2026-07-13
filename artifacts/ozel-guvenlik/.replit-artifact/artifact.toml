@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "ÖzelGüvenlik.Online"
+version = "1.0.0"
+id = "artifacts/ozel-guvenlik"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23785
+
+[services.development]
+run = "pnpm --filter @workspace/ozel-guvenlik run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ozel-guvenlik", "run", "build" ]
+publicDir = "artifacts/ozel-guvenlik/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23785"
+BASE_PATH = "/"

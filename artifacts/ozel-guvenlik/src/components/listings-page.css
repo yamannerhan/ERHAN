@@ -1,0 +1,300 @@
+/* ── İlanlar sayfası — referans görsel ───────────────────────── */
+
+.og-listings-page {
+  --lp-bg: #0a0e14;
+  --lp-gold: #f5c518;
+  --lp-gold-2: #ffb800;
+  --lp-border: rgba(245, 197, 24, 0.28);
+  --lp-card-border: rgba(100, 116, 139, 0.32);
+  --lp-pill: rgba(255, 255, 255, 0.06);
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Arama */
+.og-lp-search {
+  position: relative;
+}
+.og-lp-search__ico {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  pointer-events: none;
+}
+.og-lp-search__input {
+  width: 100%;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 20, 30, 0.95);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 14px 0 40px;
+  outline: none;
+}
+.og-lp-search__input::placeholder {
+  color: #64748b;
+  font-weight: 500;
+}
+.og-lp-search__input:focus {
+  border-color: rgba(245, 197, 24, 0.45);
+}
+
+/* Filtre şeritleri */
+.og-lp-filters {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 2px;
+}
+.og-lp-filters::-webkit-scrollbar { display: none; }
+
+.og-lp-filters--loc {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.og-lp-filters--loc .og-lp-pills-scroll {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+  scrollbar-width: none;
+}
+.og-lp-filters--loc .og-lp-pills-scroll::-webkit-scrollbar { display: none; }
+
+.og-lp-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.og-lp-pill svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+.og-lp-pill--active {
+  background: linear-gradient(180deg, #ffd54a 0%, var(--lp-gold) 100%);
+  border-color: #f5c518;
+  color: #0a0e14;
+  box-shadow: 0 2px 10px rgba(245, 197, 24, 0.35);
+}
+.og-lp-pill--active svg {
+  color: #0a0e14;
+  opacity: 1;
+}
+
+.og-lp-sort {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* İstatistik kartları */
+.og-lp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.og-lp-stat {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(18, 22, 32, 0.98) 0%, rgba(10, 14, 20, 0.98) 100%);
+  padding: 10px 8px;
+  text-align: center;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.og-lp-stat__ico {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.og-lp-stat__ico svg {
+  width: 14px;
+  height: 14px;
+}
+.og-lp-stat__ico--gold {
+  background: rgba(245, 197, 24, 0.15);
+  color: var(--lp-gold);
+}
+.og-lp-stat__ico--green {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+.og-lp-stat__ico--red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+.og-lp-stat__val {
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1;
+  color: #f8fafc;
+  letter-spacing: -0.03em;
+}
+.og-lp-stat__lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1.2;
+}
+
+/* Bölüm başlıkları */
+.og-lp-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.og-lp-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+}
+.og-lp-section-title svg {
+  width: 14px;
+  height: 14px;
+  color: var(--lp-gold);
+}
+.og-lp-section-link {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lp-gold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.og-lp-section-meta {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+/* Kart rozetleri */
+.og-lp-card-wrap {
+  position: relative;
+}
+.og-lp-card-badges {
+  position: absolute;
+  top: 12px;
+  left: 98px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+.og-lp-badge {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 5px;
+  line-height: 1.2;
+}
+.og-lp-badge--new {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+.og-lp-badge--urgent {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+.og-lp-badge--featured {
+  background: rgba(245, 197, 24, 0.18);
+  color: var(--lp-gold);
+  border: 1px solid rgba(245, 197, 24, 0.4);
+}
+
+/* İlanlar sayfası kart ince ayar */
+.og-listings-page .og-job {
+  border-color: var(--lp-card-border);
+  border-radius: 16px;
+}
+.og-listings-page .og-list-row-wrap + .og-list-row-wrap {
+  margin-top: 10px !important;
+}
+.og-listings-page .featured-rail-wrap {
+  margin: 0 -2px;
+}
+
+.og-lp-featured-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8px;
+  font-weight: 800;
+  color: var(--lp-gold);
+  background: rgba(10, 14, 20, 0.88);
+  border: 1px solid rgba(245, 197, 24, 0.4);
+  border-radius: 6px;
+  padding: 2px 6px;
+  pointer-events: none;
+}
+
+.og-lp-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.og-lp-support {
+  margin-top: 4px;
+}
+
+@media (min-width: 640px) {
+  .og-listings-page {
+    padding: 0 16px 16px;
+    gap: 14px;
+  }
+}

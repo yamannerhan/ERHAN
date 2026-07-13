@@ -1,0 +1,32 @@
+/* Lite marquee — tek transform katmanı, will-change yok */
+.lite-marquee-viewport {
+  overflow: hidden;
+  width: 100%;
+}
+
+.lite-marquee-track {
+  animation: lite-marquee-slide var(--lite-marquee-duration, 48s) linear infinite;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+@media (hover: hover) {
+  .lite-marquee-track:hover {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes lite-marquee-slide {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lite-marquee-track {
+    animation-duration: 90s !important;
+  }
+}

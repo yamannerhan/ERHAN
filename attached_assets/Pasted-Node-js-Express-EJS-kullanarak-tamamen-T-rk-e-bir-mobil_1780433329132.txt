@@ -1,0 +1,389 @@
+Node.js + Express + EJS kullanarak tamamen Türkçe bir mobil web uygulaması oluştur.
+
+ÖNEMLİ:
+- Tüm arayüz Türkçe olacak.
+- Tüm menüler Türkçe olacak.
+- Admin paneli Türkçe olacak.
+- Sohbet sistemi Türkçe olacak.
+- Hata mesajları Türkçe olacak.
+- SEO başlıkları ve açıklamaları Türkçe olacak.
+- Kod altyapısı Node.js olacak.
+- React kullanma.
+- Next.js kullanma.
+- Vite kullanma.
+- Python kullanma.
+- PHP kullanma.
+- Laravel kullanma.
+- Django kullanma.
+- Sadece Node.js + Express + EJS kullan.
+- Proje Replit üzerinde çalışacak.
+- npm install ve npm start ile çalışmalı.
+
+PROJE ADI:
+ÖzelGüvenlik.Online tarzında iş ilanları ve topluluk platformu.
+
+AMAÇ:
+Türkiye’de özel güvenlik iş ilanlarını, duyuruları ve topluluk sohbetini tek platformda toplayan modern, mobil öncelikli, hızlı ve SEO uyumlu bir web uygulaması yap.
+
+TEKNOLOJİ:
+- Node.js
+- Express.js
+- EJS template engine
+- Tailwind CSS veya normal CSS
+- Socket.io
+- bcrypt
+- express-session
+- dotenv
+- helmet
+- express-rate-limit
+- SQLite kullan
+- Veritabanı kolay taşınabilir olsun
+
+REPLIT UYUMLULUĞU:
+Proje şu komutlarla çalışmalı:
+
+npm install
+npm start
+
+Port:
+process.env.PORT || 3000
+
+package.json içinde şunlar olsun:
+"start": "node server.js"
+"dev": "nodemon server.js"
+
+DOSYA YAPISI:
+- server.js
+- package.json
+- .env.example
+- /views
+- /views/pages
+- /views/admin
+- /views/partials
+- /public
+- /public/css
+- /public/js
+- /public/icons
+- /routes
+- /controllers
+- /middleware
+- /database
+- /utils
+
+TASARIM:
+Modern mobil uygulama gibi görünsün.
+Klasik masaüstü web sitesi gibi olmasın.
+Mobil öncelikli tasarla.
+Dark theme kullan.
+Glassmorphism kullan.
+Gradient butonlar kullan.
+Yuvarlak kartlar kullan.
+Yumuşak gölgeler kullan.
+Animasyonlu geçişler kullan.
+Alt menü mobil uygulama gibi sabit olsun.
+
+RENKLER:
+- #0F172A
+- #111827
+- #1E293B
+- #4F46E5
+- #7C3AED
+- #06B6D4
+
+GENEL HİS:
+Instagram + Telegram + TikTok karışımı modern bir mobil web uygulaması gibi olsun.
+
+SAYFALAR:
+1. Ana Sayfa
+2. İlanlar
+3. İlan Detay
+4. Canlı Sohbet
+5. Giriş Yap
+6. Kayıt Ol
+7. Profil
+8. Bildirimler
+9. Admin Giriş
+10. Admin Panel
+11. Admin İlan Yönetimi
+12. Admin Kullanıcı Yönetimi
+13. Admin Sohbet Yönetimi
+14. Blog
+15. Blog Detay
+
+MOBİL ALT MENÜ:
+Tüm kullanıcı sayfalarında sabit alt menü olsun.
+
+Menüler:
+- Ana Sayfa
+- İlanlar
+- Sohbet
+- Bildirimler
+- Profil
+
+Aktif menü animasyonlu ve gradient renkli görünsün.
+
+ANA SAYFA:
+Üst bölümde:
+- Logo
+- Bildirim ikonu
+- Arama kutusu
+- Canlı online kullanıcı sayısı
+
+Kayan duyuru bandı olsun.
+
+Örnek kayan duyurular:
+- Bugün 127 yeni iş ilanı eklendi
+- Canlı sohbet odasında 342 kişi aktif
+- Admin duyurularını takip etmeyi unutmayın
+- Yeni özel güvenlik ilanları yayında
+- Kocaeli, İstanbul ve Ankara ilanları güncellendi
+
+ANA SAYFA ZAMAN AKIŞI:
+Facebook tarzı zaman akışı olsun.
+Paylaşılan ilanlar direkt ana sayfada görünsün.
+
+Her ilan kartında:
+- Firma logosu
+- İlan başlığı
+- Şehir
+- Maaş
+- Yayın tarihi
+- Kaynak
+- Görüntülenme sayısı
+- Başvur butonu
+- Paylaş butonu
+- Favori butonu
+
+Kartlar animasyonlu açılsın.
+Daha fazla yükle butonu olsun.
+
+İLAN DETAY SAYFASI:
+- Başlık
+- Firma adı
+- Şehir
+- Maaş
+- Çalışma tipi
+- Açıklama
+- Aranan şartlar
+- Başvuru butonu
+- Kaynak linki
+- Benzer ilanlar
+- SEO uyumlu başlık ve açıklama
+
+CANLI SOHBET:
+Socket.io kullan.
+Siteye giriş yapmayan kullanıcılar sohbet mesajlarını görebilsin.
+Giriş yapmayan kullanıcılar mesaj yazamasın.
+Mesaj yazmak isteyince şu uyarı çıksın:
+"Mesaj yazmak için giriş yapmalısınız."
+
+Kayıt olan kullanıcılar mesaj yazabilsin.
+
+SOHBET EKRANI:
+Üstte şunlar görünsün:
+- Aktif kullanıcı sayısı
+- Online adminler
+- Saat
+- Tarih
+- Gece/Gündüz hatırlatması
+
+Örnek:
+☀️ Günaydın Saat: 08:12
+🌙 İyi Geceler Saat: 23:45
+
+SOHBET KURALLARI:
+Sohbet ekranında sabit bir kural kutusu olsun.
+
+Metin:
+📢 Sohbet Kuralları
+- Hakaret yasaktır.
+- Küfür yasaktır.
+- Cinsel içerik yasaktır.
+- Porno içerik yasaktır.
+- Irkçılık yasaktır.
+- Reklam yapmak yasaktır.
+- Spam yapmak yasaktır.
+- Kuralları ihlal eden kullanıcılar geçici veya kalıcı olarak yasaklanabilir.
+
+Bu kural kutusu her zaman görünür olsun.
+
+TÜM SAYFALARDA SOHBET BALONU:
+Tüm sayfalarda sağ altta sohbet balonu olsun.
+Giriş yapmayan kullanıcılar sohbet balonuna tıklayınca mesajları görebilsin.
+Ama mesaj yazamasın.
+Mesaj yazmak isterse giriş/kayıt uyarısı çıksın.
+Kayıt olan kullanıcı mesaj yazabilsin.
+
+SPAM KORUMA:
+Admin panelinden yönetilebilir spam koruma sistemi ekle.
+
+Özellikler:
+- Kelime filtresi
+- Küfür filtresi
+- Link filtresi
+- Flood koruması
+- Bot koruması
+- IP engelleme
+- Kullanıcı susturma
+- Geçici ban
+- Kalıcı ban
+- Mesaj silme
+- Mesaj düzenleme
+- Sohbet kilitleme
+
+YASAKLI İÇERİK FİLTRESİ:
+Aşağıdaki içerikler engellensin veya uyarı versin:
+- Küfür
+- Hakaret
+- Cinsel içerik
+- Porno içerik
+- Irkçı ifadeler
+- Spam link
+- Tekrarlanan mesaj
+
+AUTH SİSTEMİ:
+- Kayıt ol
+- Giriş yap
+- Çıkış yap
+- Şifre bcrypt ile hashlenmeli
+- Session sistemi kullanılmalı
+- Roller olmalı:
+  - user
+  - moderator
+  - admin
+
+ADMİN PANELİ:
+Profesyonel dashboard oluştur.
+
+Kartlar:
+- Toplam Üye
+- Online Kullanıcı
+- Toplam İlan
+- Bugünkü İlanlar
+- Toplam Mesaj
+- Banlı Kullanıcılar
+- Onay Bekleyen İlanlar
+- Şikayet Edilen Mesajlar
+
+ADMİN İLAN YÖNETİMİ:
+- İlan ekleme
+- İlan düzenleme
+- İlan silme
+- İlan onaylama
+- İlan reddetme
+- Öne çıkarma
+
+ADMİN KULLANICI YÖNETİMİ:
+- Kullanıcıları listele
+- Kullanıcı banla
+- Geçici ban
+- Kalıcı ban
+- Kullanıcı sustur
+- Moderatör yap
+- Admin yap
+- Rol kaldır
+
+ADMİN SOHBET YÖNETİMİ:
+- Mesajları görüntüle
+- Mesaj sil
+- Mesaj düzenle
+- Mesaj sabitle
+- Sohbeti kilitle
+- Sohbet kilidini aç
+- Yasaklı kelime ekle
+- Yasaklı kelime sil
+- IP ban ekle
+- IP ban kaldır
+
+BİLDİRİM SİSTEMİ:
+Gerçek zamanlı bildirim sistemi olsun.
+
+Örnek bildirimler:
+- Yeni ilan geldi
+- Yeni mesaj geldi
+- Admin duyuru yaptı
+- Sistem bildirimi
+- Başvurunuz alındı
+
+SEO:
+Express EJS ile server-rendered SEO uyumlu sayfalar oluştur.
+
+Her sayfada:
+- Dinamik title
+- Dinamik meta description
+- Open Graph
+- Twitter Card
+- Canonical URL
+- JSON-LD
+- Breadcrumb schema
+
+İlan detay sayfalarında JobPosting schema kullan.
+
+Blog detay sayfalarında BlogPosting schema kullan.
+
+Şu rotaları oluştur:
+- /robots.txt
+- /sitemap.xml
+
+SEO dostu URL yapısı:
+- /is-ilani/istanbul-ozel-guvenlik-gorevlisi
+- /is-ilani/ankara-silahli-guvenlik
+- /is-ilani/kocaeli-fabrika-guvenlik
+- /blog/ozel-guvenlik-nasil-olunur
+
+BLOG SİSTEMİ:
+SEO için blog sistemi ekle.
+
+Blog kategorileri:
+- İş İlanları
+- Özel Güvenlik Haberleri
+- Güvenlik Sertifikaları
+- Silahlı Güvenlik
+- İş Başvurusu Rehberi
+- Mülakat Teknikleri
+
+PWA:
+Mobil uygulama gibi çalışması için PWA ekle.
+
+Oluştur:
+- manifest.json
+- service-worker.js
+- offline fallback sayfası
+- mobil ikonlar için placeholder
+
+DEMO VERİ:
+Uygulama ilk açıldığında demo veriler olsun.
+
+En az:
+- 10 iş ilanı
+- 5 blog yazısı
+- 5 demo kullanıcı
+- 1 admin kullanıcı
+- 20 demo sohbet mesajı
+- 5 demo bildirim
+
+Demo admin:
+E-posta: admin@ozelguvenlik.online
+Şifre: Admin12345
+
+GÜVENLİK:
+- Helmet kullan
+- Rate limit kullan
+- Form validasyonu yap
+- XSS koruması ekle
+- Şifreleri hashle
+- Admin rotalarını koru
+- Kullanıcı giriş kontrolü yap
+
+ÖNEMLİ:
+İlk sürüm sadece tasarım olmasın.
+Çalışan bir uygulama olsun.
+Çalışan route sistemi olsun.
+Çalışan giriş/kayıt sistemi olsun.
+Çalışan admin paneli olsun.
+Çalışan ilan listeleme sistemi olsun.
+Çalışan sohbet sistemi olsun.
+Çalışan SEO sayfaları olsun.
+
+SONUÇ:
+ tamamen Türkçe, Node.js + Express + EJS tabanlı, mobil öncelikli, modern, animasyonlu, SEO uyumlu, canlı sohbetli, admin panelli özel güvenlik iş ilanları platformu oluştur.

@@ -1,0 +1,19 @@
+[phases.setup]
+nixPkgs = ["nodejs_22", "chromium"]
+cmds = ["corepack enable", "corepack prepare pnpm@9.15.0 --activate"]
+
+[phases.install]
+cmds = ["pnpm install --no-frozen-lockfile"]
+
+[phases.build]
+cmds = ["pnpm -r --if-present run build"]
+
+[start]
+cmd = "node scripts/start.mjs"
+
+[variables]
+BASE_PATH = "/"
+NODE_ENV = "production"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+PUPPETEER_SKIP_DOWNLOAD = "true"
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"

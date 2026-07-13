@@ -1,0 +1,2 @@
+- [ÖzelGüvenlik PWA & dual chat](ozelguvenlik-pwa-and-chat.md) — dev URL sleeps → stale PWA (fix = deploy); chat lives in chat.tsx page AND chat-bubble.tsx widget, keep both in sync.
+- [Listing parsing & gender field](ozelguvenlik-listing-parsing.md) — salary/gender parsing in lib/job-parsing.ts (3 ingestion paths); no gender column → stored as "Cinsiyet:" line in requirements.

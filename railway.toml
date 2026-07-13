@@ -1,0 +1,8 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node scripts/start.mjs"
+restartPolicyType = "ON_FAILURE"
+# healthcheck bilerek kapali — once API ayaga kalksin; Chromium OOM / yavas boot sorununu onler

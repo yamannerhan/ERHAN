@@ -1,0 +1,212 @@
+/* ── Canlı Destek kutusu (öne çıkan ilanların altı) ─────────── */
+
+.og-support-box {
+  position: relative;
+  width: 100%;
+  height: 66px;
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 185, 0, 0.7);
+  border-radius: 22px;
+  background: linear-gradient(
+    180deg,
+    rgba(20, 31, 48, 0.98) 0%,
+    rgba(5, 15, 31, 0.98) 100%
+  );
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 14px rgba(255, 184, 0, 0.06);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+@media (min-width: 1280px) {
+  .og-support-box {
+    display: none !important;
+  }
+}
+
+@media (hover: hover) {
+  .og-support-box:hover {
+    border-color: rgba(255, 190, 0, 0.88);
+    box-shadow:
+      0 8px 26px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 0 18px rgba(255, 184, 0, 0.1);
+  }
+}
+
+.og-support-box:active {
+  transform: scale(0.985);
+}
+
+.og-support-box:focus-visible {
+  outline: 2px solid rgba(255, 190, 0, 0.85);
+  outline-offset: 2px;
+}
+
+.og-support-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: radial-gradient(
+    circle at 35% 25%,
+    rgba(255, 195, 35, 0.16),
+    rgba(8, 18, 32, 0.96) 68%
+  );
+  border: 1px solid rgba(255, 190, 0, 0.75);
+  box-shadow:
+    0 0 14px rgba(255, 185, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.og-support-icon svg {
+  width: 23px;
+  height: 23px;
+  color: #ffbe0b;
+  flex-shrink: 0;
+}
+
+.og-support-copy {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.og-support-title {
+  display: block;
+  font-size: clamp(13px, 3.8vw, 15px);
+  font-weight: 650;
+  color: #f5f7fb;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.og-support-description {
+  display: block;
+  font-size: clamp(10.5px, 3vw, 12px);
+  font-weight: 400;
+  color: #aeb8c7;
+  line-height: 1.3;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.og-support-cta {
+  height: 40px;
+  padding: 0 15px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(19, 31, 47, 0.98),
+    rgba(7, 16, 29, 0.98)
+  );
+  border: 1px solid rgba(255, 190, 0, 0.85);
+  color: #ffc21a;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 0 10px rgba(255, 185, 0, 0.08);
+  pointer-events: none;
+}
+
+.og-support-cta svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.og-support-cta__short {
+  display: none;
+}
+
+html:not(.dark) .og-support-box {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.98) 0%,
+    rgba(226, 232, 240, 0.98) 100%
+  );
+  border-color: rgba(217, 147, 0, 0.55);
+}
+
+html:not(.dark) .og-support-title {
+  color: #0f172a;
+}
+
+html:not(.dark) .og-support-description {
+  color: #64748b;
+}
+
+html:not(.dark) .og-support-cta {
+  background: linear-gradient(180deg, #f8fafc, #e2e8f0);
+  color: #b45309;
+}
+
+@media (max-width: 768px) {
+  .og-support-box {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (max-width: 350px) {
+  .og-support-box {
+    gap: 8px;
+    padding: 8px 9px;
+    height: 60px;
+    min-height: 60px;
+  }
+
+  .og-support-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .og-support-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .og-support-cta {
+    height: 36px;
+    padding: 0 11px;
+    font-size: 12px;
+  }
+
+  .og-support-cta__long {
+    display: none;
+  }
+
+  .og-support-cta__short {
+    display: inline;
+  }
+}
