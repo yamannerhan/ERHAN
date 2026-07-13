@@ -151,7 +151,7 @@ function PartTimeProfileCard({ w, isAdmin, onFeature, onBan, onDelete, isMine }:
       </div>
 
       {(isAdmin || isMine) && (
-        <div className="absolute -bottom-2 left-3 right-3 flex gap-1.5 flex-wrap">
+        <div className="og-pt-profile__admin">
           {isAdmin && (
             <>
               <button type="button" onClick={() => onFeature?.(w.id)} className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${w.isFeatured ? "bg-amber-400 text-slate-900" : "bg-slate-900 text-amber-400 border border-amber-400/40"}`}>
