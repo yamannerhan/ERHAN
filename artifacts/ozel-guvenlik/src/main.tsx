@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
@@ -10,32 +10,25 @@ import { setAuthTokenGetter, setDeviceIdGetter } from "@workspace/api-client-rea
 declare global {
   interface Window {
     __OG_BOOT_OK?: boolean;
-    __OG_BOOT_FAILED?: boolean;
+    _ogClearBootSplash?: () => void;
   }
 }
 
-function markBootOk() {
+function clearBootSplash() {
   try {
     window.__OG_BOOT_OK = true;
-    const loader = document.getElementById("_loader");
-    const recovery = document.getElementById("_recovery");
-    const slow = document.getElementById("_slow-hint");
-    if (loader) loader.style.display = "none";
-    if (recovery) recovery.style.display = "none";
-    if (slow) slow.style.display = "none";
+    const splash = document.getElementById("_boot-splash");
+    if (splash) splash.remove();
   } catch { /* ignore */ }
 }
 
-function markBootFailed() {
-  try {
-    window.__OG_BOOT_FAILED = true;
-    const loader = document.getElementById("_loader");
-    const recovery = document.getElementById("_recovery");
-    const slow = document.getElementById("_slow-hint");
-    if (loader) loader.style.display = "none";
-    if (slow) slow.style.display = "none";
-    if (recovery) recovery.style.display = "block";
-  } catch { /* ignore */ }
+window._ogClearBootSplash = clearBootSplash;
+
+function BootSplashMarker() {
+  useEffect(() => {
+    clearBootSplash();
+  }, []);
+  return null;
 }
 
 function safeGetToken(): string | null {
@@ -84,23 +77,14 @@ const queryClient = new QueryClient({
   },
 });
 
-/** Web Push — uygulama açıldıktan sonra, düşük RAM cihazlarda boot'u bloklamasın */
 function schedulePushRegistration() {
   const run = () => {
     void import("./lib/web-push")
       .then((m) => m.registerPushServiceWorker())
-      .then((reg) => {
-        if (reg) {
-          return import("./lib/web-push").then((m) => m.ensurePushSubscriptionQuiet());
-        }
-      })
+      .then((reg) => (reg ? import("./lib/web-push").then((m) => m.ensurePushSubscriptionQuiet()) : undefined))
       .catch(() => {});
   };
-  if ("requestIdleCallback" in window) {
-    requestIdleCallback(run, { timeout: 20_000 });
-  } else {
-    setTimeout(run, 12_000);
-  }
+  setTimeout(run, 15_000);
 }
 
 if ("serviceWorker" in navigator) {
@@ -109,18 +93,15 @@ if ("serviceWorker" in navigator) {
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean; message: string }
+  { hasError: boolean }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, message: "" };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: unknown) {
-    return {
-      hasError: true,
-      message: error instanceof Error ? error.message : String(error),
-    };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo) {
@@ -129,45 +110,21 @@ class ErrorBoundary extends React.Component<
     } catch { /* ignore */ }
   }
 
-  private recoverHome = () => {
-    this.setState({ hasError: false, message: "" });
-    try {
-      window.location.assign("/");
-    } catch {
-      window.location.reload();
-    }
-  };
-
-  private recoverReload = () => {
-    this.setState({ hasError: false, message: "" });
-    window.location.reload();
-  };
-
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0F172A", color: "#e2e8f0", fontFamily: "system-ui, sans-serif", padding: "2rem", textAlign: "center", gap: "0.75rem" }}>
-          <div style={{ fontSize: "2rem" }}>⚠</div>
           <div style={{ fontSize: "1.05rem", fontWeight: 600 }}>Bir sorun oluştu</div>
-          <div style={{ fontSize: "0.8rem", color: "#94a3b8", maxWidth: 340, lineHeight: 1.45 }}>
-            Sayfa beklenmedik şekilde durdu. Ana sayfaya dönüp devam edebilirsiniz.
-          </div>
-          <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
-            <button
-              type="button"
-              onClick={this.recoverHome}
-              style={{ padding: "0.55rem 1.1rem", borderRadius: 10, border: "none", background: "#f5c518", color: "#0a0e1a", fontWeight: 700, cursor: "pointer" }}
-            >
-              Ana Sayfa
-            </button>
-            <button
-              type="button"
-              onClick={this.recoverReload}
-              style={{ padding: "0.55rem 1.1rem", borderRadius: 10, border: "1px solid rgba(255,255,255,0.2)", background: "transparent", color: "#e2e8f0", fontWeight: 600, cursor: "pointer" }}
-            >
-              Yenile
-            </button>
-          </div>
+          <p style={{ fontSize: "0.8rem", color: "#94a3b8", maxWidth: 340, lineHeight: 1.45 }}>
+            Sayfa yüklenirken hata oluştu. Yenileyip tekrar deneyin.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{ padding: "0.55rem 1.1rem", borderRadius: 10, border: "none", background: "#f5c518", color: "#0a0e1a", fontWeight: 700, cursor: "pointer" }}
+          >
+            Yenile
+          </button>
         </div>
       );
     }
@@ -176,20 +133,13 @@ class ErrorBoundary extends React.Component<
 }
 
 const rootEl = document.getElementById("root");
-if (!rootEl) {
-  markBootFailed();
-} else {
-  try {
-    markBootOk();
-    createRoot(rootEl).render(
-      <QueryClientProvider client={queryClient}>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
-      </QueryClientProvider>,
-    );
-  } catch (e) {
-    try { console.error("[OG boot]", e); } catch { /* ignore */ }
-    markBootFailed();
-  }
+if (rootEl) {
+  createRoot(rootEl).render(
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <BootSplashMarker />
+        <App />
+      </ErrorBoundary>
+    </QueryClientProvider>,
+  );
 }

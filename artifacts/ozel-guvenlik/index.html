@@ -77,36 +77,15 @@
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"></noscript>
   </head>
   <body>
-    <div id="root"><div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#0F172A;flex-direction:column;gap:16px;padding:20px;text-align:center;color:#F1F5F9;font-family:system-ui,-apple-system,sans-serif"><div id="_loader" style="width:40px;height:40px;border:3px solid rgba(245,197,24,0.25);border-top-color:#f5c518;border-radius:50%;animation:_sp 0.8s linear infinite"></div><p id="_slow-hint" style="display:none;margin:0;font-size:13px;color:#94A3B8;max-width:300px;line-height:1.5">Yükleniyor… Düşük bellekli cihazlarda bu biraz sürebilir, lütfen bekleyin.</p><div id="_recovery" style="display:none;max-width:340px"><h2 style="font-size:18px;font-weight:700;margin:0 0 8px">Sayfa yüklenemedi</h2><p style="font-size:13px;color:#94A3B8;margin:0 0 16px;line-height:1.5">Bağlantı veya tarayıcı önbelleği sorun çıkarmış olabilir. Temizleyip yeniden deneyin.</p><button onclick="window._forceRecover()" style="background:linear-gradient(135deg,#f5c518,#d4a017);color:#0a0e14;border:0;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer">Sayfayı Yenile ve Temizle</button></div><style>@keyframes _sp{to{transform:rotate(360deg)}}</style></div></div>
+    <div id="root">
+      <div id="_boot-splash" style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#0F172A;flex-direction:column;gap:12px;padding:20px;text-align:center;color:#F1F5F9;font-family:system-ui,-apple-system,sans-serif">
+        <div style="width:36px;height:36px;border:3px solid rgba(245,197,24,0.25);border-top-color:#f5c518;border-radius:50%;animation:_ogsp 0.9s linear infinite"></div>
+        <p style="margin:0;font-size:13px;color:#94A3B8">Yükleniyor…</p>
+        <style>@keyframes _ogsp{to{transform:rotate(360deg)}}</style>
+      </div>
+    </div>
     <script>
       window.__OG_BOOT_OK = false;
-      window.__OG_BOOT_FAILED = false;
-
-      function _ogShowRecovery() {
-        if (window.__OG_BOOT_OK) return;
-        var loader = document.getElementById("_loader");
-        var rec = document.getElementById("_recovery");
-        var slow = document.getElementById("_slow-hint");
-        if (loader) loader.style.display = "none";
-        if (slow) slow.style.display = "none";
-        if (rec) rec.style.display = "block";
-      }
-
-      window.addEventListener("error", function(e) {
-        try {
-          var src = e.filename || (e.target && e.target.src) || "";
-          if (src && (String(src).indexOf("/assets/") !== -1 || String(src).indexOf(".js") !== -1)) {
-            window.__OG_BOOT_FAILED = true;
-            _ogShowRecovery();
-          }
-        } catch (_) {}
-      }, true);
-
-      window.addEventListener("unhandledrejection", function(e) {
-        if (!window.__OG_BOOT_OK && e && e.reason) {
-          try { console.error("[OG boot]", e.reason); } catch (_) {}
-        }
-      });
       window._forceRecover = function() {
         try {
           if ("serviceWorker" in navigator) {
@@ -129,26 +108,9 @@
             window.location.replace(window.location.pathname + "?_r=" + Date.now());
           }
         } catch (e) {
-          window.location.reload(true);
+          window.location.reload();
         }
       };
-      setTimeout(function() {
-        if (window.__OG_BOOT_OK) return;
-        var slow = document.getElementById("_slow-hint");
-        if (slow) slow.style.display = "block";
-      }, 12000);
-
-      setTimeout(function() {
-        if (window.__OG_BOOT_OK) return;
-        if (window.__OG_BOOT_FAILED) {
-          _ogShowRecovery();
-          return;
-        }
-        var root = document.getElementById("root");
-        if (root && root.querySelector("#_loader")) {
-          _ogShowRecovery();
-        }
-      }, 120000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -42,7 +42,7 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname),
   build: {
-    target: ["es2015", "chrome58", "firefox57", "safari11", "edge79"],
+    target: ["es2017", "chrome61", "firefox60", "safari11", "edge79"],
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     rollupOptions: {
@@ -51,16 +51,15 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (id.includes("jspdf") || id.includes("html2canvas")) return "pdf";
           if (id.includes("framer-motion")) return "motion";
-          if (id.includes("socket.io")) return "socket";
+          if (id.includes("socket.io-client")) return "socket";
           if (id.includes("@tanstack/react-query")) return "query";
           if (id.includes("wouter")) return "router";
-          if (id.includes("react-dom") || /\/react\//.test(id)) return "react-vendor";
           if (id.includes("@radix-ui")) return "ui";
           if (id.includes("lucide-react")) return "icons";
         },
       },
     },
-    chunkSizeWarningLimit: 800,
+    chunkSizeWarningLimit: 1200,
   },
   server: {
     port,
