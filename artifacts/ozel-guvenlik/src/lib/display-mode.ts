@@ -43,6 +43,9 @@ export function switchDisplayModeWithTransition(mode: "lite" | "full"): void {
 export function markSlowBoot(): void {
   try {
     localStorage.setItem(LS_BOOT_SLOW, "1");
+    if (getDisplayModePreference() !== "full") {
+      localStorage.setItem(LS_MODE, "lite");
+    }
   } catch { /* ignore */ }
 }
 
@@ -74,6 +77,26 @@ function heapLooksLimited(): boolean {
   }
 }
 
+function deviceMemoryLooksLow(): boolean {
+  try {
+    const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    if (typeof mem !== "number" || mem <= 0) return false;
+    return mem <= 2;
+  } catch {
+    return false;
+  }
+}
+
+function cpuLooksLow(): boolean {
+  try {
+    const cores = navigator.hardwareConcurrency;
+    if (typeof cores !== "number" || cores <= 0) return false;
+    return cores <= 2;
+  } catch {
+    return false;
+  }
+}
+
 /** Otomatik lite tespiti (kullanıcı Pro seçmediyse) */
 export function detectAutoLite(): boolean {
   try {
@@ -86,11 +109,13 @@ export function detectAutoLite(): boolean {
 
     if (localStorage.getItem(LS_BOOT_SLOW) === "1") return true;
 
-    const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-    if (typeof mem === "number" && mem > 0 && mem <= 2) return true;
+    if (deviceMemoryLooksLow()) return true;
+    if (cpuLooksLow()) return true;
 
+    // Bellek API yok + tek çekirdek (512MB sanal telefon vb.)
+    const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const cores = navigator.hardwareConcurrency;
-    if (typeof cores === "number" && cores > 0 && cores <= 2) return true;
+    if (typeof mem !== "number" && typeof cores === "number" && cores <= 1) return true;
 
     if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return true;
@@ -103,6 +128,16 @@ export function detectAutoLite(): boolean {
   } catch {
     return true;
   }
+}
+
+/** Düşük cihazda kalıcı Lite (Pro tercihi yoksa) */
+export function persistLiteIfLowEnd(): boolean {
+  const pref = getDisplayModePreference();
+  if (pref === "full") return false;
+  if (pref === "lite") return true;
+  if (!detectAutoLite()) return false;
+  setDisplayModePreference("lite");
+  return true;
 }
 
 export function isLiteMode(): boolean {
@@ -130,9 +165,10 @@ export function initDisplayModeEarly(): void {
     try { document.documentElement.classList.add("dark"); } catch { /* ignore */ }
     return;
   }
-  const autoLite = detectAutoLite();
-  applyLiteClassToDocument(autoLite);
-  if (autoLite) {
+  persistLiteIfLowEnd();
+  const lite = isLiteMode();
+  applyLiteClassToDocument(lite);
+  if (lite) {
     try { document.documentElement.classList.add("dark"); } catch { /* ignore */ }
   }
 }

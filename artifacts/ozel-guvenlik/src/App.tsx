@@ -1,33 +1,45 @@
-import type { ComponentType } from "react";
+import type { ComponentType, LazyExoticComponent } from "react";
+import { lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { usePresenceXp } from "./hooks/use-presence-xp";
-import NotFound from "@/pages/not-found";
-import Home from "@/pages/home";
-import ListingDetail from "@/pages/listing-detail";
-import Chat from "@/pages/chat";
-import Login from "@/pages/login";
-import Register from "@/pages/register";
-import Profile from "@/pages/profile";
-import AdminDashboard from "@/pages/admin";
-import ModeratorDashboard from "@/pages/moderator";
-import AddListing from "@/pages/add-listing";
-import Notifications from "@/pages/notifications";
-import Favorites from "@/pages/favorites";
-import Destek from "@/pages/destek";
-import CvOlustur from "@/pages/cv-olustur";
-import PartTime from "@/pages/part-time";
-import {
-  ListingsWithSeo, SeoPathPage,
-  BlogIndexPage, BlogPostPage,
-} from "@/pages/seo-pages";
+import { PageLoader } from "@/components/page-loader";
 import { RoutedErrorBoundary } from "@/components/route-error-boundary";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
+
+const Home = lazy(() => import("@/pages/home"));
+const ListingDetail = lazy(() => import("@/pages/listing-detail"));
+const Chat = lazy(() => import("@/pages/chat"));
+const Login = lazy(() => import("@/pages/login"));
+const Register = lazy(() => import("@/pages/register"));
+const Profile = lazy(() => import("@/pages/profile"));
+const AdminDashboard = lazy(() => import("@/pages/admin"));
+const ModeratorDashboard = lazy(() => import("@/pages/moderator"));
+const AddListing = lazy(() => import("@/pages/add-listing"));
+const Notifications = lazy(() => import("@/pages/notifications"));
+const Favorites = lazy(() => import("@/pages/favorites"));
+const Destek = lazy(() => import("@/pages/destek"));
+const CvOlustur = lazy(() => import("@/pages/cv-olustur"));
+const PartTime = lazy(() => import("@/pages/part-time"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+
+function lazyNamed<T extends ComponentType>(
+  factory: () => Promise<Record<string, T>>,
+  name: string,
+): LazyExoticComponent<T> {
+  return lazy(() => factory().then((m) => ({ default: m[name] as T })));
+}
+
+const ListingsWithSeo = lazyNamed(() => import("@/pages/seo-pages"), "ListingsWithSeo");
+const SeoPathPage = lazyNamed(() => import("@/pages/seo-pages"), "SeoPathPage");
+const BlogIndexPage = lazyNamed(() => import("@/pages/seo-pages"), "BlogIndexPage");
+const BlogPostPage = lazyNamed(() => import("@/pages/seo-pages"), "BlogPostPage");
 
 function RequireAuth({ component: Component }: { component: ComponentType }) {
   const { user, isLoading } = useAuth();
-  if (isLoading) return null;
+  if (isLoading) return <PageLoader />;
   if (!user) return <Redirect to="/kayit" />;
   return <Component />;
 }
@@ -35,33 +47,36 @@ function RequireAuth({ component: Component }: { component: ComponentType }) {
 function Router() {
   return (
     <RoutedErrorBoundary>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/ilanlar" component={ListingsWithSeo} />
-        <Route path="/ilan/:id" component={ListingDetail} />
-        <Route path="/blog/:postSlug" component={BlogPostPage} />
-        <Route path="/blog" component={BlogIndexPage} />
-        <Route path="/sohbet" component={Chat} />
-        <Route path="/destek" component={Destek} />
-        <Route path="/giris" component={Login} />
-        <Route path="/kayit" component={Register} />
-        <Route path="/profil/:username" component={Profile} />
-        <Route path="/ilan-ekle">{() => <RequireAuth component={AddListing} />}</Route>
-        <Route path="/bildirimler" component={Notifications} />
-        <Route path="/favoriler" component={Favorites} />
-        <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
-        <Route path="/part-time" component={PartTime} />
-        <Route path="/admin" component={AdminDashboard} />
-        <Route path="/moderator" component={ModeratorDashboard} />
-        <Route path="/:seoSlug" component={SeoPathPage} />
-        <Route component={NotFound} />
-      </Switch>
+      <Suspense fallback={<PageLoader />}>
+        <Switch>
+          <Route path="/" component={Home} />
+          <Route path="/ilanlar" component={ListingsWithSeo} />
+          <Route path="/ilan/:id" component={ListingDetail} />
+          <Route path="/blog/:postSlug" component={BlogPostPage} />
+          <Route path="/blog" component={BlogIndexPage} />
+          <Route path="/sohbet" component={Chat} />
+          <Route path="/destek" component={Destek} />
+          <Route path="/giris" component={Login} />
+          <Route path="/kayit" component={Register} />
+          <Route path="/profil/:username" component={Profile} />
+          <Route path="/ilan-ekle">{() => <RequireAuth component={AddListing} />}</Route>
+          <Route path="/bildirimler" component={Notifications} />
+          <Route path="/favoriler" component={Favorites} />
+          <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
+          <Route path="/part-time" component={PartTime} />
+          <Route path="/admin" component={AdminDashboard} />
+          <Route path="/moderator" component={ModeratorDashboard} />
+          <Route path="/:seoSlug" component={SeoPathPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
     </RoutedErrorBoundary>
   );
 }
 
 function AppPresence() {
-  usePresenceXp(true);
+  const { isLite } = useDisplayMode();
+  usePresenceXp(!isLite);
   return null;
 }
 

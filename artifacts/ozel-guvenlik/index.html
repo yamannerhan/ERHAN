@@ -17,7 +17,7 @@
       })();
     </script>
     <script>
-      // Düşük cihaz: paint öncesi lite sınıfı (kullanıcı Pro seçmediyse)
+      // Düşük cihaz: paint öncesi lite + kalıcı tercih (Pro seçilmediyse)
       (function () {
         try {
           var pref = localStorage.getItem("og_display_mode");
@@ -32,10 +32,15 @@
           if (mem && mem <= 2) lite = true;
           var cores = navigator.hardwareConcurrency;
           if (cores && cores <= 2) lite = true;
+          if (typeof mem !== "number" && cores === 1) lite = true;
           if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) lite = true;
           var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
           if (conn && (conn.saveData || conn.effectiveType === "slow-2g" || conn.effectiveType === "2g" || conn.effectiveType === "3g")) lite = true;
-          if (lite) document.documentElement.classList.add("og-lite");
+          if (lite) {
+            document.documentElement.classList.add("og-lite");
+            document.documentElement.classList.add("dark");
+            if (!pref) localStorage.setItem("og_display_mode", "lite");
+          }
         } catch (e) {}
       })();
     </script>
@@ -94,10 +99,24 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="dns-prefetch" href="https://ozelguvenlik.online" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"></noscript>
+    <script>
+      (function () {
+        if (document.documentElement.classList.contains("og-lite")) return;
+        var l = document.createElement("link");
+        l.rel = "preconnect";
+        l.href = "https://fonts.googleapis.com";
+        document.head.appendChild(l);
+        var l2 = document.createElement("link");
+        l2.rel = "preconnect";
+        l2.href = "https://fonts.gstatic.com";
+        l2.crossOrigin = "anonymous";
+        document.head.appendChild(l2);
+        var s = document.createElement("link");
+        s.rel = "stylesheet";
+        s.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+        document.head.appendChild(s);
+      })();
+    </script>
   </head>
   <body>
     <div id="root">
@@ -109,6 +128,7 @@
     </div>
     <script>
       window.__OG_BOOT_OK = false;
+      window.__OG_BOOT_RELOADED = false;
       window._forceRecover = function() {
         try {
           if ("serviceWorker" in navigator) {
@@ -134,6 +154,31 @@
           window.location.reload();
         }
       };
+      // Düşük cihaz: JS açılmazsa Lite moda zorla ve bir kez yenile
+      setTimeout(function () {
+        if (window.__OG_BOOT_OK) return;
+        try {
+          if (localStorage.getItem("og_display_mode") !== "full") {
+            localStorage.setItem("og_display_mode", "lite");
+            localStorage.setItem("og_boot_slow", "1");
+          }
+        } catch (e) {}
+        if (!window.__OG_BOOT_RELOADED) {
+          window.__OG_BOOT_RELOADED = true;
+          window.location.reload();
+          return;
+        }
+        var splash = document.getElementById("_boot-splash");
+        if (splash && !document.getElementById("_boot-recover")) {
+          var btn = document.createElement("button");
+          btn.id = "_boot-recover";
+          btn.type = "button";
+          btn.textContent = "Yeniden dene";
+          btn.style.cssText = "margin-top:8px;padding:10px 16px;border:0;border-radius:10px;background:#f5c518;color:#0a0e1a;font-weight:700;font-size:13px;cursor:pointer";
+          btn.onclick = function () { window._forceRecover(); };
+          splash.appendChild(btn);
+        }
+      }, 9000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

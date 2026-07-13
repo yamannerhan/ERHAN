@@ -33,6 +33,8 @@ window._ogClearBootSplash = clearBootSplash;
 function BootSplashMarker() {
   useEffect(() => {
     clearBootSplash();
+    const elapsed = (typeof performance !== "undefined" ? performance.now() : 0) - __OG_BOOT_START;
+    if (elapsed > 6000) markSlowBoot();
   }, []);
   return null;
 }
