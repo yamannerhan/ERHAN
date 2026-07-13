@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -4104,5 +4104,8 @@ html:not(.dark) .og-pt-row {
   background: linear-gradient(135deg, #ffe27a, #f5c518);
 }
 
+@keyframes og-spin {
+  to { transform: rotate(360deg); }
+}
 
 

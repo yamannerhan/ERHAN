@@ -7,6 +7,37 @@ import "./styles/lite-marquee.css";
 import "./cmc-layout.css";
 import { setAuthTokenGetter, setDeviceIdGetter } from "@workspace/api-client-react";
 
+declare global {
+  interface Window {
+    __OG_BOOT_OK?: boolean;
+    __OG_BOOT_FAILED?: boolean;
+  }
+}
+
+function markBootOk() {
+  try {
+    window.__OG_BOOT_OK = true;
+    const loader = document.getElementById("_loader");
+    const recovery = document.getElementById("_recovery");
+    const slow = document.getElementById("_slow-hint");
+    if (loader) loader.style.display = "none";
+    if (recovery) recovery.style.display = "none";
+    if (slow) slow.style.display = "none";
+  } catch { /* ignore */ }
+}
+
+function markBootFailed() {
+  try {
+    window.__OG_BOOT_FAILED = true;
+    const loader = document.getElementById("_loader");
+    const recovery = document.getElementById("_recovery");
+    const slow = document.getElementById("_slow-hint");
+    if (loader) loader.style.display = "none";
+    if (slow) slow.style.display = "none";
+    if (recovery) recovery.style.display = "block";
+  } catch { /* ignore */ }
+}
+
 function safeGetToken(): string | null {
   try {
     return localStorage.getItem("auth_token");
@@ -35,7 +66,6 @@ function safeGetDeviceId(): string | null {
 setAuthTokenGetter(safeGetToken);
 setDeviceIdGetter(safeGetDeviceId);
 
-// beforeinstallprompt React mount'tan önce gelebilir — kaçırma
 try {
   (window as Window & { __ogDeferredInstall?: Event | null }).__ogDeferredInstall = null;
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -54,23 +84,27 @@ const queryClient = new QueryClient({
   },
 });
 
-// PWA Service Worker — Web Push için kaydet (eski cache'leri temizle, SW kalsın)
+/** Web Push — uygulama açıldıktan sonra, düşük RAM cihazlarda boot'u bloklamasın */
+function schedulePushRegistration() {
+  const run = () => {
+    void import("./lib/web-push")
+      .then((m) => m.registerPushServiceWorker())
+      .then((reg) => {
+        if (reg) {
+          return import("./lib/web-push").then((m) => m.ensurePushSubscriptionQuiet());
+        }
+      })
+      .catch(() => {});
+  };
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(run, { timeout: 20_000 });
+  } else {
+    setTimeout(run, 12_000);
+  }
+}
+
 if ("serviceWorker" in navigator) {
-  void (async () => {
-    try {
-      const cacheKeys = await caches.keys();
-      await Promise.all(
-        cacheKeys
-          .filter((k) => !k.startsWith("ozelguvenlik-push"))
-          .map((k) => caches.delete(k)),
-      );
-    } catch { /* ignore */ }
-    try {
-      const { registerPushServiceWorker, ensurePushSubscriptionQuiet } = await import("./lib/web-push");
-      await registerPushServiceWorker();
-      await ensurePushSubscriptionQuiet();
-    } catch { /* ignore */ }
-  })();
+  schedulePushRegistration();
 }
 
 class ErrorBoundary extends React.Component<
@@ -141,10 +175,21 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-createRoot(document.getElementById("root")!).render(
-  <QueryClientProvider client={queryClient}>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </QueryClientProvider>
-);
+const rootEl = document.getElementById("root");
+if (!rootEl) {
+  markBootFailed();
+} else {
+  try {
+    markBootOk();
+    createRoot(rootEl).render(
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </QueryClientProvider>,
+    );
+  } catch (e) {
+    try { console.error("[OG boot]", e); } catch { /* ignore */ }
+    markBootFailed();
+  }
+}

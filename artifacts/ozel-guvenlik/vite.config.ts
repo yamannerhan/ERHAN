@@ -42,17 +42,21 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname),
   build: {
-    target: ["chrome61", "firefox60", "safari11", "edge79"],
+    target: ["es2015", "chrome58", "firefox57", "safari11", "edge79"],
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ["react", "react-dom"],
-          router: ["wouter", "wouter/use-hash-location", "wouter/use-browser-location"],
-          query: ["@tanstack/react-query"],
-          ui: ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tooltip", "@radix-ui/react-select", "@radix-ui/react-tabs", "@radix-ui/react-toast", "@radix-ui/react-popover", "@radix-ui/react-avatar", "@radix-ui/react-separator", "@radix-ui/react-slot", "@radix-ui/react-label", "@radix-ui/react-checkbox"],
-          pdf: ["html2canvas", "jspdf"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("jspdf") || id.includes("html2canvas")) return "pdf";
+          if (id.includes("framer-motion")) return "motion";
+          if (id.includes("socket.io")) return "socket";
+          if (id.includes("@tanstack/react-query")) return "query";
+          if (id.includes("wouter")) return "router";
+          if (id.includes("react-dom") || /\/react\//.test(id)) return "react-vendor";
+          if (id.includes("@radix-ui")) return "ui";
+          if (id.includes("lucide-react")) return "icons";
         },
       },
     },
