@@ -1,17 +1,19 @@
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import App from "./App";
 import "./index.css";
 import "./styles/lite-marquee.css";
 import "./styles/og-lite.css";
-import "./cmc-layout.css";
 import { initDisplayModeEarly, isLiteMode, markSlowBoot } from "./lib/display-mode";
 import { DisplayModeProvider } from "./contexts/DisplayModeContext";
 import { setAuthTokenGetter, setDeviceIdGetter } from "@workspace/api-client-react";
 
 const __OG_BOOT_START = typeof performance !== "undefined" ? performance.now() : 0;
 initDisplayModeEarly();
+
+if (!isLiteMode()) {
+  void import("./cmc-layout.css");
+}
 
 declare global {
   interface Window {
@@ -29,12 +31,13 @@ function clearBootSplash() {
 }
 
 window._ogClearBootSplash = clearBootSplash;
+clearBootSplash();
 
 function BootSplashMarker() {
   useEffect(() => {
     clearBootSplash();
     const elapsed = (typeof performance !== "undefined" ? performance.now() : 0) - __OG_BOOT_START;
-    if (elapsed > 6000) markSlowBoot();
+    if (elapsed > 5000) markSlowBoot();
   }, []);
   return null;
 }
@@ -52,7 +55,7 @@ function safeGetDeviceId(): string | null {
     const KEY = "og_device_id";
     let id = localStorage.getItem(KEY);
     if (!id) {
-      id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      id = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
       });
@@ -78,7 +81,7 @@ try {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: isLiteMode() ? 0 : 1,
       refetchOnWindowFocus: false,
       staleTime: 15_000,
     },
@@ -140,16 +143,38 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-const rootEl = document.getElementById("root");
-if (rootEl) {
-  createRoot(rootEl).render(
-    <QueryClientProvider client={queryClient}>
-      <DisplayModeProvider>
-        <ErrorBoundary>
-          <BootSplashMarker />
-          <App />
-        </ErrorBoundary>
-      </DisplayModeProvider>
-    </QueryClientProvider>,
-  );
+function showBootError(message: string) {
+  clearBootSplash();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) return;
+  rootEl.innerHTML = `
+    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0F172A;color:#e2e8f0;font-family:system-ui,sans-serif;padding:2rem;text-align:center;gap:0.75rem">
+      <div style="font-size:1.05rem;font-weight:600">Açılış hatası</div>
+      <p style="font-size:0.8rem;color:#94a3b8;max-width:340px;line-height:1.45">${message}</p>
+      <button type="button" onclick="window._forceRecover&&window._forceRecover()" style="padding:0.55rem 1.1rem;border-radius:10px;border:0;background:#f5c518;color:#0a0e1a;font-weight:700;cursor:pointer">Önbelleği temizle ve yenile</button>
+    </div>`;
 }
+
+async function boot() {
+  try {
+    const { default: App } = await import("./App");
+    const rootEl = document.getElementById("root");
+    if (!rootEl) return;
+    createRoot(rootEl).render(
+      <QueryClientProvider client={queryClient}>
+        <DisplayModeProvider>
+          <ErrorBoundary>
+            <BootSplashMarker />
+            <App />
+          </ErrorBoundary>
+        </DisplayModeProvider>
+      </QueryClientProvider>,
+    );
+  } catch (err) {
+    console.error("[OG boot]", err);
+    markSlowBoot();
+    showBootError("Uygulama yüklenemedi. Önbelleği temizleyip tekrar deneyin.");
+  }
+}
+
+void boot();

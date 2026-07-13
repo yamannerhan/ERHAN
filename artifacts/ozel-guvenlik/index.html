@@ -17,29 +17,17 @@
       })();
     </script>
     <script>
-      // Düşük cihaz: paint öncesi lite + kalıcı tercih (Pro seçilmediyse)
+      // Varsayılan: herkes Lite — yalnızca Pro seçenler full
       (function () {
         try {
           var pref = localStorage.getItem("og_display_mode");
           if (pref === "full") return;
-          if (pref === "lite") {
-            document.documentElement.classList.add("og-lite");
-            return;
-          }
-          var lite = false;
-          if (localStorage.getItem("og_boot_slow") === "1") lite = true;
-          var mem = navigator.deviceMemory;
-          if (mem && mem <= 2) lite = true;
-          var cores = navigator.hardwareConcurrency;
-          if (cores && cores <= 2) lite = true;
-          if (typeof mem !== "number" && cores === 1) lite = true;
-          if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) lite = true;
-          var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-          if (conn && (conn.saveData || conn.effectiveType === "slow-2g" || conn.effectiveType === "2g" || conn.effectiveType === "3g")) lite = true;
-          if (lite) {
-            document.documentElement.classList.add("og-lite");
-            document.documentElement.classList.add("dark");
-            if (!pref) localStorage.setItem("og_display_mode", "lite");
+          document.documentElement.classList.add("og-lite", "dark");
+          localStorage.setItem("og_display_mode", "lite");
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              return Promise.all(regs.map(function (r) { return r.unregister(); }));
+            }).catch(function () {});
           }
         } catch (e) {}
       })();
@@ -178,9 +166,15 @@
           btn.onclick = function () { window._forceRecover(); };
           splash.appendChild(btn);
         }
-      }, 9000);
+      }, 6000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      window.addEventListener("error", function () {
+        if (window.__OG_BOOT_OK) return;
+        try { localStorage.setItem("og_display_mode", "lite"); } catch (e) {}
+      });
+    </script>
   </body>
 </html>
 

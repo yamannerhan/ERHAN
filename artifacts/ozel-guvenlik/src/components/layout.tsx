@@ -17,10 +17,8 @@ import {
   useGetNotifications, getGetNotificationsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { io as socketIo } from "socket.io-client";
 import { useToast } from "@/hooks/use-toast";
 import { PushPermissionBanner } from "./push-permission-banner";
-import { playNotificationBeep, listenForPushSounds } from "@/lib/web-push";
 import { isBackgroundOnlyEnabled, isNotifSoundEnabled } from "@/lib/notif-prefs";
 import { asArray, normalizeAppPath } from "@/lib/safe";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
@@ -193,7 +191,16 @@ export function Layout({
 
   useEffect(() => {
     if (isLite) return;
-    return listenForPushSounds();
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    void import("@/lib/web-push").then((m) => {
+      if (cancelled) return;
+      cleanup = m.listenForPushSounds();
+    });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
   }, [isLite]);
 
   useEffect(() => {
@@ -201,49 +208,60 @@ export function Layout({
     document.documentElement.classList.add("dark");
   }, [isLite]);
 
-  /* Socket.io — online count + push notifications + presence (lite modda kapalı) */
+  /* Socket.io — online count + push notifications (lite modda kapalı) */
   useEffect(() => {
     if (isLite) return;
-    const socket = socketIo(window.location.origin, {
-      path: "/ws",
-      transports: ["websocket", "polling"],
-      secure: window.location.protocol === "https:",
-      withCredentials: true,
-    });
-    const emitPresence = () => {
-      if (!user?.id || !socket.connected) return;
-      socket.emit("presence:update", {
-        userId: user.id,
-        visible: document.visibilityState === "visible",
+    let cancelled = false;
+    let socket: import("socket.io-client").Socket | null = null;
+    let onVis: (() => void) | null = null;
+    let authenticate: (() => void) | null = null;
+
+    void import("socket.io-client").then(({ io }) => {
+      if (cancelled) return;
+      socket = io(window.location.origin, {
+        path: "/ws",
+        transports: ["websocket", "polling"],
+        secure: window.location.protocol === "https:",
+        withCredentials: true,
       });
-    };
-    const authenticate = () => {
-      if (user?.id && socket.connected) {
-        socket.emit("authenticate", { userId: user.id });
-        emitPresence();
-      }
-    };
-    socket.on("connect", authenticate);
-    socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
-    socket.on("notification:new", (payload?: { userId?: number; title?: string; message?: string }) => {
-      if (!user) return;
-      if (payload?.userId != null && payload.userId !== user.id) return;
-      void refetchNotifs();
-      void refetchUnread();
-      // Uygulama öndeyse (tercih açıksa) bildirim sesi çalma
-      const bgOnly = isBackgroundOnlyEnabled();
-      const foreground = document.visibilityState === "visible";
-      if (isNotifSoundEnabled() && !(bgOnly && foreground)) {
-        try { playNotificationBeep(); } catch { /* ignore */ }
-      }
+      const emitPresence = () => {
+        if (!user?.id || !socket?.connected) return;
+        socket.emit("presence:update", {
+          userId: user.id,
+          visible: document.visibilityState === "visible",
+        });
+      };
+      authenticate = () => {
+        if (user?.id && socket?.connected) {
+          socket.emit("authenticate", { userId: user.id });
+          emitPresence();
+        }
+      };
+      socket.on("connect", authenticate);
+      socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
+      socket.on("notification:new", (payload?: { userId?: number }) => {
+        if (!user) return;
+        if (payload?.userId != null && payload.userId !== user.id) return;
+        void refetchNotifs();
+        void refetchUnread();
+        const bgOnly = isBackgroundOnlyEnabled();
+        const foreground = document.visibilityState === "visible";
+        if (isNotifSoundEnabled() && !(bgOnly && foreground)) {
+          void import("@/lib/web-push").then((m) => {
+            try { m.playNotificationBeep(); } catch { /* ignore */ }
+          });
+        }
+      });
+      onVis = () => emitPresence();
+      document.addEventListener("visibilitychange", onVis);
+      if (socket.connected && authenticate) authenticate();
     });
-    const onVis = () => emitPresence();
-    document.addEventListener("visibilitychange", onVis);
-    if (socket.connected) authenticate();
+
     return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      socket.off("connect", authenticate);
-      socket.disconnect();
+      cancelled = true;
+      if (onVis) document.removeEventListener("visibilitychange", onVis);
+      if (socket && authenticate) socket.off("connect", authenticate);
+      socket?.disconnect();
     };
   }, [refetchNotifs, refetchUnread, user, isLite]);
 

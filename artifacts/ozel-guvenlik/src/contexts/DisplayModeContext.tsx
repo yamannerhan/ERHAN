@@ -14,8 +14,8 @@ type DisplayModeContextValue = {
 };
 
 const DisplayModeContext = createContext<DisplayModeContextValue>({
-  isLite: false,
-  preference: "auto",
+  isLite: true,
+  preference: "lite",
   setMode: () => {},
 });
 

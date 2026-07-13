@@ -3,9 +3,9 @@ import "./display-mode-toggle.css";
 
 /** Anasayfa — küçük Pro / Lite geçiş */
 export function DisplayModeToggle() {
-  const { isLite, preference, setMode } = useDisplayMode();
-  const proActive = preference === "full" || (preference === "auto" && !isLite);
-  const liteActive = preference === "lite" || (preference === "auto" && isLite);
+  const { preference, setMode } = useDisplayMode();
+  const proActive = preference === "full";
+  const liteActive = preference !== "full";
 
   return (
     <div className="og-mode-toggle" role="group" aria-label="Görüntü modu">
