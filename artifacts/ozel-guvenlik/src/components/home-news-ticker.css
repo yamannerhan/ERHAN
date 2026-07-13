@@ -76,6 +76,29 @@
   animation: og-ticker-static-in 0.35s ease;
 }
 
+/* Gündüz modu — sarı yazı açık zeminde kayboluyordu; siyah metin */
+html:not(.dark) .og-home-ticker {
+  background: #fef3c7;
+  border-bottom-color: rgba(15, 23, 42, 0.12);
+}
+
+html:not(.dark) .og-home-ticker__item,
+html:not(.dark) .og-home-ticker__static-text {
+  color: #0f172a;
+}
+
+html:not(.dark) .og-home-ticker__dot {
+  color: #0f172a;
+}
+
+html:not(.dark) .og-home-ticker__fade--left {
+  background: linear-gradient(to right, #fef3c7, transparent);
+}
+
+html:not(.dark) .og-home-ticker__fade--right {
+  background: linear-gradient(to left, #fef3c7, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .og-home-ticker__track.lite-marquee-track {
     animation-duration: 90s !important;
