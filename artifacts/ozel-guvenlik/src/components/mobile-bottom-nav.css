@@ -1,12 +1,23 @@
-/* ── Mobil alt navigasyon ─────────────────────────────────── */
+/* ── Mobil alt navigasyon — viewport altına sabit ─────────── */
 
 .og-bottom-nav {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: calc(8px + var(--safe-bottom));
+  left: 0;
+  right: 0;
+  width: 100%;
+  bottom: 0;
   z-index: 9999;
   pointer-events: none;
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  box-sizing: border-box;
+  background: #071221;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  max-width: 100%;
 }
 
 @media (min-width: 1280px) {
@@ -18,6 +29,10 @@
 .og-bottom-nav-wrap {
   position: relative;
   pointer-events: auto;
+  width: 100%;
+  max-width: var(--og-shell-max, 28rem);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .og-bottom-nav-shell {

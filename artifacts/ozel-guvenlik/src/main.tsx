@@ -5,11 +5,13 @@ import "./index.css";
 import "./styles/lite-marquee.css";
 import "./styles/og-lite.css";
 import { initDisplayModeEarly, isLiteMode, markSlowBoot } from "./lib/display-mode";
+import { initBottomNavViewportFix } from "./lib/fix-bottom-nav";
 import { DisplayModeProvider } from "./contexts/DisplayModeContext";
 import { setAuthTokenGetter, setDeviceIdGetter } from "@workspace/api-client-react";
 
 const __OG_BOOT_START = typeof performance !== "undefined" ? performance.now() : 0;
 initDisplayModeEarly();
+initBottomNavViewportFix();
 
 if (!isLiteMode()) {
   void import("./cmc-layout.css");

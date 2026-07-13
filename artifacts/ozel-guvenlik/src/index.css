@@ -82,8 +82,8 @@
   --safe-left: env(safe-area-inset-left, 0px);
   --mobile-header-height: 56px;
   --mobile-bottom-nav-height: 72px;
-  --app-bottom-pad: calc(114px + var(--safe-bottom));
-  --chat-fab-bottom: calc(90px + var(--safe-bottom));
+  --app-bottom-pad: calc(106px + env(safe-area-inset-bottom, 0px));
+  --chat-fab-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
   --og-shell-max: 28rem; /* telefon / Xiaomi */
   /* <1280: telefon+tablet (alt menÃ¼ + BaÅŸvur). â‰¥1280: masaÃ¼stÃ¼ chrome */
   --og-desktop: 1280px;
@@ -103,6 +103,8 @@
     width: 100%;
     max-width: 100%;
     overflow-x: clip;
+    min-height: 100dvh;
+    min-height: 100vh;
     @apply bg-background text-foreground font-sans antialiased;
   }
   img,
@@ -949,6 +951,8 @@ html:not(.dark) body {
   min-height: 100vh;
   min-height: 100dvh;
   padding-bottom: var(--app-bottom-pad);
+  isolation: auto;
+  transform: none;
 }
 @media (min-width: 1280px) {
   .og-app {
@@ -3257,9 +3261,6 @@ html:not(.dark) .og-pt-row {
   }
   html:not(.dark) .og-header {
     background: #ffffff;
-  }
-  html:not(.dark) .og-bottom-nav {
-    background: transparent;
   }
 
   /* P1 — blur / filter (sabit + kaydırılan katmanlar) */
