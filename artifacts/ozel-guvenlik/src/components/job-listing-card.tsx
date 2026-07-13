@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Link } from "wouter";
 import {
-  MapPin, Clock, BadgeCheck, Bookmark, Eye, Send, Users, CalendarDays,
+  MapPin, Clock, BadgeCheck, Bookmark, Building2, Briefcase,
+  User, CalendarDays, Utensils, Bus, Shield, Star, ArrowRight,
 } from "lucide-react";
-import { displayCompany } from "@/lib/utils";
+import { displayCompany, extractBenefits } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
@@ -59,22 +60,63 @@ function detectGender(blob: string): string | null {
   return null;
 }
 
-function formatSalary(raw?: string | null): { amount: string; period: string } {
-  const s = (raw || "").trim();
-  if (!s || /belirtilmedi|g[oö]r[uü][sş]me/i.test(s)) {
-    return { amount: "Maaş görüşmede", period: "" };
+function detectExperience(blob: string): string | null {
+  const t = blob.toLocaleLowerCase("tr-TR");
+  if (/deneyim\s*(şart\s*)?de[ğg]il|tecr[uü]be\s*(şart\s*)?de[ğg]il|deneyimsiz/.test(t)) {
+    return "Deneyim Şart Değil";
   }
-  let period = "Aylık";
-  if (/g[uü]nl[uü]k/i.test(s)) period = "Günlük";
-  else if (/haftal[iı]k/i.test(s)) period = "Haftalık";
-  else if (/\bnet\b/i.test(s)) period = "Net";
-  else if (/br[uü]t/i.test(s)) period = "Brüt";
-  const amount = s
-    .replace(/\b(ayl[iı]k|g[uü]nl[uü]k|haftal[iı]k|net|br[uü]t)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim() || s;
-  return { amount, period };
+  if (/deneyimli|tecr[uü]beli|\d+\s*y[ıi]l/.test(t)) return "Deneyimli";
+  return null;
 }
+
+function formatSalary(raw?: string | null): string {
+  const s = (raw || "").trim();
+  if (!s || /belirtilmedi|g[oö]r[uü][sş]me/i.test(s)) return "Görüşmede";
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function formatPostedAt(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "";
+  const diff = Math.max(0, Date.now() - t);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "Az önce";
+  if (mins < 60) return `${mins} dk önce`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} saat önce`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Dün";
+  if (days < 7) return `${days} gün önce`;
+  return new Date(iso).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+}
+
+function postedBadge(iso: string): string | null {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const hours = (Date.now() - t) / 3_600_000;
+  if (hours < 24) return "Bugün";
+  if (hours < 48) return "Dün";
+  return null;
+}
+
+const BENEFIT_ICON: Record<string, typeof Utensils> = {
+  Yemek: Utensils,
+  "Yemek Kartı": Utensils,
+  Servis: Bus,
+  SGK: Shield,
+  Prim: Star,
+  Konaklama: Building2,
+  Kıyafet: Briefcase,
+  Mesai: Clock,
+  Yol: Bus,
+};
+
+type Chip = {
+  key: string;
+  label: string;
+  Icon: typeof Clock;
+  tone?: "default" | "time" | "shift";
+};
 
 type Props = {
   listing: JobCardListing;
@@ -82,11 +124,11 @@ type Props = {
   adminOverlay?: React.ReactNode;
   saved?: boolean;
   onToggleSave?: (e: React.MouseEvent, id: number) => void;
-  /** Öne çıkan şerit — 2'li kompakt boyut */
+  /** Öne çıkan şerit — kompakt boyut */
   compact?: boolean;
 };
 
-/** Referans görsel — normal ilan kartı */
+/** Referans görsel — normal / öne çıkan ilan kartı */
 export function JobListingCard({
   listing,
   onNavigate,
@@ -96,19 +138,15 @@ export function JobListingCard({
   compact = false,
 }: Props) {
   const isRead = useListingRead(listing.id);
-  const company = compact
-    ? (displayCompany(listing.company) ?? "ozelguvenlik.online")
-    : (displayCompany(listing.company) || "Firma");
+  const company = displayCompany(listing.company) || (compact ? "ozelguvenlik.online" : "Firma");
   const blob = `${listing.title} ${listing.description ?? ""} ${listing.requirements ?? ""}`;
   const { city, district } = splitCity(listing.city);
   const location = district ? `${city} / ${district}` : city;
   const logo = resolveCompanyLogo(listing.companyLogoUrl);
   const hasOwnLogo = isRealLogo(listing.companyLogoUrl);
   const verified = !!listing.companyVerified || hasOwnLogo;
-  const shiftLabel = detectShift(blob);
-  const genderLabel = detectGender(blob);
-  const workType = (listing.workType || "").trim() || null;
-  const { amount: salaryAmount, period: salaryPeriod } = formatSalary(listing.salary);
+  const salaryText = formatSalary(listing.salary);
+  const posted = formatPostedAt(listing.createdAt);
   const isSaved = saved ?? !!listing.isFavoritedByMe;
   const detailHref = `/ilan/${listing.id}`;
 
@@ -121,10 +159,28 @@ export function JobListingCard({
   const applyHref = resolvedApply && resolvedApply !== "auth_required" ? resolvedApply : detailHref;
   const applyIsTel = applyHref.startsWith("tel:");
 
-  const tags: Array<{ key: string; label: string; Icon: typeof Clock }> = [];
-  if (shiftLabel) tags.push({ key: "shift", label: shiftLabel, Icon: Clock });
-  if (genderLabel) tags.push({ key: "gender", label: genderLabel, Icon: Users });
-  if (workType) tags.push({ key: "work", label: workType, Icon: CalendarDays });
+  const chips: Chip[] = useMemo(() => {
+    const list: Chip[] = [];
+    list.push({ key: "loc", label: location, Icon: MapPin });
+    if (district) list.push({ key: "dist", label: district, Icon: Building2 });
+    const shift = detectShift(blob);
+    if (shift) list.push({ key: "shift", label: shift, Icon: Clock, tone: "shift" });
+    const workType = (listing.workType || "").trim();
+    if (workType) list.push({ key: "work", label: workType, Icon: Briefcase });
+    const gender = detectGender(blob);
+    if (gender) list.push({ key: "gender", label: gender, Icon: User });
+    const day = postedBadge(listing.createdAt);
+    if (day) list.push({ key: "day", label: day, Icon: CalendarDays, tone: "time" });
+    const benefits = extractBenefits(listing.requirements, listing.description);
+    for (const b of benefits.slice(0, compact ? 2 : 4)) {
+      list.push({ key: `b-${b}`, label: b, Icon: BENEFIT_ICON[b] || Star });
+    }
+    const exp = detectExperience(blob);
+    if (exp) list.push({ key: "exp", label: exp, Icon: Star });
+    return list;
+  }, [blob, compact, district, listing.createdAt, listing.description, listing.requirements, listing.workType, location]);
+
+  const visibleChips = compact ? chips.slice(0, 4) : chips;
 
   const markReadAndNavigate = () => {
     markListingRead(listing.id);
@@ -143,77 +199,85 @@ export function JobListingCard({
           </div>
 
           <div className="og-job__main">
+            <h3 className="og-job__title" title={listing.title}>{listing.title}</h3>
             <div className="og-job__company-row">
-              <span className="og-job__company-name">{company}</span>
+              <span className="og-job__company-name" title={company}>{company}</span>
               {verified && (
-                <BadgeCheck className="og-job__verify" aria-label="Doğrulanmış firma" />
+                <span className="og-job__verified">
+                  <BadgeCheck className="og-job__verify" aria-hidden />
+                  {!compact && <span>Doğrulanmış</span>}
+                </span>
               )}
-            </div>
-            <h3 className="og-job__title">{listing.title}</h3>
-            <div className="og-job__location">
-              <MapPin className="og-job__loc-ico" aria-hidden />
-              <span>{location}</span>
             </div>
           </div>
 
           <div className="og-job__aside">
-            <button
-              type="button"
-              className={`og-job__bookmark${isSaved ? " is-on" : ""}`}
-              aria-label={isSaved ? "Kayıttan çıkar" : "Kaydet"}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleSave?.(e, listing.id);
-              }}
-            >
-              <Bookmark className="og-job__bookmark-ico" aria-hidden />
-            </button>
-            <div className="og-job__salary-box">
-              <span className="og-job__salary-amount">{salaryAmount}</span>
-              {salaryPeriod ? (
-                <span className="og-job__salary-period">{salaryPeriod}</span>
-              ) : null}
+            {onToggleSave && (
+              <button
+                type="button"
+                className={`og-job__bookmark${isSaved ? " is-on" : ""}`}
+                aria-label={isSaved ? "Kayıttan çıkar" : "Kaydet"}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleSave(e, listing.id);
+                }}
+              >
+                <Bookmark className="og-job__bookmark-ico" aria-hidden />
+              </button>
+            )}
+            <div className="og-job__salary-box" title={salaryText}>
+              <span className="og-job__salary-amount">{salaryText}</span>
             </div>
           </div>
         </div>
 
-        {tags.length > 0 && (
+        {visibleChips.length > 0 && (
           <div className="og-job__tags">
-            {tags.map((t) => (
-              <span key={t.key} className="og-job__tag">
+            {visibleChips.map((t) => (
+              <span key={t.key} className={`og-job__tag${t.tone ? ` og-job__tag--${t.tone}` : ""}`}>
                 <t.Icon className="og-job__tag-ico" aria-hidden />
-                {t.label}
+                <span className="og-job__tag-label">{t.label}</span>
               </span>
             ))}
           </div>
         )}
 
-        <div className="og-job__actions">
-          <Link href={detailHref} onClick={markReadAndNavigate} className="og-job__btn-detail">
-            <Eye className="og-job__btn-ico" aria-hidden />
-            <span>{compact ? "Detay" : "İlanın Detayını Gör"}</span>
-          </Link>
-          <a
-            href={applyHref}
-            className="og-job__btn-apply"
-            onClick={(e) => {
-              markListingRead(listing.id);
-              if (resolvedApply === "auth_required") {
-                e.preventDefault();
-                window.location.assign("/giris");
-                return;
-              }
-              if (!applyIsTel) {
-                e.preventDefault();
-                markReadAndNavigate();
-                window.location.assign(detailHref);
-              }
-            }}
-          >
-            <Send className="og-job__btn-ico" aria-hidden />
-            <span>{compact ? "Başvur" : "Hemen Başvur"}</span>
-          </a>
+        <div className="og-job__foot">
+          {posted ? (
+            <div className="og-job__posted">
+              <Clock className="og-job__posted-ico" aria-hidden />
+              <span>{posted}</span>
+            </div>
+          ) : (
+            <span className="og-job__posted-spacer" />
+          )}
+
+          <div className="og-job__actions">
+            <Link href={detailHref} onClick={markReadAndNavigate} className="og-job__btn-detail">
+              <span>{compact ? "Detay" : "Detaylar"}</span>
+            </Link>
+            <a
+              href={applyHref}
+              className="og-job__btn-apply"
+              onClick={(e) => {
+                markListingRead(listing.id);
+                if (resolvedApply === "auth_required") {
+                  e.preventDefault();
+                  window.location.assign("/giris");
+                  return;
+                }
+                if (!applyIsTel) {
+                  e.preventDefault();
+                  markReadAndNavigate();
+                  window.location.assign(detailHref);
+                }
+              }}
+            >
+              <span>{compact ? "Başvur" : "Başvur"}</span>
+              <ArrowRight className="og-job__btn-ico" aria-hidden />
+            </a>
+          </div>
         </div>
       </div>
     </article>

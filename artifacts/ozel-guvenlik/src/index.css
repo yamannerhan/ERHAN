@@ -3371,6 +3371,13 @@ html:not(.dark) .og-pt-row {
 /* Chat FAB — alt menünün üstünde */
 .og-chat-fab {
   bottom: var(--chat-fab-bottom);
+  z-index: 10040;
+}
+
+html.og-chat-open .og-chat-fab,
+html.og-keyboard-open .og-chat-fab {
+  /* Açık sohbet / klavye: FAB alt menüyle beraber gizlenmesin ama arkaya itilmesin */
+  z-index: 10040;
 }
 
 /* PWA geri bildirim — alt menünün üstünde, her cihazda ortalı */
@@ -3422,9 +3429,17 @@ html:not(.dark) .og-pt-row {
   border-radius: 18px;
   box-shadow: 0 28px 64px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(245, 197, 24, 0.08);
   overflow: hidden;
+  z-index: 10050;
 }
 .og-chat-win-expanded {
   border-radius: 16px;
+}
+/* Klavye açık: yazma kutusu klavyenin dibine yaslanır (WhatsApp) */
+.og-chat-win--kb {
+  border-radius: 14px 14px 0 0;
+}
+.og-chat-win--kb .og-chat-input-wrap {
+  padding-bottom: 10px;
 }
 .og-chat-hdr {
   display: flex;

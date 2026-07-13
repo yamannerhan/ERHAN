@@ -1,4 +1,4 @@
-/* Öne çıkan şerit — normal ilan kartı, yan yana 2 adet */
+/* Öne çıkan şerit — normal kartın kompakt hali, taşmasız */
 :root {
   --featured-gap: 10px;
   --featured-gold: #f5c518;
@@ -10,6 +10,9 @@
   gap: 4px;
   container-type: inline-size;
   container-name: featured-wrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .featured-rail {
@@ -21,12 +24,11 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   padding: 1px 0 1px;
+  min-width: 0;
 }
 .featured-rail--auto {
   overflow: hidden;
   scroll-snap-type: none;
-  -webkit-mask-image: none;
-  mask-image: none;
 }
 .featured-rail::-webkit-scrollbar { display: none; }
 
@@ -41,17 +43,17 @@
   .featured-rail__track > .og-job {
     flex: 0 0 calc((100cqw - var(--featured-gap)) / 2);
     width: calc((100cqw - var(--featured-gap)) / 2);
+    max-width: calc((100cqw - var(--featured-gap)) / 2);
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }
 }
 
-/* Lite: 3 kart yan yana, elle kaydırma */
+/* Lite: 3 kart yan yana */
 .featured-rail--lite .featured-rail__track > .og-job {
   flex: 0 0 calc((100cqw - 2 * var(--featured-gap)) / 3);
   width: calc((100cqw - 2 * var(--featured-gap)) / 3);
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
+  max-width: calc((100cqw - 2 * var(--featured-gap)) / 3);
 }
 
 .featured-rail--lite {
@@ -65,116 +67,117 @@
   margin: 0;
   border-radius: 14px;
   border-color: rgba(245, 197, 24, 0.38);
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.28),
-    0 0 0 1px rgba(245, 197, 24, 0.07);
+  min-width: 0;
+  overflow: hidden;
 }
 
-/* Kompakt — normal kartın küçültülmüş hali */
+/* Kompakt kart */
 .featured-rail-wrap .og-job--compact .og-job__inner {
   padding: 10px;
   gap: 8px;
 }
 
 .featured-rail-wrap .og-job--compact .og-job__head {
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 7px;
-  align-items: start;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(52px, 70px);
+  gap: 6px;
 }
 
 .featured-rail-wrap .og-job--compact .og-job__logo {
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   border-radius: 10px;
   padding: 4px;
-  gap: 2px;
-}
-.featured-rail-wrap .og-job--compact .og-job__logo-shield {
-  width: 18px;
-  height: 18px;
-}
-.featured-rail-wrap .og-job--compact .og-job__logo-label {
-  font-size: 6.5px;
 }
 
-.featured-rail-wrap .og-job--compact .og-job__main {
-  gap: 2px;
-  padding-top: 0;
-}
-.featured-rail-wrap .og-job--compact .og-job__company-name {
-  font-size: 9px;
-}
-.featured-rail-wrap .og-job--compact .og-job__verify {
-  width: 10px;
-  height: 10px;
-}
 .featured-rail-wrap .og-job--compact .og-job__title {
   font-size: 11.5px;
   line-height: 1.2;
   -webkit-line-clamp: 2;
 }
-.featured-rail-wrap .og-job--compact .og-job__location {
+
+.featured-rail-wrap .og-job--compact .og-job__company-name {
   font-size: 9px;
 }
-.featured-rail-wrap .og-job--compact .og-job__loc-ico {
-  width: 10px;
-  height: 10px;
+
+.featured-rail-wrap .og-job--compact .og-job__verified {
+  padding: 1px 4px;
+  font-size: 0;
+  gap: 0;
+}
+.featured-rail-wrap .og-job--compact .og-job__verify {
+  width: 11px;
+  height: 11px;
 }
 
 .featured-rail-wrap .og-job--compact .og-job__aside {
-  gap: 5px;
+  max-width: 70px;
+  gap: 4px;
 }
+
 .featured-rail-wrap .og-job--compact .og-job__bookmark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 7px;
 }
 .featured-rail-wrap .og-job--compact .og-job__bookmark-ico {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
 }
+
 .featured-rail-wrap .og-job--compact .og-job__salary-box {
-  min-width: 58px;
-  max-width: 72px;
+  max-width: 70px;
   padding: 4px 5px;
   border-radius: 8px;
 }
 .featured-rail-wrap .og-job--compact .og-job__salary-amount {
-  font-size: 9.5px;
-}
-.featured-rail-wrap .og-job--compact .og-job__salary-period {
-  font-size: 7.5px;
-  margin-top: 1px;
+  font-size: 9px;
 }
 
 .featured-rail-wrap .og-job--compact .og-job__tags {
   gap: 4px;
+  max-height: 52px;
+  overflow: hidden;
 }
 .featured-rail-wrap .og-job--compact .og-job__tag {
   padding: 3px 6px;
   font-size: 8.5px;
+  border-radius: 7px;
   gap: 3px;
 }
 .featured-rail-wrap .og-job--compact .og-job__tag-ico {
   width: 9px;
   height: 9px;
 }
+.featured-rail-wrap .og-job--compact .og-job__tag-label {
+  max-width: 5.5rem;
+}
 
-.featured-rail-wrap .og-job--compact .og-job__actions {
-  grid-template-columns: 1fr 1fr;
+.featured-rail-wrap .og-job--compact .og-job__foot {
   gap: 6px;
+  flex-wrap: nowrap;
+}
+.featured-rail-wrap .og-job--compact .og-job__posted {
+  display: none;
+}
+.featured-rail-wrap .og-job--compact .og-job__actions {
+  flex: 1 1 auto;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 5px;
 }
 .featured-rail-wrap .og-job--compact .og-job__btn-detail,
 .featured-rail-wrap .og-job--compact .og-job__btn-apply {
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 6px;
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 9px;
-  gap: 4px;
+  gap: 3px;
+  width: 100%;
 }
 .featured-rail-wrap .og-job--compact .og-job__btn-ico {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
 }
 
 .featured-rail-wrap .og-job--compact .og-job__read {
@@ -182,11 +185,8 @@
   left: 5px;
   font-size: 7px;
   padding: 1px 5px;
-  border-radius: 5px;
-  z-index: 9;
 }
 
-/* Noktalar */
 .featured-rail__dots {
   display: flex;
   justify-content: center;
@@ -215,6 +215,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
+  min-width: 0;
 }
 .featured-section-head__link {
   display: inline-flex;
@@ -231,33 +232,37 @@
   :root { --featured-gap: 8px; }
   .featured-rail-wrap .og-job--compact .og-job__inner { padding: 8px; gap: 6px; }
   .featured-rail-wrap .og-job--compact .og-job__head {
-    grid-template-columns: 42px minmax(0, 1fr) auto;
-    gap: 6px;
+    grid-template-columns: 36px minmax(0, 1fr) minmax(48px, 60px);
   }
   .featured-rail-wrap .og-job--compact .og-job__logo {
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
   }
   .featured-rail-wrap .og-job--compact .og-job__title { font-size: 10.5px; }
   .featured-rail-wrap .og-job--compact .og-job__btn-detail,
   .featured-rail-wrap .og-job--compact .og-job__btn-apply {
-    min-height: 30px;
+    min-height: 28px;
     font-size: 8.5px;
   }
-  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__logo {
-    width: 36px;
-    height: 36px;
-  }
-  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__title {
-    font-size: 9.5px;
-  }
-  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__btn-detail,
-  .featured-rail--lite .featured-rail__track > .og-job--compact .og-job__btn-apply {
-    min-height: 28px;
-    font-size: 8px;
-  }
+}
+
+/* Lite 3'lü: daha sıkı */
+.featured-rail--lite .og-job--compact .og-job__tags {
+  max-height: 28px;
+}
+.featured-rail--lite .og-job--compact .og-job__tag:nth-child(n + 3) {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .featured-rail { scroll-behavior: auto; }
+}
+
+@media (max-width: 768px) {
+  .featured-rail__track > .og-job {
+    box-shadow: none;
+  }
+  .featured-rail__dot.is-active {
+    box-shadow: none;
+  }
 }

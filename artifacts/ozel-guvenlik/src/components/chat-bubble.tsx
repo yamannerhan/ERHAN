@@ -177,6 +177,12 @@ export function ChatBubble() {
   const [location, navigate] = useLocation();
   const keyboardInset = useKeyboardInset();
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("og-chat-open", open);
+    return () => root.classList.remove("og-chat-open");
+  }, [open]);
   const [messages, setMessages] = useState<AnyMsg[]>(() => loadCachedHumans() as ExtMsg[]);
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
@@ -785,24 +791,31 @@ export function ChatBubble() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 24, scale: 0.92 }}
             transition={{ type: "spring", stiffness: 320, damping: 28 }}
-            className={`og-chat-win fixed z-50 flex flex-col ${expanded ? "og-chat-win-expanded" : ""}`}
+            className={`og-chat-win fixed z-[10050] flex flex-col ${expanded ? "og-chat-win-expanded" : ""}${keyboardInset > 0 ? " og-chat-win--kb" : ""}`}
             style={{
-              right: expanded ? "max(0.75rem, env(safe-area-inset-right))" : "1rem",
-              left: expanded ? "max(0.75rem, env(safe-area-inset-left))" : "auto",
+              right: keyboardInset > 0 || expanded
+                ? "max(0.5rem, env(safe-area-inset-right))"
+                : "1rem",
+              left: keyboardInset > 0 || expanded
+                ? "max(0.5rem, env(safe-area-inset-left))"
+                : "auto",
+              /* WhatsApp: pencere + yazma kutusu klavyenin tam üstünde */
               bottom: keyboardInset > 0
-                ? `calc(${keyboardInset}px + 0.5rem)`
+                ? `${keyboardInset}px`
                 : expanded
                   ? "max(0.5rem, env(safe-area-inset-bottom))"
                   : "calc(6rem + 56px)",
-              width: expanded ? "auto" : "min(460px, calc(100vw - 1.25rem))",
-              maxWidth: expanded ? "760px" : "460px",
+              width: keyboardInset > 0 || expanded
+                ? "auto"
+                : "min(460px, calc(100vw - 1.25rem))",
+              maxWidth: keyboardInset > 0 ? "100%" : expanded ? "760px" : "460px",
               height: keyboardInset > 0
-                ? `min(${expanded ? 720 : 560}px, calc(100dvh - ${keyboardInset}px - 4.5rem))`
+                ? `min(100dvh, calc(100dvh - ${keyboardInset}px - env(safe-area-inset-top, 0px) - 0.5rem))`
                 : expanded
                   ? "min(92dvh, calc(100dvh - 1rem))"
                   : "min(560px, calc(100dvh - 10.5rem))",
-              marginLeft: expanded ? "auto" : undefined,
-              marginRight: expanded ? "auto" : undefined,
+              marginLeft: keyboardInset > 0 || expanded ? "auto" : undefined,
+              marginRight: keyboardInset > 0 || expanded ? "auto" : undefined,
             }}
             role="dialog"
             aria-label="Topluluk Sohbeti"
