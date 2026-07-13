@@ -24,6 +24,7 @@ import { HomeQuickCards } from "@/components/home-quick-cards";
 import { HomeNewsTicker } from "@/components/home-news-ticker";
 import { getHomeTickerLines } from "@/lib/home-ticker";
 import { DisplayModeToggle } from "@/components/display-mode-toggle";
+import { HomeHero } from "@/components/home-hero";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 const BASE_URL = "https://ozelguvenlik.online";
@@ -219,7 +220,7 @@ export default function Home() {
         "name": "Özel Güvenlik Online",
         "alternateName": ["ozelguvenlik.online", "ÖzelGüvenlik.Online"],
         "url": BASE_URL,
-        "logo": `${BASE_URL}/favicon-192x192.png`,
+        "logo": `${BASE_URL}/brand-logo.png`,
         "sameAs": [],
         "contactPoint": {
           "@type": "ContactPoint",
@@ -466,6 +467,7 @@ export default function Home() {
         lines={isLite ? liteTickerDisplay : tickerLines}
         variant={isLite ? "static" : "marquee"}
       />
+      <HomeHero totalCount={totalCount} />
       <div className="og-home-mode-row px-4">
         <DisplayModeToggle />
       </div>

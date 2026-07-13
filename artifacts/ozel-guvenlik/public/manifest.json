@@ -1,14 +1,20 @@
 {
-  "name": "ÖZEL GÜVENLİK",
-  "short_name": "ÖZEL GÜVENLİK",
-  "description": "Özel Güvenlik İş İlanları & Topluluk Platformu",
-  "theme_color": "#4F46E5",
+  "name": "ozelguvenlik.online",
+  "short_name": "ÖzelGüvenlik",
+  "description": "Türkiye geneli özel güvenlik iş ilanları — bay bayan personel alımları",
+  "theme_color": "#0F172A",
   "background_color": "#0F172A",
   "display": "standalone",
   "orientation": "portrait",
   "scope": "/",
   "start_url": "/",
   "icons": [
+    {
+      "src": "/brand-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",

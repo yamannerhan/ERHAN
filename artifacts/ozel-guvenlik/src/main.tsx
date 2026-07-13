@@ -26,7 +26,11 @@ function clearBootSplash() {
   try {
     window.__OG_BOOT_OK = true;
     const splash = document.getElementById("_boot-splash");
-    if (splash) splash.remove();
+    if (!splash) return;
+    splash.classList.add("og-pwa-splash--out");
+    window.setTimeout(() => {
+      try { splash.remove(); } catch { /* ignore */ }
+    }, 280);
   } catch { /* ignore */ }
 }
 

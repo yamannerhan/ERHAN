@@ -2,7 +2,7 @@
 
 export const SEO_BASE_URL = "https://ozelguvenlik.online";
 export const SEO_SITE_NAME = "Özel Güvenlik İş İlanları";
-export const SEO_OG_IMAGE = `${SEO_BASE_URL}/og-image.jpg`;
+export const SEO_OG_IMAGE = `${SEO_BASE_URL}/og-brand.jpg`;
 
 export function safeText(value: unknown, fallback: string): string {
   if (value == null) return fallback;
@@ -18,12 +18,12 @@ export function truncateDescription(text: string, max = 158): string {
 }
 
 export function buildHomeTitle(): string {
-  return "Özel Güvenlik İş İlanları | ozelguvenlik.online — Bay Bayan Güvenlik Personeli Alımları";
+  return "ozelguvenlik.online | Özel Güvenlik İş İlanları";
 }
 
 export function buildHomeDescription(): string {
   return truncateDescription(
-    "ozelguvenlik.online — Türkiye geneli özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru.",
+    "ozelguvenlik.online — Türkiye geneli güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV ve hızlı başvuru.",
   );
 }
 

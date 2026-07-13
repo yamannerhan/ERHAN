@@ -1,0 +1,116 @@
+/* PWA / boot açılış — logo animasyonu (lite'da da çalışır) */
+.og-pwa-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  background: radial-gradient(ellipse 120% 80% at 50% 20%, #1a2744 0%, #0f172a 55%, #080d18 100%);
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: center;
+  overflow: hidden;
+}
+
+.og-pwa-splash__glow {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(245, 197, 24, 0.28) 0%, rgba(245, 197, 24, 0) 70%);
+  animation: og-splash-glow 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.og-pwa-splash__logo-wrap {
+  position: relative;
+  width: 118px;
+  height: 118px;
+  animation: og-splash-logo-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.og-pwa-splash__logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 24px rgba(245, 197, 24, 0.35));
+  animation: og-splash-float 2.8s ease-in-out 0.85s infinite;
+}
+
+.og-pwa-splash__brand {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
+  animation: og-splash-text-in 0.7s ease 0.35s both;
+}
+
+.og-pwa-splash__brand span {
+  color: #f5c518;
+}
+
+.og-pwa-splash__tag {
+  margin: 0;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  animation: og-splash-text-in 0.7s ease 0.5s both;
+}
+
+.og-pwa-splash__ring {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(245, 197, 24, 0.2);
+  border-top-color: #f5c518;
+  border-radius: 50%;
+  animation: og-splash-spin 0.85s linear infinite, og-splash-text-in 0.5s ease 0.65s both;
+  margin-top: 4px;
+}
+
+@keyframes og-splash-logo-in {
+  from { opacity: 0; transform: scale(0.72); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes og-splash-text-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes og-splash-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes og-splash-glow {
+  0%, 100% { opacity: 0.55; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes og-splash-spin {
+  to { transform: rotate(360deg); }
+}
+
+.og-pwa-splash--out {
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .og-pwa-splash__logo-wrap,
+  .og-pwa-splash__logo,
+  .og-pwa-splash__glow,
+  .og-pwa-splash__brand,
+  .og-pwa-splash__tag,
+  .og-pwa-splash__ring {
+    animation: none !important;
+  }
+}

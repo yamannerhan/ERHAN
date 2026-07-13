@@ -142,6 +142,13 @@ html.og-lite .cmc-role-pill {
 }
 
 /* Hamburger menü — lite animasyon kısıtından muaf */
+html.og-lite .og-pwa-splash,
+html.og-lite .og-pwa-splash * {
+  animation-duration: unset !important;
+  animation-iteration-count: unset !important;
+  transition-duration: unset !important;
+}
+
 html.og-lite .og-hd-overlay--lite,
 html.og-lite .og-hd-drawer--lite,
 html.og-lite .og-hd-drawer--lite * {

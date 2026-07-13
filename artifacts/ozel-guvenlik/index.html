@@ -42,8 +42,8 @@
     <meta name="google-site-verification" content="ig59nbwFkwMDZqYh-XTYyjhVS7wg71g9pMQGSTqH2yw" />
 
     <!-- Temel SEO -->
-    <title>Özel Güvenlik İş İlanları | ozelguvenlik.online — Bay Bayan Güvenlik Personeli Alımları</title>
-    <meta name="description" content="ozelguvenlik.online — Türkiye geneli özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru." />
+    <title>ozelguvenlik.online | Özel Güvenlik İş İlanları</title>
+    <meta name="description" content="ozelguvenlik.online — Türkiye geneli güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV ve hızlı başvuru." />
     <meta name="keywords" content="özel güvenlik iş ilanları, ozelguvenlik.online, özelgüvenlik.online, güvenlik görevlisi alımı, bay bayan güvenlik ilanları, silahlı güvenlik iş ilanları, silahsız güvenlik iş ilanları, İstanbul özel güvenlik iş ilanları, Kocaeli özel güvenlik iş ilanları, Gebze güvenlik iş ilanları, GOSB güvenlik ilanları, TOSB güvenlik ilanları" />
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
     <meta name="application-name" content="Özel Güvenlik İş İlanları" />
@@ -60,16 +60,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Özel Güvenlik İş İlanları" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#4F46E5" />
+    <meta name="theme-color" content="#0F172A" />
 
     <!-- Open Graph -->
     <meta property="og:locale" content="tr_TR" />
     <meta property="og:site_name" content="Özel Güvenlik İş İlanları | ozelguvenlik.online" />
-    <meta property="og:title" content="Özel Güvenlik İş İlanları | ozelguvenlik.online" />
+    <meta property="og:title" content="ozelguvenlik.online | Özel Güvenlik İş İlanları" />
     <meta property="og:description" content="ozelguvenlik.online — Bay bayan özel güvenlik iş ilanları, ücretsiz CV oluşturma, ücretsiz ilan verme ve yapay zeka destekli iş bulma platformu." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://ozelguvenlik.online/" />
-    <meta property="og:image" content="https://ozelguvenlik.online/og-image.jpg" />
+    <meta property="og:image" content="https://ozelguvenlik.online/og-brand.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Özel Güvenlik İş İlanları Platformu" />
@@ -78,7 +78,7 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Özel Güvenlik İş İlanları" />
     <meta name="twitter:description" content="Türkiye geneli özel güvenlik iş ilanları ve ücretsiz CV oluşturma platformu." />
-    <meta name="twitter:image" content="https://ozelguvenlik.online/og-image.jpg" />
+    <meta name="twitter:image" content="https://ozelguvenlik.online/og-brand.jpg" />
 
     <!-- Favicon -->
     <link rel="icon" href="/favicon.ico" />
@@ -86,6 +86,7 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/pwa-splash.css" />
     <link rel="dns-prefetch" href="https://ozelguvenlik.online" />
     <script>
       (function () {
@@ -108,10 +109,14 @@
   </head>
   <body>
     <div id="root">
-      <div id="_boot-splash" style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#0F172A;flex-direction:column;gap:12px;padding:20px;text-align:center;color:#F1F5F9;font-family:system-ui,-apple-system,sans-serif">
-        <div style="width:36px;height:36px;border:3px solid rgba(245,197,24,0.25);border-top-color:#f5c518;border-radius:50%;animation:_ogsp 0.9s linear infinite"></div>
-        <p style="margin:0;font-size:13px;color:#94A3B8">Yükleniyor…</p>
-        <style>@keyframes _ogsp{to{transform:rotate(360deg)}}</style>
+      <div id="_boot-splash" class="og-pwa-splash" aria-hidden="true">
+        <div class="og-pwa-splash__glow"></div>
+        <div class="og-pwa-splash__logo-wrap">
+          <img src="/brand-logo.png" alt="" class="og-pwa-splash__logo" width="118" height="118" decoding="sync" />
+        </div>
+        <p class="og-pwa-splash__brand"><span>ozelguvenlik</span>.online</p>
+        <p class="og-pwa-splash__tag">Özel güvenlik iş ilanları</p>
+        <div class="og-pwa-splash__ring" role="presentation"></div>
       </div>
     </div>
     <script>
