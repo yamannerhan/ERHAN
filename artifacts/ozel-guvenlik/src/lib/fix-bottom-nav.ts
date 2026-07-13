@@ -1,75 +1,83 @@
-/** Android / PWA: küçük chrome kaymaları için alt menüyü hizala; klavyede ASLA yukarı çekme. */
+/** Alt menüyü klavyede yukarı çekme — hafif, döngüsüz. */
 export function initBottomNavViewportFix(): void {
   if (typeof window === "undefined") return;
-  if ((window as Window & { __ogBottomNavFix?: boolean }).__ogBottomNavFix) return;
-  (window as Window & { __ogBottomNavFix?: boolean }).__ogBottomNavFix = true;
+  const w = window as Window & { __ogBottomNavFix?: boolean };
+  if (w.__ogBottomNavFix) return;
+  w.__ogBottomNavFix = true;
 
-  let bound = false;
+  let ticking = false;
+  let lastBottom = "";
 
   const isEditableFocused = () => {
     const el = document.activeElement as HTMLElement | null;
     if (!el) return false;
     const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-    return el.isContentEditable === true;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
   };
 
   const apply = () => {
     const nav = document.querySelector<HTMLElement>(".og-bottom-nav");
     if (!nav) return;
 
-    const chatOpen = document.documentElement.classList.contains("og-chat-open");
     const vv = window.visualViewport;
     const gap = vv
       ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
       : 0;
 
-    // Klavye veya sohbet açıkken: menü viewport dibinde kalsın (klavye arkasında)
-    const keyboardUp = gap > 120 || isEditableFocused();
-    if (chatOpen || keyboardUp) {
-      nav.style.bottom = "0px";
+    // Klavye (büyük inset veya input focus): menü dibe sabit + gizle (klavye arkası)
+    const keyboardUp = isEditableFocused() || gap > 180;
+    const chatOpen = document.documentElement.classList.contains("og-chat-open");
+
+    if (keyboardUp || chatOpen) {
+      if (lastBottom !== "0") {
+        nav.style.bottom = "0px";
+        lastBottom = "0";
+      }
       nav.classList.add("og-bottom-nav--behind-kb");
-      document.documentElement.classList.toggle("og-keyboard-open", keyboardUp);
       return;
     }
 
     nav.classList.remove("og-bottom-nav--behind-kb");
-    document.documentElement.classList.remove("og-keyboard-open");
 
-    // Sadece küçük chrome / adres çubuğu farkı (klavye değil)
-    if (gap > 0 && gap <= 120) {
-      nav.style.bottom = `${gap}px`;
-    } else {
-      nav.style.removeProperty("bottom");
+    // Küçük chrome farkı (adres çubuğu); klavye değil
+    const next = gap > 0 && gap <= 100 ? `${gap}px` : "";
+    if (next !== lastBottom) {
+      if (next) nav.style.bottom = next;
+      else nav.style.removeProperty("bottom");
+      lastBottom = next;
     }
   };
 
-  const bind = () => {
-    if (bound) return;
-    bound = true;
-    apply();
-    window.visualViewport?.addEventListener("resize", apply);
-    window.visualViewport?.addEventListener("scroll", apply);
-    window.addEventListener("resize", apply);
-    window.addEventListener("orientationchange", apply);
-    document.addEventListener("visibilitychange", apply);
-    document.addEventListener("focusin", apply);
-    document.addEventListener("focusout", apply);
-    // Sohbet sınıfı değişince de yeniden uygula
-    const obs = new MutationObserver(apply);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  };
-
-  const tryBind = () => {
-    if (!document.querySelector(".og-bottom-nav")) return false;
-    bind();
-    return true;
-  };
-
-  if (!tryBind()) {
-    const obs = new MutationObserver(() => {
-      if (tryBind()) obs.disconnect();
+  const schedule = () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      apply();
     });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
+  };
+
+  const start = () => {
+    apply();
+    window.visualViewport?.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("orientationchange", schedule, { passive: true });
+    document.addEventListener("focusin", schedule, { passive: true });
+    document.addEventListener("focusout", schedule, { passive: true });
+  };
+
+  if (document.querySelector(".og-bottom-nav")) {
+    start();
+    return;
   }
+
+  // Nav mount olana kadar kısa bekle — subtree MutationObserver kullanma (freeze riski)
+  let tries = 0;
+  const id = window.setInterval(() => {
+    tries += 1;
+    if (document.querySelector(".og-bottom-nav") || tries > 40) {
+      window.clearInterval(id);
+      if (document.querySelector(".og-bottom-nav")) start();
+    }
+  }, 250);
 }

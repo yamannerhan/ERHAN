@@ -1,10 +1,10 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { Link } from "wouter";
 import {
-  MapPin, Clock, BadgeCheck, Bookmark, Building2, Briefcase,
-  User, CalendarDays, Utensils, Bus, Shield, Star, ArrowRight,
+  MapPin, Clock, BadgeCheck, Bookmark, Briefcase,
+  User, ArrowRight,
 } from "lucide-react";
-import { displayCompany, extractBenefits } from "@/lib/utils";
+import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
@@ -28,10 +28,6 @@ export type JobCardListing = {
   sourceTag?: string | null;
   createdAt: string;
 };
-
-function isRealLogo(url?: string | null): boolean {
-  return isRealCompanyLogo(url);
-}
 
 function splitCity(city: string): { city: string; district: string | null } {
   const parts = city.split(/\s*[\/|,]\s*/).map((s) => s.trim()).filter(Boolean);
@@ -60,15 +56,6 @@ function detectGender(blob: string): string | null {
   return null;
 }
 
-function detectExperience(blob: string): string | null {
-  const t = blob.toLocaleLowerCase("tr-TR");
-  if (/deneyim\s*(şart\s*)?de[ğg]il|tecr[uü]be\s*(şart\s*)?de[ğg]il|deneyimsiz/.test(t)) {
-    return "Deneyim Şart Değil";
-  }
-  if (/deneyimli|tecr[uü]beli|\d+\s*y[ıi]l/.test(t)) return "Deneyimli";
-  return null;
-}
-
 function formatSalary(raw?: string | null): string {
   const s = (raw || "").trim();
   if (!s || /belirtilmedi|g[oö]r[uü][sş]me/i.test(s)) return "Görüşmede";
@@ -90,33 +77,7 @@ function formatPostedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
 }
 
-function postedBadge(iso: string): string | null {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return null;
-  const hours = (Date.now() - t) / 3_600_000;
-  if (hours < 24) return "Bugün";
-  if (hours < 48) return "Dün";
-  return null;
-}
-
-const BENEFIT_ICON: Record<string, typeof Utensils> = {
-  Yemek: Utensils,
-  "Yemek Kartı": Utensils,
-  Servis: Bus,
-  SGK: Shield,
-  Prim: Star,
-  Konaklama: Building2,
-  Kıyafet: Briefcase,
-  Mesai: Clock,
-  Yol: Bus,
-};
-
-type Chip = {
-  key: string;
-  label: string;
-  Icon: typeof Clock;
-  tone?: "default" | "time" | "shift";
-};
+type Chip = { key: string; label: string; Icon: typeof Clock; tone?: "shift" };
 
 type Props = {
   listing: JobCardListing;
@@ -124,11 +85,10 @@ type Props = {
   adminOverlay?: React.ReactNode;
   saved?: boolean;
   onToggleSave?: (e: React.MouseEvent, id: number) => void;
-  /** Öne çıkan şerit — kompakt boyut */
   compact?: boolean;
 };
 
-/** Referans görsel — normal / öne çıkan ilan kartı */
+/** Referans düzen — hafif (az ikon, kısa metin taraması) */
 export function JobListingCard({
   listing,
   onNavigate,
@@ -139,11 +99,12 @@ export function JobListingCard({
 }: Props) {
   const isRead = useListingRead(listing.id);
   const company = displayCompany(listing.company) || (compact ? "ozelguvenlik.online" : "Firma");
-  const blob = `${listing.title} ${listing.description ?? ""} ${listing.requirements ?? ""}`;
-  const { city, district } = splitCity(listing.city);
+  // Uzun description tüm kartlarda tekrar regex'lenmesin
+  const blob = `${listing.title} ${(listing.requirements ?? "").slice(0, 400)} ${(listing.description ?? "").slice(0, 400)}`;
+  const { city, district } = splitCity(listing.city || "");
   const location = district ? `${city} / ${district}` : city;
   const logo = resolveCompanyLogo(listing.companyLogoUrl);
-  const hasOwnLogo = isRealLogo(listing.companyLogoUrl);
+  const hasOwnLogo = isRealCompanyLogo(listing.companyLogoUrl);
   const verified = !!listing.companyVerified || hasOwnLogo;
   const salaryText = formatSalary(listing.salary);
   const posted = formatPostedAt(listing.createdAt);
@@ -159,28 +120,15 @@ export function JobListingCard({
   const applyHref = resolvedApply && resolvedApply !== "auth_required" ? resolvedApply : detailHref;
   const applyIsTel = applyHref.startsWith("tel:");
 
-  const chips: Chip[] = useMemo(() => {
-    const list: Chip[] = [];
-    list.push({ key: "loc", label: location, Icon: MapPin });
-    if (district) list.push({ key: "dist", label: district, Icon: Building2 });
-    const shift = detectShift(blob);
-    if (shift) list.push({ key: "shift", label: shift, Icon: Clock, tone: "shift" });
-    const workType = (listing.workType || "").trim();
-    if (workType) list.push({ key: "work", label: workType, Icon: Briefcase });
-    const gender = detectGender(blob);
-    if (gender) list.push({ key: "gender", label: gender, Icon: User });
-    const day = postedBadge(listing.createdAt);
-    if (day) list.push({ key: "day", label: day, Icon: CalendarDays, tone: "time" });
-    const benefits = extractBenefits(listing.requirements, listing.description);
-    for (const b of benefits.slice(0, compact ? 2 : 4)) {
-      list.push({ key: `b-${b}`, label: b, Icon: BENEFIT_ICON[b] || Star });
-    }
-    const exp = detectExperience(blob);
-    if (exp) list.push({ key: "exp", label: exp, Icon: Star });
-    return list;
-  }, [blob, compact, district, listing.createdAt, listing.description, listing.requirements, listing.workType, location]);
-
-  const visibleChips = compact ? chips.slice(0, 4) : chips;
+  const chips: Chip[] = [];
+  chips.push({ key: "loc", label: location, Icon: MapPin });
+  const shift = detectShift(blob);
+  if (shift) chips.push({ key: "shift", label: shift, Icon: Clock, tone: "shift" });
+  const workType = (listing.workType || "").trim();
+  if (workType) chips.push({ key: "work", label: workType, Icon: Briefcase });
+  const gender = detectGender(blob);
+  if (gender) chips.push({ key: "gender", label: gender, Icon: User });
+  const visibleChips = chips.slice(0, compact ? 3 : 4);
 
   const markReadAndNavigate = () => {
     markListingRead(listing.id);
@@ -195,7 +143,7 @@ export function JobListingCard({
       <div className="og-job__inner">
         <div className="og-job__head">
           <div className="og-job__logo">
-            <img src={logo} alt="" loading="lazy" className={hasOwnLogo ? "" : "og-job__logo-brand"} />
+            <img src={logo} alt="" loading="lazy" decoding="async" className={hasOwnLogo ? "" : "og-job__logo-brand"} />
           </div>
 
           <div className="og-job__main">
@@ -274,7 +222,7 @@ export function JobListingCard({
                 }
               }}
             >
-              <span>{compact ? "Başvur" : "Başvur"}</span>
+              <span>Başvur</span>
               <ArrowRight className="og-job__btn-ico" aria-hidden />
             </a>
           </div>

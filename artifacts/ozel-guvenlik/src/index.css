@@ -3374,9 +3374,7 @@ html:not(.dark) .og-pt-row {
   z-index: 10040;
 }
 
-html.og-chat-open .og-chat-fab,
-html.og-keyboard-open .og-chat-fab {
-  /* Açık sohbet / klavye: FAB alt menüyle beraber gizlenmesin ama arkaya itilmesin */
+html.og-chat-open .og-chat-fab {
   z-index: 10040;
 }
 

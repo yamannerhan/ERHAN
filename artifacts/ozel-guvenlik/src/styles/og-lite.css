@@ -165,8 +165,6 @@ html.og-lite .og-hd-overlay--lite {
 /* ── Kaydırma: ilan kartları düz katman (ghost/tear önleme) ── */
 html.og-lite .og-list-row-wrap {
   contain: layout paint !important;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
   transform: none !important;
   will-change: auto !important;
   isolation: auto !important;

@@ -22,7 +22,6 @@
 
 /* Sohbet / klavye: alt menü klavyenin arkasında sabit, yukarı kalkmaz */
 html.og-chat-open .og-bottom-nav,
-html.og-keyboard-open .og-bottom-nav,
 .og-bottom-nav.og-bottom-nav--behind-kb {
   bottom: 0 !important;
   z-index: 10;

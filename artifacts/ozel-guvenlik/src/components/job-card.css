@@ -476,8 +476,6 @@
 @media (max-width: 768px) {
   .og-list-row-wrap {
     contain: layout paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 220px;
     transform: none !important;
     will-change: auto;
   }
