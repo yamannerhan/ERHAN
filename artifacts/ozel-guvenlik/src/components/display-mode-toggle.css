@@ -30,7 +30,65 @@
 .og-home-mode-row {
   display: flex;
   justify-content: flex-end;
-  padding: 0 4px 2px;
+  align-items: center;
+  padding: 2px 12px 0;
+  margin: 0;
+  min-height: 0;
+}
+
+/* Anasayfa: banner ↔ Pro/Lite ↔ ilan sayısı boşluklarını sıkı tut */
+.og-home-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.og-home-banner {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 12px 0;
+  margin: 0;
+}
+
+.og-home-body {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+  .og-home-mode-row {
+    padding: 1px 10px 0;
+  }
+  .og-home-banner {
+    padding: 1px 10px 0;
+  }
+  .og-home-body {
+    padding: 4px 10px 14px;
+    gap: 8px;
+  }
+  .og-home-banner .og-banner-carousel {
+    border-radius: 12px;
+    min-height: 72px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .og-home-mode-row,
+  .og-home-banner {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .og-home-banner {
+    padding-top: 6px;
+  }
+  .og-home-body {
+    padding: 10px 16px 20px;
+    gap: 14px;
+  }
 }
 
 .og-mode-switch-overlay {

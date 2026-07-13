@@ -466,18 +466,18 @@ export default function Home() {
         lines={isLite ? liteTickerDisplay : tickerLines}
         variant={isLite ? "static" : "marquee"}
       />
-      <div className="og-home-mode-row px-4">
-        <DisplayModeToggle />
-      </div>
-
-      {!isLite && banners.length > 0 && (
-        <div className="px-4 pt-4 w-full box-border">
-          <BannerCarousel banners={banners} />
+      <div className="og-home-top">
+        <div className="og-home-mode-row">
+          <DisplayModeToggle />
         </div>
-      )}
 
-      <div className="p-4 space-y-4">
+        {!isLite && banners.length > 0 && (
+          <div className="og-home-banner">
+            <BannerCarousel banners={banners} />
+          </div>
+        )}
 
+        <div className="og-home-body">
         {/* ── Hızlı kartlar (referans) ───────────────────────── */}
         <HomeQuickCards
           totalCount={totalCount}
