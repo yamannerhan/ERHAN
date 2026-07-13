@@ -128,7 +128,7 @@ export function JobListingCard({
   if (workType) chips.push({ key: "work", label: workType, Icon: Briefcase });
   const gender = detectGender(blob);
   if (gender) chips.push({ key: "gender", label: gender, Icon: User });
-  const visibleChips = chips.slice(0, compact ? 3 : 4);
+  const visibleChips = chips.slice(0, compact ? 2 : 4);
 
   const markReadAndNavigate = () => {
     markListingRead(listing.id);

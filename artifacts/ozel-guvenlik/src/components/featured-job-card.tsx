@@ -11,11 +11,11 @@ type CarouselProps = {
   onNavigate?: () => void;
   savedIds?: Set<number>;
   onToggleSave?: (e: React.MouseEvent, id: number) => void;
-  /** Lite: elle kaydırma, 3 kart yan yana, otomatik kayma yok */
+  /** Lite: elle kaydırma, 2 kart yan yana, otomatik kayma yok */
   isLite?: boolean;
 };
 
-/** Pro: otomatik kayan şerit | Lite: elle kaydırma, 3'lü sıra */
+/** Pro: otomatik kayan şerit | Lite: elle kaydırma, 2'li sıra */
 export function FeaturedJobCarousel({
   listings,
   onNavigate,
