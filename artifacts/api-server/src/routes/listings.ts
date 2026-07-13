@@ -79,12 +79,15 @@ const DISTRICT_PROVINCES: Record<string, string> = {
   "körfez", "korfez", "derince", "gölcük", "golcuk", "başiskele", "basiskele", "kandıra", "kandira", "kartepe", "değirmendere", "degirmendere",
   "hereke", "yarımca", "yarimca", "tütünçiftlik", "tutunciftlik", "kirazlıyalı", "kirazliyali", "yenikent", "maşukiye", "masukiye", "uzuntarla",
   "köseköy", "kosekoy", "bahçecik", "bahcecik", "yahyakaptan", "alikahya", "bekirdere", "karabaş", "karabas", "veliahmet",
-  "plajyolu", "tatlıkuyu", "tatlikuyu", "mustafapaşa", "mustafapasa", "mimar sinan", "şekerpınar", "sekerpinar", "gosb",
-  "gebze osb", "gebze organize sanayi bölgesi", "tosb", "imes osb", "gebkim", "gebkim osb", "taysad", "güzeller", "guzeller", "dilovası osb",
-  "dilovasi osb", "kimya osb", "plastikçiler osb", "plastikciler osb", "makine ihtisas osb", "asım kibar osb", "asim kibar osb", "kobi osb",
-  "demirciler osb", "kömürcüler osb", "komurculer osb", "kartepe karma osb", "başiskele osb", "basiskele osb", "pelitli", "balçık", "balcik",
-  "tepecik", "muallimköy", "muallimkoy", "köseler", "koseler", "cumhuriyet mahallesi", "derince liman", "evyapport", "safiport", "ford otosan",
-  "hyundai assan", "assa abloy", "pirelli", "brisa", "gölcük tersane", "golcuk tersane", "ford yeniköy", "ford yenikoy",
+  "plajyolu", "tatlıkuyu", "tatlikuyu", "mustafapaşa", "mustafapasa",
+  "şekerpınar", "sekerpinar", "gosb", "taysad", "gebze taysad",
+  "gebze osb", "gebze organize sanayi bölgesi", "tosb", "imes osb", "gebkim", "gebkim osb",
+  "dilovası osb", "dilovasi osb", "kimya ihtisas osb", "plastikçiler osb", "plastikciler osb",
+  "makine ihtisas osb", "asım kibar osb", "asim kibar osb", "kobi osb",
+  "demirciler osb", "kömürcüler osb", "komurculer osb", "kartepe karma osb", "başiskele osb", "basiskele osb",
+  "pelitli", "balçık", "balcik", "muallimköy", "muallimkoy", "köseler", "koseler",
+  "derince liman", "evyapport", "safiport", "ford otosan",
+  "hyundai assan", "gölcük tersane", "golcuk tersane", "ford yeniköy", "ford yenikoy",
 ].forEach(term => { DISTRICT_PROVINCES[term] = "Kocaeli"; });
 
 Object.assign(DISTRICT_PROVINCES, getRegionalDistrictProvinces());
@@ -175,30 +178,75 @@ async function getLocationTermsForProvince(province: string): Promise<string[]> 
 
 async function cityFilterCondition(city: string) {
   const province = extractProvinceName(city) ?? city;
+  const normProv = normalizeCityText(province);
+
+  // Kısa / belirsiz terimler (başka illerle çakışır) — filtrede kullanma
+  const AMBIGUOUS = new Set([
+    "kimyaosb", "tepecik", "mimarsinan", "yenisehir", "cumhuriyetmahallesi",
+    "aksaray", "konak", "merkez", "sanayi", "osb", "organize", "fabrika",
+    "hyundai", "brisa", "pirelli", "goodyear",
+  ]);
+
   const customTerms = await getLocationTermsForProvince(province);
   const districts = Object.entries(DISTRICT_PROVINCES)
     .filter(([, p]) => p === province)
     .map(([d]) => d);
-  // Sadece city alanında ara. Başlık/açıklamada "Ankara" vb. geçen İstanbul ilanları
-  // yanlışlıkla Ankara filtresine düşüyordu (SEO /ankara sayfasını bozuyordu).
-  const patterns = [province, city, ...districts, ...customTerms]
-    .map((t) => String(t || "").trim())
-    .filter((t) => t.length >= 2);
-  const unique = [...new Set(patterns)];
 
-  return or(...unique.flatMap((pattern) => {
-    const variants = locationSearchVariants(pattern);
-    return variants.flatMap((variant) => {
+  const uniqueDistricts = [...districts, ...customTerms]
+    .map((t) => String(t || "").trim())
+    .filter((t) => {
+      const compact = normalizeCityText(t).replace(/\s+/g, "");
+      if (compact.length < 5) return false;
+      if (AMBIGUOUS.has(compact)) return false;
+      return true;
+    });
+
+  // 1) İl adı city alanında geçmeli VEYA benzersiz OSB/ilçe
+  const provincePatterns = locationSearchVariants(province);
+  const positive = or(
+    ...provincePatterns.flatMap((variant) => {
       const norm = normalizeCityText(variant);
       const compact = norm.replace(/\s+/g, "");
       if (compact.length < 2) return [];
       return [
+        ilike(listingsTable.city, `${variant}%`),
         ilike(listingsTable.city, `%${variant}%`),
+        sql`${normalizedColumn(listingsTable.city)} like ${`${norm}%`}`,
         sql`${normalizedColumn(listingsTable.city)} like ${`%${norm}%`}`,
         sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${compact}%`}`,
       ];
+    }),
+    ...uniqueDistricts.flatMap((pattern) => {
+      const variants = locationSearchVariants(pattern);
+      return variants.flatMap((variant) => {
+        const norm = normalizeCityText(variant);
+        const compact = norm.replace(/\s+/g, "");
+        if (compact.length < 5) return [];
+        return [
+          ilike(listingsTable.city, `%${variant}%`),
+          sql`${normalizedColumn(listingsTable.city)} like ${`%${norm}%`}`,
+          sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${compact}%`}`,
+        ];
+      });
+    }),
+  );
+
+  // 2) city alanı başka bir il ile başlıyorsa ELER
+  //    örn: "İstanbul / Tuzla Kimya OSB" → Kocaeli filtresine girmez
+  const otherProvinceClauses = PROVINCES
+    .filter((p) => normalizeCityText(p) !== normProv)
+    .flatMap((p) => {
+      const np = normalizeCityText(p);
+      return [
+        sql`${normalizedColumn(listingsTable.city)} like ${`${np} /%`}`,
+        sql`${normalizedColumn(listingsTable.city)} like ${`${np}/%`}`,
+        sql`${normalizedColumn(listingsTable.city)} like ${`${np},%`}`,
+        sql`${normalizedColumn(listingsTable.city)} = ${np}`,
+      ];
     });
-  }));
+
+  if (otherProvinceClauses.length === 0) return positive;
+  return and(positive, sql`NOT (${or(...otherProvinceClauses)})`);
 }
 
 function pickAutoImage(title: string, description: string | null): string {

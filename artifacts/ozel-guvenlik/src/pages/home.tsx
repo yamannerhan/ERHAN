@@ -376,9 +376,36 @@ export default function Home() {
   const apiTotal = listingsData?.total ?? 0;
   const allListings = apiListings;
   const filtered = useMemo(() => {
-    if (activePill === "all" || activePill === "istanbul" || (activePill === "other" && otherCity)) {
-      return allListings;
+    const norm = (s: string) => s.toLocaleLowerCase("tr-TR");
+    const primary = (city: string) => norm(city).split(/[\/,|]/)[0]?.trim() || "";
+
+    if (activePill === "other" && otherCity) {
+      const needle = norm(otherCity);
+      return allListings.filter((l) => {
+        const c = norm(l.city || "");
+        const head = primary(l.city || "");
+        // Başka il ile başlayanları ele (İstanbul / … → Kocaeli filtresine düşmez)
+        if (head && !head.includes(needle) && !c.includes(` ${needle}`) && !c.includes(`/${needle}`) && !c.startsWith(needle)) {
+          // benzersiz OSB/ilçe city alanında olabilir (Kocaeli / TAYSAD)
+          return c.includes(needle);
+        }
+        return c.includes(needle) || head.includes(needle);
+      });
     }
+
+    if (activePill === "istanbul") {
+      return allListings.filter((l) => {
+        const c = norm(l.city || "");
+        const head = primary(l.city || "");
+        if (/^(kocaeli|ankara|izmir|bursa|sakarya|tekirdag|yalova|konya|antalya|adana|mersin)\b/.test(head)) {
+          return false;
+        }
+        return /istanbul|anadolu|avrupa/.test(c);
+      });
+    }
+
+    if (activePill === "all") return allListings;
+
     const pill = QUICK_CITY_PILLS.find(p => p.id === activePill);
     if (pill?.match) {
       return allListings.filter(l => pill.match!(l.city));

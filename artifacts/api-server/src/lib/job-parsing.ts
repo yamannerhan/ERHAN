@@ -261,6 +261,21 @@ function hasTerm(haystackAscii: string, term: string): boolean {
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystackAscii);
 }
 
+/** Görev yeri / OSB — firma merkezinden (İzmir vb.) daha güçlü sinyal */
+const WORKPLACE_BOOST = new Set([
+  "gosb", "taysad", "gebze taysad", "tosb", "gebkim", "gebze osb", "gebze organize sanayi bolgesi",
+  "imes osb", "plastikciler osb", "kimya ihtisas osb", "dilovasi makine osb", "demirciler osb",
+  "tuzla", "tuzlaosb", "idosb", "ikitelli", "dudullu", "hadimkoy", "ostim", "aosb", "nosab",
+  "gebze", "darica", "cayirova", "dilovasi", "sekerpinar",
+]);
+
+function workplaceBoost(termKey: string): number {
+  const n = normalize(termKey).replace(/\s+/g, " ");
+  if (WORKPLACE_BOOST.has(n) || WORKPLACE_BOOST.has(n.replace(/\s+/g, ""))) return 420;
+  if (/\bosb\b|organize sanayi|taysad|gosb|tosb|gebkim/.test(n)) return 380;
+  return 0;
+}
+
 function detectMentionedCities(ascii: string): Set<string> {
   const mentioned = new Set<string>();
   const cityKeys = Object.entries(CITY_DISPLAY).sort((a, b) => b[0].length - a[0].length);
@@ -274,13 +289,17 @@ export function extractLocation(text: string): ParsedLocation {
   const ascii = normalize(text);
   const mentioned = detectMentionedCities(ascii);
 
+  // Görev yeri bağlamı: merkez şehir cezası daha hafif
+  const hasWorkplaceCue = /gorev yeri|calis(ilacak|ma) yer|proje lokasyon|proje yeri|lokasyon|tesis|fabrika|osb|organize sanayi|taysad|gosb/.test(ascii);
+
   type Candidate = ParsedLocation & { score: number };
   const candidates: Candidate[] = [];
 
   const preferCity = (city: string): number => {
     if (mentioned.size === 0) return 0;
     if (mentioned.has(city)) return 50;
-    // Metinde açıkça başka il varken bu adayı cezalandır
+    // Açıklamada başka il adı var ama OSB/görev yeri bu ili işaretliyorsa cezayı hafiflet
+    if (hasWorkplaceCue) return -15;
     return -40;
   };
 
@@ -293,7 +312,7 @@ export function extractLocation(text: string): ParsedLocation {
       district: loc.district ?? null,
       neighborhood: loc.neighborhood,
       display,
-      score: 300 + nKey.length + preferCity(loc.city),
+      score: 300 + nKey.length + preferCity(loc.city) + workplaceBoost(key) + workplaceBoost(loc.neighborhood),
     });
   }
 
@@ -305,18 +324,20 @@ export function extractLocation(text: string): ParsedLocation {
       district: loc.district,
       neighborhood: null,
       display: `${loc.city} / ${loc.district}`,
-      score: 200 + nKey.length + preferCity(loc.city),
+      score: 200 + nKey.length + preferCity(loc.city) + workplaceBoost(key) + workplaceBoost(loc.district),
     });
   }
 
   for (const [key, city] of Object.entries(CITY_DISPLAY)) {
     if (!hasTerm(ascii, key)) continue;
+    // Sadece il adı: görev yeri OSB sinyali varsa zayıf kalsın
+    const alone = 100 + normalize(key).length + preferCity(city);
     candidates.push({
       city,
       district: null,
       neighborhood: null,
       display: city,
-      score: 100 + normalize(key).length + preferCity(city),
+      score: alone,
     });
   }
 

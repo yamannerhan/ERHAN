@@ -94,7 +94,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
   const [listing] = await db.insert(listingsTable).values({
     title,
     company: job.company ?? "Belirtilmemiş",
-    city: job.city ?? "Türkiye",
+    city: location.display ?? location.city ?? job.city ?? "Türkiye",
     salary: job.salary ?? undefined,
     workType: extractWorkType(job.rawText),
     description: job.description ?? job.rawText,

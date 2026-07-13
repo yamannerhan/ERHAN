@@ -2626,23 +2626,21 @@ export function isTelegramScraperPaused(): boolean {
   return telegramScraperPaused;
 }
 
-// Otomatik içe aktarılmış (sourceTag dolu) ilanları, kayıtlı metinlerinden
-// yeniden ayrıştırır: maaş, şehir, başlık ve cinsiyet bilgisini günceller.
-// Eksik bilgiyle eklenen eski ilanları düzeltmek için kullanılır.
+// Tüm aktif ilanların şehirlerini açıklama/başlıktan yeniden ayıklar.
 export async function reparseImportedListings(): Promise<{ total: number; updated: number }> {
   const rows = await db.select().from(listingsTable)
-    .where(isNotNull(listingsTable.sourceTag));
+    .where(eq(listingsTable.isActive, true));
 
   let updated = 0;
   for (const row of rows) {
-    const text = row.description;
-    if (!text?.trim()) continue;
+    const text = [row.title, row.description, row.requirements].filter(Boolean).join("\n");
+    if (!text.trim()) continue;
 
-    const newTitle = extractTitle(text);
+    const newTitle = extractTitle(row.description || text);
     const newCity = resolveListingCity(extractLocation(text));
-    const newSalary = extractSalary(text);
-    const newGender = extractGender(text);
-    const newPhone = extractPhone(text);
+    const newSalary = extractSalary(row.description || text);
+    const newGender = extractGender(row.description || text);
+    const newPhone = extractPhone(row.description || text);
 
     // Mevcut "Kaynak:" satırını koru
     const reqLines = (row.requirements ?? "").split("\n");
@@ -2655,16 +2653,16 @@ export async function reparseImportedListings(): Promise<{ total: number; update
       + (kaynakLine ? `\n${kaynakLine.trim()}` : "");
 
     const next: Partial<typeof listingsTable.$inferInsert> = {
-      title: newTitle,
       requirements,
     };
-    // Yeni bilgi bulunduysa güncelle; bulunamazsa mevcut değeri silme
-    if (newCity) next.city = newCity;
+    // Sadece açıklamada net konum çıktıysa şehir güncelle (Türkiye/boş üzerine yaz)
+    if (newCity && newCity !== "Türkiye") next.city = newCity;
+    if (newTitle && newTitle.length >= 8) next.title = newTitle;
     if (newSalary) next.salary = newSalary;
     if (newPhone) next.applyUrl = `tel:${newPhone}`;
     else if (row.applyUrl && /t\.me\/|telegram\.me\//i.test(row.applyUrl)) next.applyUrl = null;
 
-    const changed = next.title !== row.title
+    const changed = (next.title !== undefined && next.title !== row.title)
       || next.requirements !== row.requirements
       || (next.city !== undefined && next.city !== row.city)
       || (next.salary !== undefined && next.salary !== row.salary)

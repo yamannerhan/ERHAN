@@ -5,7 +5,7 @@ import { logger } from "./lib/logger";
 import { onlineSockets } from "./routes/chat";
 import { setBotIo, isGuvenlikBotEnabled, isBilgiBotEnabled, isFakeBotEnabled } from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
-import { startScraperWorker, purgeExpiredListings, purgeDemoListings } from "./workers/scraper";
+import { startScraperWorker, purgeExpiredListings, purgeDemoListings, reparseImportedListings } from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
 import { initWhatsAppClient } from "./services/whatsapp-client";
 import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
@@ -1077,6 +1077,10 @@ async function bootstrapWorkers(): Promise<void> {
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
     void import("./lib/listing-feature").then((m) => m.startFeatureExpiryWorker()).catch(() => {});
+    // Açıklamadaki OSB/ilçeye göre yanlış şehir etiketlerini düzelt
+    void reparseImportedListings()
+      .then((r) => logger.info({ total: r.total, updated: r.updated }, "Listing city reparse done"))
+      .catch((err) => logger.warn({ err }, "Listing city reparse skipped"));
     logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push; feature-expiry)");
   } catch (e) {
     logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
