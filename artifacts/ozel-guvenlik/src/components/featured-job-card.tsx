@@ -15,7 +15,7 @@ type CarouselProps = {
   isLite?: boolean;
 };
 
-/** Pro: otomatik kayan şerit | Lite: elle kaydırma | Desktop ≥1024: 3 kolon sabit grid */
+/** Pro + masaüstü: sola kayan şerit (3 kart görünür) | Lite: elle kaydırma */
 export function FeaturedJobCarousel({
   listings,
   onNavigate,
@@ -35,14 +35,13 @@ export function FeaturedJobCarousel({
     return () => mq.removeEventListener("change", sync);
   }, []);
 
-  const animated = !isLite && !isDesktop && listings.length > 1;
+  const animated = !isLite && listings.length > 1;
   const loopItems = animated ? [...listings, ...listings] : listings;
   const durationSec = Math.max(32, listings.length * 10);
-  const desktopItems = listings.slice(0, 3);
 
-  useLiteMarquee(trackRef, animated, [listings.map((l) => l.id).join(",")], {
-    speedPxPerSec: 30,
-    minDurationSec: 36,
+  useLiteMarquee(trackRef, animated, [listings.map((l) => l.id).join(","), isDesktop ? "d" : "m"], {
+    speedPxPerSec: isDesktop ? 36 : 30,
+    minDurationSec: isDesktop ? 40 : 36,
   });
 
   useEffect(() => {
@@ -54,30 +53,23 @@ export function FeaturedJobCarousel({
     return () => window.clearInterval(id);
   }, [animated, listings.length, durationSec]);
 
-  if (isDesktop) {
-    return (
-      <div className="featured-listings-grid desktop-home desktop-home--grid">
-        {desktopItems.map((item) => (
-          <JobListingCard
-            key={item.id}
-            listing={item}
-            onNavigate={onNavigate}
-            compact
-            saved={savedIds?.has(item.id) || !!item.isFavoritedByMe}
-            onToggleSave={onToggleSave}
-          />
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div className={`featured-rail-wrap mobile-home${isLite ? " featured-rail-wrap--lite" : ""}`}>
-      <div className={`featured-rail lite-marquee-viewport${animated ? " featured-rail--auto" : ""}${isLite ? " featured-rail--lite" : ""}`}>
+    <div
+      className={[
+        "featured-rail-wrap",
+        isLite ? "featured-rail-wrap--lite" : "",
+        isDesktop ? "featured-rail-wrap--desktop" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div
+        className={`featured-rail lite-marquee-viewport${animated ? " featured-rail--auto" : ""}${isLite ? " featured-rail--lite" : ""}`}
+      >
         <div
           ref={trackRef}
           className={`featured-rail__track${animated ? " lite-marquee-track" : ""}`}
-          style={animated ? ({ "--lite-marquee-duration": "40s" } as CSSProperties) : undefined}
+          style={animated ? ({ "--lite-marquee-duration": isDesktop ? "48s" : "40s" } as CSSProperties) : undefined}
         >
           {loopItems.map((item, idx) => (
             <JobListingCard

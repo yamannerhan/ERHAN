@@ -515,79 +515,11 @@
   }
 }
 
-/* ── 12. Featured listings grid ──────────────────────────────── */
+/* ── 12. Featured listings (masaüstü şerit boyutları featured-job-card.css'te) ── */
 
 @media (min-width: 1024px) {
   .featured-listings-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .featured-listings-grid > * {
-    min-width: 0;
-  }
-
-  /* Rail → grid conversion when carousel wrapper is reused */
-  .featured-listings-grid .featured-rail-wrap,
-  .featured-listings-grid .featured-rail {
-    overflow: visible;
-    max-width: none;
-  }
-
-  .featured-listings-grid .featured-rail__track {
-    display: contents;
-  }
-
-  .featured-listings-grid .featured-rail__dots,
-  .featured-listings-grid .featured-rail__dot {
     display: none;
-  }
-
-  .featured-listings-grid .featured-rail__track > .og-job,
-  .featured-listings-grid > .og-job {
-    width: 100%;
-    max-width: none;
-    flex: none;
-    min-height: 150px;
-    max-height: 170px;
-    border-radius: 12px;
-    border-color: var(--card-border, rgba(226, 169, 17, 0.48));
-    background: var(--card-bg, #111a2b);
-  }
-
-  .featured-listings-grid .og-job__title,
-  .featured-listings-grid .og-job--compact .og-job__title {
-    font-size: 15px;
-    font-weight: 700;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .featured-listings-grid .og-job__company,
-  .featured-listings-grid .og-job--compact .og-job__company {
-    font-size: 12px;
-    color: var(--text-muted, #788395);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .featured-listings-grid .og-job__salary,
-  .featured-listings-grid .og-job--compact .og-job__salary {
-    font-size: 16px;
-    font-weight: 800;
-    color: var(--gold, #ffbe0b);
-  }
-}
-
-@media (min-width: 1024px) and (max-width: 1199px) {
-  .featured-listings-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
