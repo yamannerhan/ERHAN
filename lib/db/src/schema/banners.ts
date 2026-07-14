@@ -6,6 +6,8 @@ export const bannersTable = pgTable("banners", {
   id: serial("id").primaryKey(),
   title: text("title"),
   imageUrl: text("image_url").notNull(),
+  /** Deploy-sonrası kalıcı JPEG (base64, data: öneki yok) */
+  imageData: text("image_data"),
   linkUrl: text("link_url"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),

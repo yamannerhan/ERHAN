@@ -1843,6 +1843,17 @@ const DEFAULT_BANNERS = [
   },
 ];
 
+let bannerSchemaReady = false;
+async function ensureBannerSchema(): Promise<void> {
+  if (bannerSchemaReady) return;
+  try {
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS image_data TEXT`);
+    bannerSchemaReady = true;
+  } catch (e) {
+    console.warn("[banners] schema ensure failed", e);
+  }
+}
+
 function isLegacyBannerSeed(imageUrl: string | null): boolean {
   if (!imageUrl) return true;
   if (imageUrl.includes("unsplash.com")) return true;
@@ -1851,6 +1862,7 @@ function isLegacyBannerSeed(imageUrl: string | null): boolean {
 }
 
 async function ensureDefaultBanners(): Promise<void> {
+  await ensureBannerSchema();
   const existing = await db
     .select({ id: bannersTable.id, imageUrl: bannersTable.imageUrl })
     .from(bannersTable);
@@ -1861,7 +1873,6 @@ async function ensureDefaultBanners(): Promise<void> {
     return;
   }
 
-  // Eski unsplash / png seed satırlarını tek tek public jpg'e çevir (toplu silme yok)
   for (const row of existing) {
     if (!isLegacyBannerSeed(row.imageUrl)) continue;
     const idx = existing.indexOf(row) % DEFAULT_BANNERS.length;
@@ -1872,21 +1883,31 @@ async function ensureDefaultBanners(): Promise<void> {
   await db.update(bannersTable).set({ linkUrl: null }).where(sql`${bannersTable.linkUrl} is not null`);
 }
 
-/** Diskteki eski yüklemeyi DB'ye (data URL) taşı — deploy sonrası kaybolmasın */
-async function migrateBannerToDurable(id: number, imageUrl: string): Promise<string | null> {
-  const uploaded = imageUrl.match(/\/api\/banner-images\/([^/?#]+)/);
-  if (!uploaded?.[1]) return null;
-  const filepath = path.join(BANNER_IMAGES_DIR, path.basename(uploaded[1]));
+/** Upload URL / data URL → Postgres'te saklanacak base64 */
+async function extractBannerImageData(imageUrl: string): Promise<string | null> {
+  if (imageUrl.startsWith("data:image/")) {
+    const m = imageUrl.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/);
+    if (!m?.[1]) return null;
+    const b64 = m[1].replace(/\s+/g, "");
+    if (b64.length > 4 * 1024 * 1024) return null;
+    return b64;
+  }
+  const filename = bannerFilenameFromUrl(imageUrl);
+  if (!filename) return null;
+  const filepath = path.join(BANNER_IMAGES_DIR, filename);
   if (!fs.existsSync(filepath)) return null;
   try {
     const buf = await fs.promises.readFile(filepath);
     if (buf.length > 2.8 * 1024 * 1024) return null;
-    const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
-    await db.update(bannersTable).set({ imageUrl: dataUrl }).where(eq(bannersTable.id, id));
-    return dataUrl;
+    return buf.toString("base64");
   } catch {
     return null;
   }
+}
+
+function publicBannerImageUrl(id: number, imageUrl: string, hasData: boolean): string {
+  if (hasData) return `/api/banners/${id}/image`;
+  return resolveBannerImageUrl(imageUrl, id);
 }
 
 router.get("/banner-images/:filename", (req, res): void => {
@@ -1900,59 +1921,131 @@ router.get("/banner-images/:filename", (req, res): void => {
     res.status(404).json({ error: "Dosya bulunamadı" });
     return;
   }
+  res.setHeader("Cache-Control", "public, max-age=86400");
   res.sendFile(filepath);
 });
 
+/** Kalıcı banner görseli — DB image_data (deploy sonrası da çalışır) */
+router.get("/banners/:id/image", async (req, res): Promise<void> => {
+  await ensureBannerSchema();
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  try {
+    const [row] = await db
+      .select({ imageData: bannersTable.imageData, imageUrl: bannersTable.imageUrl })
+      .from(bannersTable)
+      .where(eq(bannersTable.id, id))
+      .limit(1);
+    if (!row) { res.status(404).json({ error: "Banner bulunamadı" }); return; }
+
+    if (row.imageData) {
+      const buf = Buffer.from(row.imageData, "base64");
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(buf);
+      return;
+    }
+
+    const filename = bannerFilenameFromUrl(row.imageUrl);
+    if (filename) {
+      const filepath = path.join(BANNER_IMAGES_DIR, filename);
+      if (fs.existsSync(filepath)) {
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.sendFile(filepath);
+        return;
+      }
+    }
+
+    if (row.imageUrl.startsWith("/banners/") && !row.imageUrl.includes("..")) {
+      res.redirect(row.imageUrl);
+      return;
+    }
+
+    res.status(404).json({ error: "Görsel bulunamadı" });
+  } catch (e) {
+    console.error("[banners] image serve", e);
+    res.status(500).json({ error: "Görsel yüklenemedi" });
+  }
+});
+
 router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUpload.single("image"), async (req, res): Promise<void> => {
-  if (!req.file) {
-    res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" });
-    return;
-  }
-  const buf = await sharp(req.file.buffer)
-    .rotate()
-    .resize(BANNER_WIDTH, BANNER_HEIGHT, {
-      fit: "cover",
-      position: "centre",
-    })
-    .jpeg({ quality: 85, mozjpeg: true })
-    .toBuffer();
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" });
+      return;
+    }
+    await ensureBannerSchema();
+    const filename = `banner_${req.user!.id}_${Date.now()}.jpg`;
+    const filepath = path.join(BANNER_IMAGES_DIR, filename);
+    const buf = await sharp(req.file.buffer)
+      .rotate()
+      .resize(BANNER_WIDTH, BANNER_HEIGHT, {
+        fit: "cover",
+        position: "centre",
+      })
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
 
-  if (buf.length > 2.8 * 1024 * 1024) {
-    res.status(400).json({ error: "Banner çok büyük. Daha küçük bir görsel yükleyin." });
-    return;
-  }
+    if (buf.length > 2.8 * 1024 * 1024) {
+      res.status(400).json({ error: "Banner çok büyük. Daha küçük bir görsel yükleyin." });
+      return;
+    }
 
-  // Postgres'te sakla — Railway redeploy diskini silse bile banner kalır
-  const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
-  res.json({
-    url: dataUrl,
-    width: BANNER_WIDTH,
-    height: BANNER_HEIGHT,
-    aspectRatio: "3:1",
-  });
+    // Disk (anında önizleme) + kısa URL — FE JSON'a megabayt yazmaz
+    await fs.promises.writeFile(filepath, buf);
+    res.json({
+      url: `/api/banner-images/${filename}`,
+      width: BANNER_WIDTH,
+      height: BANNER_HEIGHT,
+      aspectRatio: "3:1",
+    });
+  } catch (e) {
+    console.error("[banners] upload", e);
+    res.status(500).json({ error: "Banner yüklenemedi. Lütfen tekrar deneyin." });
+  }
 });
 
 router.get("/admin/banners", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
-  await ensureDefaultBanners();
-  const banners = await db.select().from(bannersTable).orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
-  const out = [];
-  for (const b of banners) {
-    let imageUrl = b.imageUrl;
-    if (imageUrl.includes("/api/banner-images/")) {
-      const migrated = await migrateBannerToDurable(b.id, imageUrl);
-      if (migrated) imageUrl = migrated;
+  try {
+    await ensureDefaultBanners();
+    const banners = await db.select().from(bannersTable).orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
+    const out = [];
+    for (const b of banners) {
+      // Eski disk dosyası varsa DB'ye taşı
+      if (!b.imageData && b.imageUrl.includes("/api/banner-images/")) {
+        const data = await extractBannerImageData(b.imageUrl);
+        if (data) {
+          await db.update(bannersTable).set({
+            imageData: data,
+            imageUrl: `/api/banners/${b.id}/image`,
+          }).where(eq(bannersTable.id, b.id));
+          out.push({
+            id: b.id,
+            title: b.title,
+            imageUrl: `/api/banners/${b.id}/image`,
+            linkUrl: b.linkUrl,
+            isActive: b.isActive,
+            sortOrder: b.sortOrder,
+            createdAt: b.createdAt.toISOString(),
+          });
+          continue;
+        }
+      }
+      out.push({
+        id: b.id,
+        title: b.title,
+        imageUrl: publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData)),
+        linkUrl: b.linkUrl,
+        isActive: b.isActive,
+        sortOrder: b.sortOrder,
+        createdAt: b.createdAt.toISOString(),
+      });
     }
-    out.push({
-      id: b.id,
-      title: b.title,
-      imageUrl,
-      linkUrl: b.linkUrl,
-      isActive: b.isActive,
-      sortOrder: b.sortOrder,
-      createdAt: b.createdAt.toISOString(),
-    });
+    res.json(out);
+  } catch (e) {
+    console.error("[banners] admin list", e);
+    res.status(500).json({ error: "Bannerlar yüklenemedi" });
   }
-  res.json(out);
 });
 
 router.post("/admin/banners/reorder", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
@@ -1969,29 +2062,80 @@ router.post("/admin/banners/reorder", authMiddleware, requireAdmin, async (req, 
 });
 
 router.post("/admin/banners", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
-  if (!imageUrl) { res.status(400).json({ error: "Resim URL zorunludur" }); return; }
-  const [banner] = await db.insert(bannersTable).values({ title: title ? String(title) : null, imageUrl: String(imageUrl), linkUrl: linkUrl ? String(linkUrl) : null, isActive: isActive !== false, sortOrder: sortOrder ? parseInt(String(sortOrder), 10) : 0 }).returning();
-  res.status(201).json({ id: banner!.id, imageUrl: banner!.imageUrl, isActive: banner!.isActive });
+  try {
+    await ensureBannerSchema();
+    const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
+    if (!imageUrl) { res.status(400).json({ error: "Resim URL zorunludur" }); return; }
+    const rawUrl = String(imageUrl);
+    // data: URL istemciden gelmesin diye sınırla (çok büyük gövde = 500)
+    if (rawUrl.startsWith("data:") && rawUrl.length > 900_000) {
+      res.status(400).json({ error: "Görsel çok büyük. Lütfen tekrar yükleyin." });
+      return;
+    }
+    const imageData = await extractBannerImageData(rawUrl);
+    if ((rawUrl.includes("/api/banner-images/") || rawUrl.startsWith("data:image/")) && !imageData) {
+      res.status(400).json({ error: "Yüklenen görsel bulunamadı. Lütfen resmi tekrar yükleyin." });
+      return;
+    }
+    const [banner] = await db.insert(bannersTable).values({
+      title: title ? String(title) : null,
+      imageUrl: imageData ? "/banners/pending.jpg" : rawUrl,
+      imageData: imageData,
+      linkUrl: linkUrl ? String(linkUrl) : null,
+      isActive: isActive !== false,
+      sortOrder: sortOrder ? parseInt(String(sortOrder), 10) : 0,
+    }).returning();
+    if (!banner) {
+      res.status(500).json({ error: "Banner kaydedilemedi" });
+      return;
+    }
+    const finalUrl = imageData ? `/api/banners/${banner.id}/image` : resolveBannerImageUrl(rawUrl, banner.id);
+    if (imageData || finalUrl !== banner.imageUrl) {
+      await db.update(bannersTable).set({ imageUrl: finalUrl }).where(eq(bannersTable.id, banner.id));
+    }
+    res.status(201).json({ id: banner.id, imageUrl: finalUrl, isActive: banner.isActive });
+  } catch (e) {
+    console.error("[banners] create", e);
+    res.status(500).json({ error: "Banner kaydedilemedi. Lütfen tekrar deneyin." });
+  }
 });
 
 router.patch("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
-  const id = safeId(req.params["id"]);
-  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
-  const [existing] = await db.select({ imageUrl: bannersTable.imageUrl }).from(bannersTable).where(eq(bannersTable.id, id)).limit(1);
-  if (!existing) { res.status(404).json({ error: "Banner bulunamadı" }); return; }
-  const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
-  const updates: Partial<typeof bannersTable.$inferInsert> = {};
-  if (title !== undefined) updates.title = title ? String(title) : null;
-  if (imageUrl !== undefined) updates.imageUrl = String(imageUrl);
-  if (linkUrl !== undefined) updates.linkUrl = linkUrl ? String(linkUrl) : null;
-  if (isActive !== undefined) updates.isActive = Boolean(isActive);
-  if (sortOrder !== undefined) updates.sortOrder = parseInt(String(sortOrder), 10);
-  await db.update(bannersTable).set(updates).where(eq(bannersTable.id, id));
-  if (imageUrl !== undefined && String(imageUrl) !== existing.imageUrl) {
-    await deleteBannerImageFile(existing.imageUrl);
+  try {
+    await ensureBannerSchema();
+    const id = safeId(req.params["id"]);
+    if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+    const [existing] = await db.select().from(bannersTable).where(eq(bannersTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Banner bulunamadı" }); return; }
+    const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
+    const updates: Partial<typeof bannersTable.$inferInsert> = {};
+    if (title !== undefined) updates.title = title ? String(title) : null;
+    if (linkUrl !== undefined) updates.linkUrl = linkUrl ? String(linkUrl) : null;
+    if (isActive !== undefined) updates.isActive = Boolean(isActive);
+    if (sortOrder !== undefined) updates.sortOrder = parseInt(String(sortOrder), 10);
+    if (imageUrl !== undefined) {
+      const rawUrl = String(imageUrl);
+      if (rawUrl.startsWith("data:") && rawUrl.length > 900_000) {
+        res.status(400).json({ error: "Görsel çok büyük. Lütfen tekrar yükleyin." });
+        return;
+      }
+      const imageData = await extractBannerImageData(rawUrl);
+      if (imageData) {
+        updates.imageData = imageData;
+        updates.imageUrl = `/api/banners/${id}/image`;
+      } else {
+        updates.imageUrl = rawUrl;
+      }
+    }
+    await db.update(bannersTable).set(updates).where(eq(bannersTable.id, id));
+    if (imageUrl !== undefined && String(imageUrl) !== existing.imageUrl) {
+      await deleteBannerImageFile(existing.imageUrl);
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[banners] patch", e);
+    res.status(500).json({ error: "Banner güncellenemedi" });
   }
-  res.json({ success: true });
 });
 
 router.delete("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
@@ -2006,11 +2150,9 @@ router.delete("/admin/banners/:id", authMiddleware, requireAdmin, async (req, re
 function resolveBannerImageUrl(imageUrl: string | null, index: number): string {
   const fallback = `/banners/banner-${(index % 3) + 1}.jpg`;
   if (!imageUrl || !imageUrl.trim()) return fallback;
-
-  // DB'de saklanan kalıcı banner
   if (imageUrl.startsWith("data:image/")) return imageUrl;
+  if (/^\/api\/banners\/\d+\/image$/.test(imageUrl)) return imageUrl;
 
-  // Yüklenen dosya diskte yoksa (Railway ephemeral) public yedek kullan
   const uploaded = imageUrl.match(/\/api\/banner-images\/([^/?#]+)/);
   if (uploaded?.[1]) {
     const filepath = path.join(BANNER_IMAGES_DIR, path.basename(uploaded[1]));
@@ -2020,37 +2162,54 @@ function resolveBannerImageUrl(imageUrl: string | null, index: number): string {
 
   if (imageUrl.includes("unsplash.com")) return fallback;
   if (imageUrl.startsWith("/banners/") && imageUrl.endsWith(".png")) return fallback;
+  if (imageUrl.includes("pending.jpg")) return fallback;
 
   return imageUrl;
 }
 
 router.get("/banners", async (_req, res): Promise<void> => {
-  await ensureDefaultBanners();
-  const banners = await db
-    .select()
-    .from(bannersTable)
-    .where(eq(bannersTable.isActive, true))
-    .orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
+  try {
+    await ensureDefaultBanners();
+    const banners = await db
+      .select()
+      .from(bannersTable)
+      .where(eq(bannersTable.isActive, true))
+      .orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
 
-  // Diskteki eski /api/banner-images/... dosyalarını DB'ye taşı (bir sonraki deploy'da kaybolmasın)
-  const resolved = await Promise.all(
-    banners.map(async (b, i) => {
-      let imageUrl = b.imageUrl;
-      if (imageUrl.includes("/api/banner-images/")) {
-        const migrated = await migrateBannerToDurable(b.id, imageUrl);
-        if (migrated) imageUrl = migrated;
+    const resolved = [];
+    for (let i = 0; i < banners.length; i++) {
+      const b = banners[i]!;
+      // Diskteki eski dosyayı DB'ye taşı (hala varsa)
+      if (!b.imageData && b.imageUrl.includes("/api/banner-images/")) {
+        const data = await extractBannerImageData(b.imageUrl);
+        if (data) {
+          await db.update(bannersTable).set({
+            imageData: data,
+            imageUrl: `/api/banners/${b.id}/image`,
+          }).where(eq(bannersTable.id, b.id));
+          resolved.push({
+            id: b.id,
+            title: b.title,
+            imageUrl: `/api/banners/${b.id}/image`,
+            linkUrl: null,
+          });
+          continue;
+        }
       }
-      return {
+      resolved.push({
         id: b.id,
         title: b.title,
-        imageUrl: resolveBannerImageUrl(imageUrl, i),
+        imageUrl: publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData)),
         linkUrl: null,
-      };
-    }),
-  );
+      });
+    }
 
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-  res.json(resolved);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.json(resolved);
+  } catch (e) {
+    console.error("[banners] public list", e);
+    res.status(500).json({ error: "Bannerlar yüklenemedi" });
+  }
 });
 
 // ─── Akıllı İlan Yayınlama Yetkileri (Grant) ─────────────────────
