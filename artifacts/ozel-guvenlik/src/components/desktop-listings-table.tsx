@@ -42,15 +42,15 @@ export function DesktopListingsTable({
   return (
     <div className="desktop-listings-table desktop-home">
       <div className="desktop-listings-table__toolbar">
-        <h2 className="desktop-listings-table__title">
-          Tüm İlanlar
-          <span className="desktop-listings-table__badge">{totalCount.toLocaleString("tr-TR")}</span>
-        </h2>
-        <div className="desktop-listings-table__tools">
+        <div className="desktop-listings-table__heading">
+          <h2 className="desktop-listings-table__heading-title">Tüm İlanlar</h2>
+          <span className="desktop-listings-table__count-badge">{totalCount.toLocaleString("tr-TR")}</span>
+        </div>
+        <div className="desktop-listings-table__controls">
           <button type="button" className="desktop-listings-table__sort" onClick={onToggleSort}>
             Sırala: <strong>{sortNewest === "new" ? "Yeni Eklenen" : "Eski Önce"}</strong>
           </button>
-          <span className="desktop-listings-table__view-btns" aria-hidden>
+          <span className="desktop-listings-table__view-toggle" aria-hidden>
             <button type="button" className="desktop-listings-table__view-btn" title="Grid" disabled>
               <LayoutGrid size={16} />
             </button>
@@ -62,7 +62,7 @@ export function DesktopListingsTable({
       </div>
 
       <div className="desktop-listings-table__scroll">
-        <table className="desktop-listings-table__table">
+        <table>
           <thead>
             <tr>
               <th>İlan Başlığı</th>
@@ -96,7 +96,7 @@ export function DesktopListingsTable({
                   <td>
                     <Link
                       href={detailHref}
-                      className="desktop-listings-table__job"
+                      className="desktop-listings-table__title-cell"
                       onClick={() => {
                         markListingRead(listing.id);
                         onNavigate?.();
@@ -108,43 +108,45 @@ export function DesktopListingsTable({
                         className={`desktop-listings-table__logo${hasOwnLogo ? "" : " is-brand"}`}
                         loading="lazy"
                       />
-                      <span className="desktop-listings-table__job-title">{listing.title}</span>
+                      <span className="desktop-listings-table__title-text">{listing.title}</span>
                     </Link>
                   </td>
                   <td>
-                    <span className="desktop-listings-table__muted">{company}</span>
+                    <span className="desktop-listings-table__company">{company}</span>
                   </td>
                   <td>
-                    <span className="desktop-listings-table__muted">{listing.city}</span>
+                    <span className="desktop-listings-table__location">{listing.city}</span>
                   </td>
                   <td>
-                    <span className="desktop-listings-table__muted">{listing.workType || "—"}</span>
+                    <span className="desktop-listings-table__type">{listing.workType || "—"}</span>
                   </td>
                   <td>
                     <span className="desktop-listings-table__salary">{salary}</span>
                   </td>
                   <td className="desktop-listings-table__col-date">
-                    <span className="desktop-listings-table__muted">{formatDate(listing.createdAt)}</span>
+                    <span className="desktop-listings-table__date">{formatDate(listing.createdAt)}</span>
                   </td>
                   <td>
-                    <a
-                      href={applyHref}
-                      className="desktop-listings-table__apply"
-                      target={applyHref.startsWith("http") ? "_blank" : undefined}
-                      rel={applyHref.startsWith("http") ? "noopener noreferrer" : undefined}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Başvur
-                    </a>
+                    <div className="desktop-listings-table__actions">
+                      <a
+                        href={applyHref}
+                        className="desktop-listings-table__apply-btn"
+                        target={applyHref.startsWith("http") ? "_blank" : undefined}
+                        rel={applyHref.startsWith("http") ? "noopener noreferrer" : undefined}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Başvur
+                      </a>
+                    </div>
                   </td>
                   <td>
                     <button
                       type="button"
-                      className={`desktop-listings-table__save${isSaved ? " is-on" : ""}`}
+                      className={`desktop-listings-table__save-btn${isSaved ? " is-saved" : ""}`}
                       aria-label={isSaved ? "Kayıttan çıkar" : "Kaydet"}
                       onClick={(e) => onToggleSave(e, listing.id)}
                     >
-                      <Bookmark size={16} />
+                      <Bookmark size={16} fill={isSaved ? "currentColor" : "none"} />
                     </button>
                   </td>
                 </tr>

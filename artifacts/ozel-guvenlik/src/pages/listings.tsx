@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { JobListingCard } from "@/components/job-listing-card";
 import { FeaturedJobCarousel } from "@/components/featured-job-card";
+import { DesktopListingsTable } from "@/components/desktop-listings-table";
 import { LiveSupportBar } from "@/components/live-support-bar";
 import "@/components/listings-page.css";
 
@@ -451,36 +452,62 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
         {/* Tüm ilanlar */}
         <section ref={listingsTopRef}>
-          <div className="og-lp-section-head">
-            <h2 className="og-lp-section-title">Tüm İlanlar</h2>
-            <span className="og-lp-section-meta">{statActive.toLocaleString("tr-TR")} ilan</span>
+          {/* Mobil kart listesi */}
+          <div className="mobile-home">
+            <div className="og-lp-section-head">
+              <h2 className="og-lp-section-title">Tüm İlanlar</h2>
+              <span className="og-lp-section-meta">{statActive.toLocaleString("tr-TR")} ilan</span>
+            </div>
+
+            <div className="space-y-0">
+              {isLoading ? (
+                [1, 2, 3, 4].map(i => <div key={i} className="og-list-skeleton" style={{ minHeight: 140, marginBottom: 10 }} />)
+              ) : displayListings.length === 0 ? (
+                <div className="og-lp-empty">
+                  <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>Bu filtreye uygun ilan bulunamadı</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCity("");
+                      setSearch("");
+                      setCategoryFilter("all");
+                      setPage(1);
+                      setActiveSubFilter(null);
+                    }}
+                    className="text-amber-400 text-xs mt-2 hover:underline"
+                  >
+                    Filtreyi Temizle
+                  </button>
+                </div>
+              ) : (
+                displayListings.map((listing, idx) => renderListingCard(listing, idx))
+              )}
+            </div>
           </div>
 
-          <div className="space-y-0">
-            {isLoading ? (
-              [1, 2, 3, 4].map(i => <div key={i} className="og-list-skeleton" style={{ minHeight: 140, marginBottom: 10 }} />)
-            ) : displayListings.length === 0 ? (
-              <div className="og-lp-empty">
-                <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p>Bu filtreye uygun ilan bulunamadı</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCity("");
-                    setSearch("");
-                    setCategoryFilter("all");
-                    setPage(1);
-                    setActiveSubFilter(null);
-                  }}
-                  className="text-amber-400 text-xs mt-2 hover:underline"
-                >
-                  Filtreyi Temizle
-                </button>
-              </div>
-            ) : (
-              displayListings.map((listing, idx) => renderListingCard(listing, idx))
-            )}
-          </div>
+          {/* Masaüstü tablo — anasayfa ile aynı */}
+          {!isLoading && displayListings.length > 0 && (
+            <DesktopListingsTable
+              listings={displayListings}
+              totalCount={statActive}
+              sortNewest={sortNewest}
+              onToggleSort={() => setSortNewest((s) => (s === "new" ? "old" : "new"))}
+              savedIds={favIds}
+              onToggleSave={handleToggleFav}
+            />
+          )}
+          {isLoading && (
+            <div className="desktop-home desktop-listings-table" aria-hidden>
+              <div className="og-list-skeleton" style={{ minHeight: 200 }} />
+            </div>
+          )}
+          {!isLoading && displayListings.length === 0 && (
+            <div className="desktop-home og-lp-empty">
+              <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p>Bu filtreye uygun ilan bulunamadı</p>
+            </div>
+          )}
 
           {!isLoading && totalPages > 1 && (
             <div className="flex items-center justify-center gap-1.5 mt-5 mb-4 flex-wrap">
