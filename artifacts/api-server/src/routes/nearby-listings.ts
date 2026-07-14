@@ -13,6 +13,7 @@ import { listDistrictsForProvince, listProvinces, resolveDistrictCenter } from "
 import { db, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { extractPhoneNumbers, formatTelApplyUrl } from "../lib/job-parsing";
+import { matchKnownCompanySync, isPlaceholderListingLogo } from "../lib/known-companies";
 
 const router = Router();
 
@@ -52,7 +53,6 @@ function formatNearbyListing(
   let companyLogoUrl = listing.companyLogoUrl;
   let companyVerified = false;
   try {
-    const { matchKnownCompanySync, isPlaceholderListingLogo } = await import("../lib/known-companies");
     if (isPlaceholderListingLogo(companyLogoUrl)) {
       const brand = matchKnownCompanySync(listing.company);
       if (brand) {
