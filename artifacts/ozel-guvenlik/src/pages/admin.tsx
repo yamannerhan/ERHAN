@@ -3344,7 +3344,13 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       else if (nextStatus.pairing) setPairingMode(true);
       // Onay kodu modunda QR gösterme
       setQr(isPairing ? null : (nextStatus.qr ?? null));
-      setPairingCode(nextStatus.pairingCode ?? null);
+      // Kısa kopmalarda kodun UI'dan kaybolmasını engelle
+      setPairingCode((prev) => {
+        if (isConn) return null;
+        if (nextStatus.pairingCode) return nextStatus.pairingCode;
+        if (isPairing && prev) return prev;
+        return nextStatus.pairingCode ?? null;
+      });
       setErrorLog(nextStatus.error ?? "");
       if (isConn) setQrStatus("ready");
       else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
@@ -3375,9 +3381,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, qrStatus === "connecting" ? 2000 : 4000);
+    const fast = qrStatus === "connecting" || pairingMode || !!pairingCode;
+    const timer = window.setInterval(() => { void refresh(); }, fast ? 1500 : 4000);
     return () => window.clearInterval(timer);
-  }, [qrStatus]);
+  }, [qrStatus, pairingMode, pairingCode]);
 
   const connect = async (usePairing: boolean) => {
     setLoading(true);
@@ -3595,7 +3602,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                     ? `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`
                     : pairingCode}
                 </div>
-                <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Gelmezse 905… formatıyla tekrar deneyin.</p>
+                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra bu ekranda «Bağlı» olana kadar bekleyin. Kod kaybolsa bile tekrar basmayın.</p>
+                <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Bağlanmazsa 905… formatıyla bir kez daha deneyin.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">

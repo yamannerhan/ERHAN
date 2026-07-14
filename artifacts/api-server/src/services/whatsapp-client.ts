@@ -13,6 +13,8 @@ let pendingPhone: string | null = null;
 /** true = kullanıcı onay kodu istedi; QR asla UI'ya gitmez */
 let pairingIntent = false;
 let pairingCodeRequested = false;
+/** Onay kodu alındığı an — UI'da tutmak için */
+let pairingCodeAt = 0;
 let ClientCtor: any = null;
 let LocalAuthCtor: any = null;
 /** Admin «Bağlantıyı Kes» — otomatik yeniden bağlanma yapma */
@@ -20,6 +22,8 @@ let manualStop = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+/** Pairing sırasında geçici kopmada yeniden başlatmayı sınırla */
+let pairingReconnectScheduled = false;
 /** Puppeteer sayfasını aynı anda getChats + deep fetch paylaşmasın */
 let pageBusy: Promise<void> = Promise.resolve();
 
@@ -150,15 +154,29 @@ function setPairingCode(code: string | null): void {
   const raw = String(code).replace(/\s+/g, "").toUpperCase();
   if (raw.length < 6) return;
   pairingCode = raw;
+  pairingCodeAt = Date.now();
   qrDataUrl = null;
-  lastError = null;
-  logger.info({ codeLen: raw.length }, "wa: pairing code set");
+  lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
+  logger.info({ codeLen: raw.length, codePreview: `${raw.slice(0, 2)}**${raw.slice(-2)}` }, "wa: pairing code set");
+}
+
+function clearPairingCode(reason: string): void {
+  if (!pairingCode) return;
+  logger.info({ reason }, "wa: pairing code cleared");
+  pairingCode = null;
+  pairingCodeAt = 0;
 }
 
 async function requestPairingCodeNow(c: any, phone: string): Promise<string | null> {
   if (!c || typeof c.requestPairingCode !== "function") return null;
   try {
-    const code = await c.requestPairingCode(phone, true, 180_000);
+    // wwebjs: requestPairingCode(phoneNumber, showNotification?) — 3. argüman yok
+    let code: unknown;
+    try {
+      code = await c.requestPairingCode(phone, true);
+    } catch {
+      code = await c.requestPairingCode(phone);
+    }
     if (code) {
       setPairingCode(String(code));
       return pairingCode;
@@ -169,13 +187,34 @@ async function requestPairingCodeNow(c: any, phone: string): Promise<string | nu
   return null;
 }
 
+function scheduleWhatsAppPairingReconnect(phone: string, reason: string): void {
+  if (manualStop || pairingReconnectScheduled || isReady) return;
+  pairingReconnectScheduled = true;
+  const delay = 4_000;
+  logger.info({ reason, delay, phone }, "wa: pairing ile yeniden bağlanma");
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    pairingReconnectScheduled = false;
+    if (manualStop || isReady) return;
+    void startWhatsAppClient({ phoneNumber: phone, force: true }).catch((e) => {
+      logger.warn({ err: e }, "wa: pairing reconnect failed");
+      lastError = "Onay kodu yenilenemedi. «Onay Kodu ile Bağlan»a tekrar basın.";
+    });
+  }, delay);
+}
+
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
     // Onay kodu modunda QR'ı ASLA gösterme — kod iste
     if (pairingIntent && pendingPhone) {
-      logger.info("wa: QR yoksayıldı (onay kodu modu) — pairing code isteniyor");
+      logger.info("wa: QR yoksayıldı (onay kodu modu)");
       qrDataUrl = null;
-      if (!pairingCode && !pairingCodeRequested) {
+      // Kod zaten varsa tekrar isteme (eski kodu düşürür)
+      if (pairingCode && Date.now() - pairingCodeAt < 150_000) {
+        lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
+        return;
+      }
+      if (!pairingCodeRequested) {
         pairingCodeRequested = true;
         void requestPairingCodeNow(c, pendingPhone).then((code) => {
           if (!code) {
@@ -189,7 +228,7 @@ function attachHandlers(c: any): void {
 
     logger.info("wa: QR received");
     lastError = null;
-    pairingCode = null;
+    clearPairingCode("qr_mode");
     try {
       qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2, errorCorrectionLevel: "M" });
       logger.info("wa: QR data URL hazır");
@@ -200,6 +239,9 @@ function attachHandlers(c: any): void {
 
   c.on("loading_screen", (percent: string, message: string) => {
     logger.info(`wa: loading ${percent}% ${message}`);
+    if (pairingIntent) {
+      lastError = `Oturum yükleniyor… %${percent}`;
+    }
   });
 
   c.on("code", (code: string) => {
@@ -208,17 +250,21 @@ function attachHandlers(c: any): void {
 
   c.on("authenticated", () => {
     logger.info("wa: authenticated");
-    lastError = null;
+    lastError = pairingIntent
+      ? "Telefon doğrulandı — oturum açılıyor, bekleyin…"
+      : null;
+    // Hazır olana kadar kodu tut (UI "gitti" sanmasın); ready'de temizlenir
   });
 
   c.on("ready", () => {
     logger.info("wa: connected");
     isReady = true;
     qrDataUrl = null;
-    pairingCode = null;
+    clearPairingCode("ready");
     pendingPhone = null;
     pairingIntent = false;
     pairingCodeRequested = false;
+    pairingReconnectScheduled = false;
     lastError = null;
     reconnectAttempts = 0;
     manualStop = false;
@@ -229,38 +275,76 @@ function attachHandlers(c: any): void {
   });
 
   c.on("disconnected", (reason: string) => {
-    logger.warn(`wa: disconnected - ${reason}`);
+    const reasonStr = String(reason ?? "unknown");
+    logger.warn(`wa: disconnected - ${reasonStr}`);
     isReady = false;
     stopWhatsAppWatchdog();
+    const wasPairing = pairingIntent && !!pendingPhone;
+    const savedPhone = pendingPhone;
+    const savedCode = pairingCode;
     const old = client;
     client = null;
     qrDataUrl = null;
-    pairingCode = null;
-    lastError = `Bağlantı koptu: ${reason}`;
+
+    // Pairing sırasında kodu silme — kullanıcı telefonuna giriyor olabilir
+    if (wasPairing && savedPhone) {
+      pairingIntent = true;
+      pendingPhone = savedPhone;
+      if (savedCode) {
+        pairingCode = savedCode;
+        lastError = `Kod hâlâ geçerli olabilir — telefona girin. Yeniden bağlanılıyor… (${reasonStr})`;
+      } else {
+        lastError = `Bağlantı koptu, onay kodu yenileniyor… (${reasonStr})`;
+      }
+      try { void old?.destroy?.(); } catch { /* ignore */ }
+      // LOGOUT / CONFLICT ise pairing ile yeniden başlat; kodu yeni istekte yenile
+      const hard = /LOGOUT|CONFLICT|UNPAIRED|AUTH/i.test(reasonStr);
+      if (hard) {
+        clearPairingCode(`disconnect:${reasonStr}`);
+        pairingCodeRequested = false;
+      }
+      scheduleWhatsAppPairingReconnect(savedPhone, reasonStr);
+      return;
+    }
+
+    clearPairingCode(`disconnect:${reasonStr}`);
+    lastError = `Bağlantı koptu: ${reasonStr}`;
     try { void old?.destroy?.(); } catch { /* ignore */ }
-    scheduleWhatsAppReconnect(reason);
+    scheduleWhatsAppReconnect(reasonStr);
   });
 
   c.on("auth_failure", (msg: string) => {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
     stopWhatsAppWatchdog();
+    const wasPairing = pairingIntent && !!pendingPhone;
+    const savedPhone = pendingPhone;
     client = null;
     qrDataUrl = null;
-    pairingCode = null;
+    clearPairingCode("auth_failure");
+    pairingCodeRequested = false;
     lastError = `Kimlik doğrulama hatası: ${msg}`;
+    if (wasPairing && savedPhone && !manualStop) {
+      scheduleWhatsAppPairingReconnect(savedPhone, `auth_failure:${msg}`);
+      return;
+    }
     if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
   });
 }
 
 function scheduleWhatsAppReconnect(reason: string): void {
   if (manualStop) return;
+  // Pairing modundayken QR'sız reconnect yapma
+  if (pairingIntent && pendingPhone) {
+    scheduleWhatsAppPairingReconnect(pendingPhone, reason);
+    return;
+  }
   if (reconnectTimer) return;
   reconnectAttempts++;
   if (reconnectAttempts > 20) {
     lastError = `WhatsApp tekrar bağlanamadı (${reason}). Admin panelinden QR/onay ile bağlanın.`;
     logger.error({ reason, reconnectAttempts }, "wa: reconnect vazgeçildi");
-    reconnectAttempts = 0; // sonra tekrar denenebilsin
+    reconnectAttempts = 0;
     return;
   }
   const delay = Math.min(45_000, 3_000 * Math.min(reconnectAttempts, 8));
@@ -268,6 +352,13 @@ function scheduleWhatsAppReconnect(reason: string): void {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (manualStop || isReady) return;
+    if (pairingIntent && pendingPhone) {
+      void startWhatsAppClient({ phoneNumber: pendingPhone, force: true }).catch((e) => {
+        logger.warn({ err: e }, "wa: pairing auto-reconnect failed");
+        scheduleWhatsAppPairingReconnect(pendingPhone!, "retry");
+      });
+      return;
+    }
     void startWhatsAppClient().catch((e) => {
       logger.warn({ err: e }, "wa: auto-reconnect failed");
       scheduleWhatsAppReconnect("retry");
@@ -342,10 +433,9 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
   starting = true;
   manualStop = false;
   qrDataUrl = null;
-  pairingCode = null;
   pairingCodeRequested = false;
   pairingIntent = pairingMode;
-  lastError = pairingMode ? "Onay kodu hazırlanıyor… QR kullanılmayacak." : null;
+  pairingReconnectScheduled = false;
 
   if (pairingMode) {
     pendingPhone = normalizePhone(opts!.phoneNumber!);
@@ -355,12 +445,21 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
       lastError = `Geçersiz numara: ${pendingPhone}. Örn: 905xxxxxxxxx (ülke kodu ile)`;
       throw new Error(lastError);
     }
-    // Eski oturum QR'a düşürüyor — pairing için hem ana hem pair session temizle
+    // Yeniden bağlanırken eski kodu hemen silme — yenisi gelene kadar ekranda kalsın
+    if (!pairingCode || Date.now() - pairingCodeAt > 120_000) {
+      clearPairingCode("pairing_start");
+    }
+    lastError = pairingCode
+      ? "Telefonda kodu girin — oturum yenileniyor…"
+      : "Onay kodu hazırlanıyor… QR kullanılmayacak.";
+    // Eski oturum QR'a düşürüyor — pairing için temiz oturum
     clearWhatsAppLocalSession(WA_CLIENT_ID);
     clearWhatsAppLocalSession(WA_PAIR_CLIENT_ID);
   } else {
     pendingPhone = null;
     pairingIntent = false;
+    clearPairingCode("qr_start");
+    lastError = null;
   }
 
   try {
@@ -373,7 +472,6 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
     }
 
     const executablePath = resolveExecutablePath();
-    // Aynı clientId: pairing sonrası oturum auto-reconnect ile bulunsun
     logger.info({ executablePath, pairingMode, phone: pendingPhone }, "wa: Chromium yolu");
 
     const clientOpts: Record<string, unknown> = {
@@ -393,38 +491,36 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
         ],
       },
       restartOnAuthFail: false,
+      authTimeoutMs: 120_000,
     };
 
-    // Dolu phoneNumber → kod; boş/yok → QR. Pairing'de mutlaka phoneNumber ver.
-    if (pairingMode && pendingPhone) {
-      clientOpts.pairWithPhoneNumber = {
-        phoneNumber: String(pendingPhone),
-        showNotification: true,
-        intervalMs: 180_000,
-      };
-    }
-
+    // Onay kodu: sadece manuel requestPairingCode — pairWithPhoneNumber ile çift istek kodu düşürüyordu
     client = new ClientCtor(clientOpts);
     attachHandlers(client);
 
     await client.initialize();
 
-    // initialize sonrası kod yoksa zorla iste ve bekle
-    if (pairingMode && pendingPhone && !isReady && !pairingCode) {
-      lastError = "Onay kodu isteniyor…";
-      pairingCodeRequested = true;
-      const code = await requestPairingCodeNow(client, pendingPhone);
-      if (!code) {
-        // Birkaç sn daha code event bekledikten sonra hata
-        for (let i = 0; i < 20 && !pairingCode && !isReady; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
+    if (pairingMode && pendingPhone && !isReady) {
+      // initialize sonrası code event gelmesini kısa bekle, yoksa iste
+      for (let i = 0; i < 8 && !pairingCode && !isReady; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!pairingCode && !isReady) {
+        lastError = "Onay kodu isteniyor…";
+        pairingCodeRequested = true;
+        const code = await requestPairingCodeNow(client, pendingPhone);
+        if (!code) {
+          for (let i = 0; i < 25 && !pairingCode && !isReady; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
         }
       }
       if (!pairingCode && !isReady) {
         lastError = "Onay kodu gelmedi. 905xxxxxxxxx formatında tekrar deneyin (QR kapalı).";
         logger.warn({ phone: pendingPhone }, "wa: pairing code gelmedi");
-      } else if (pairingCode) {
-        lastError = null;
+      } else if (pairingCode && !isReady) {
+        lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
+        // ready asenkron gelir; HTTP isteğini bloklama
       }
     }
   } catch (e) {
@@ -512,6 +608,7 @@ export async function stopWhatsAppClient(): Promise<void> {
   manualStop = true;
   pairingIntent = false;
   pairingCodeRequested = false;
+  pairingReconnectScheduled = false;
   pendingPhone = null;
   stopWhatsAppWatchdog();
   if (reconnectTimer) {
@@ -519,6 +616,7 @@ export async function stopWhatsAppClient(): Promise<void> {
     reconnectTimer = null;
   }
   reconnectAttempts = 0;
+  clearPairingCode("stop");
   if (!client) {
     isReady = false;
     return;
@@ -529,7 +627,6 @@ export async function stopWhatsAppClient(): Promise<void> {
   client = null;
   isReady = false;
   qrDataUrl = null;
-  pairingCode = null;
 }
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
