@@ -8,7 +8,6 @@ import Dashboard from "./pages/Dashboard";
 import Listings from "./pages/Listings";
 import Companies from "./pages/Companies";
 import Users from "./pages/Users";
-import Comments from "./pages/Comments";
 import Messages from "./pages/Messages";
 import Notifications from "./pages/Notifications";
 import Reports from "./pages/Reports";
@@ -29,7 +28,6 @@ function ModeratorRoutes() {
       <Route path="/moderator/listings" component={Listings} />
       <Route path="/moderator/companies" component={Companies} />
       <Route path="/moderator/users" component={Users} />
-      <Route path="/moderator/comments" component={Comments} />
       <Route path="/moderator/messages" component={Messages} />
       <Route path="/moderator/notifications" component={Notifications} />
       <Route path="/moderator/reports" component={Reports} />
@@ -40,6 +38,7 @@ function ModeratorRoutes() {
       <Route path="/moderator/announcements" component={Announcements} />
       <Route path="/moderator/statistics" component={Statistics} />
       <Route path="/moderator/settings" component={Settings} />
+      <Route path="/moderator/comments">{() => <Redirect to="/moderator/dashboard" />}</Route>
       <Route>{() => <Redirect to="/moderator/dashboard" />}</Route>
     </Switch>
   );

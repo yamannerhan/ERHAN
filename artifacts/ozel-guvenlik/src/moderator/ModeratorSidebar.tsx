@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, Briefcase, Building2, Users, MessageSquare, Mail,
+  LayoutDashboard, Briefcase, Building2, Users, Mail,
   Bell, Flag, Globe, ShieldBan, Filter, ScrollText, Megaphone,
-  BarChart3, Settings, ChevronLeft, ChevronRight, Shield, X,
+  BarChart3, Settings, ChevronLeft, ChevronRight, Shield, X, Home,
 } from "lucide-react";
 import { useModerator } from "./context";
 import type { ModBadges } from "./context";
@@ -25,7 +25,6 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/moderator/listings", label: "İlanlar", icon: Briefcase, permission: "listings.view", badgeKey: "listings" },
   { path: "/moderator/companies", label: "Şirketler", icon: Building2, permission: "companies.view", badgeKey: "companies" },
   { path: "/moderator/users", label: "Kullanıcılar", icon: Users, permission: "users.view", badgeKey: "users" },
-  { path: "/moderator/comments", label: "Yorumlar", icon: MessageSquare, permission: "comments.view", badgeKey: "comments" },
   { path: "/moderator/messages", label: "Mesajlar", icon: Mail, permission: "messages.view_reported", badgeKey: "messages" },
   { path: "/moderator/notifications", label: "Bildirimler", icon: Bell, permission: "notifications.view", badgeKey: "notifications" },
   { path: "/moderator/reports", label: "Raporlar", icon: Flag, permission: "reports.view", badgeKey: "reports" },
@@ -79,6 +78,29 @@ function SidebarContent({ collapsed, onToggle, mobile, onMobileClose }: {
       </div>
 
       <nav style={{ flex: 1, overflowY: "auto", padding: "12px 8px" }}>
+        <Link
+          href="/"
+          onClick={mobile ? onMobileClose : undefined}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: collapsed && !mobile ? "10px 0" : "10px 12px",
+            justifyContent: collapsed && !mobile ? "center" : "flex-start",
+            borderRadius: 8,
+            marginBottom: 8,
+            textDecoration: "none",
+            color: "var(--mod-gold)",
+            background: "var(--mod-gold-dim)",
+            border: "1px solid var(--mod-border)",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+          title="Ana Sayfa"
+        >
+          <Home size={18} style={{ flexShrink: 0 }} />
+          {(!collapsed || mobile) && <span style={{ flex: 1 }}>Ana Sayfa</span>}
+        </Link>
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const active = location === item.path || location.startsWith(item.path + "/");

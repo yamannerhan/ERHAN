@@ -29,7 +29,6 @@ const MODERATOR_PERMS: PermissionKey[] = [
   "listings.view", "listings.edit", "listings.approve", "listings.reject", "listings.archive", "listings.soft_delete",
   "companies.view", "companies.edit", "companies.verify", "companies.reject",
   "users.view", "users.warn", "users.suspend_temporarily", "users.unsuspend", "users.view_activity", "users.view_reports",
-  "comments.view", "comments.hide", "comments.restore", "comments.soft_delete",
   "messages.view_reported", "messages.hide", "messages.soft_delete",
   "notifications.view",
   "reports.view", "reports.assign", "reports.resolve", "reports.reject", "reports.escalate",
@@ -37,7 +36,6 @@ const MODERATOR_PERMS: PermissionKey[] = [
   "blacklist.view",
   "word_filter.view",
   "logs.view",
-  "announcements.view",
   "statistics.view",
   "settings.profile", "settings.notifications",
 ];
@@ -49,7 +47,6 @@ const SENIOR_EXTRA: PermissionKey[] = [
   "ip_devices.block",
   "blacklist.add", "blacklist.remove",
   "word_filter.add", "word_filter.edit", "word_filter.remove",
-  "announcements.create", "announcements.edit", "announcements.publish", "announcements.unpublish",
 ];
 
 export const ROLE_PERMISSION_MATRIX: Record<PanelRole, PermissionKey[]> = {

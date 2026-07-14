@@ -36,15 +36,20 @@ assert(!roleHasPermission("moderator", "listings.feature"), "mod cannot feature"
 assert(!roleHasPermission("moderator", "blacklist.add"), "mod cannot add blacklist");
 assert(!roleHasPermission("moderator", "word_filter.add"), "mod cannot add word filter");
 assert(!roleHasPermission("moderator", "announcements.create"), "mod cannot create announcements");
+assert(!roleHasPermission("moderator", "announcements.view"), "mod cannot view announcements");
+assert(!roleHasPermission("moderator", "comments.view"), "mod cannot view comments");
 assert(!roleHasPermission("moderator", "ip_devices.block"), "mod cannot block IP");
 
 // Senior extras
 assert(roleHasPermission("senior_moderator", "listings.feature"), "senior can feature");
 assert(roleHasPermission("senior_moderator", "blacklist.add"), "senior can blacklist");
 assert(roleHasPermission("senior_moderator", "word_filter.add"), "senior can word filter");
-assert(roleHasPermission("senior_moderator", "announcements.publish"), "senior can publish");
+assert(!roleHasPermission("senior_moderator", "announcements.publish"), "senior cannot publish announcements");
+assert(!roleHasPermission("senior_moderator", "announcements.view"), "senior cannot view announcements");
+assert(!roleHasPermission("senior_moderator", "comments.view"), "senior cannot view comments");
 assert(roleHasPermission("senior_moderator", "ip_devices.block"), "senior can block IP");
 assert(roleHasPermission("senior_moderator", "listings.approve"), "senior inherits approve");
+assert(roleHasPermission("senior_moderator", "dashboard.view"), "senior keeps dashboard");
 
 // Admin has all
 assert(roleHasPermission("admin", "dashboard.view"), "admin dashboard");
