@@ -5,9 +5,10 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { db, companyProfilesTable, listingsTable } from "@workspace/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { ensureCompanySchema } from "../lib/company-profiles";
 import { authMiddleware } from "../middlewares/auth";
+import { emitRealtime } from "../lib/realtime";
 
 const router = Router();
 
@@ -227,9 +228,21 @@ router.post(
       }
       throw error;
     }
+    const affectedListings = await db.update(listingsTable)
+      .set({ companyLogoUrl: logoPath, companyProfileId: existing.id })
+      .where(or(
+        eq(listingsTable.companyProfileId, existing.id),
+        eq(listingsTable.authorId, existing.userId),
+      ))
+      .returning({ id: listingsTable.id });
     deleteLogoFile(existing.logoPath);
+    emitRealtime("company:logo-updated", {
+      companyProfileId: existing.id,
+      logoUrl: logoPath,
+      appliedListings: affectedListings.length,
+    });
 
-    res.json(profileJson(updated!));
+    res.json({ ...profileJson(updated!), appliedListings: affectedListings.length });
   },
 );
 
@@ -250,8 +263,20 @@ router.delete("/company-profiles/me/logo", authMiddleware, async (req, res): Pro
     .set({ logoPath: null, logoData: null, updatedAt: new Date() })
     .where(eq(companyProfilesTable.id, existing.id))
     .returning();
+  const affectedListings = await db.update(listingsTable)
+    .set({ companyLogoUrl: null })
+    .where(or(
+      eq(listingsTable.companyProfileId, existing.id),
+      eq(listingsTable.authorId, existing.userId),
+    ))
+    .returning({ id: listingsTable.id });
   deleteLogoFile(existing.logoPath);
-  res.json(profileJson(updated!));
+  emitRealtime("company:logo-updated", {
+    companyProfileId: existing.id,
+    logoUrl: null,
+    appliedListings: affectedListings.length,
+  });
+  res.json({ ...profileJson(updated!), appliedListings: affectedListings.length });
 });
 
 /** Soft delete şirket profili */

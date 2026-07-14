@@ -16,6 +16,7 @@ import {
   trimLogoWhitespace,
   upsertKnownCompanyAliases,
 } from "../lib/known-companies";
+import { emitRealtime } from "../lib/realtime";
 
 const router = Router();
 const DEFAULT_COMPANY_SLUG = "__default_listing_company__";
@@ -38,7 +39,7 @@ function companyJson(c: typeof knownCompaniesTable.$inferSelect, aliases: string
     id: c.id,
     name: c.name,
     slug: c.slug,
-    logoUrl: c.logoData || c.logoUrl ? `/api/known-company-logos/${c.id}` : null,
+    logoUrl: c.logoData || c.logoUrl ? `/api/known-company-logos/${c.id}?v=${c.updatedAt.getTime()}` : null,
     aliases,
     isActive: c.isActive,
     createdAt: c.createdAt.toISOString(),
@@ -87,7 +88,7 @@ router.get("/known-company-logos/:id", async (req, res): Promise<void> => {
   }
   if (row.logoData) {
     res.setHeader("Content-Type", "image/webp");
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
     res.send(Buffer.from(row.logoData, "base64"));
     return;
   }
@@ -171,6 +172,11 @@ router.post(
         sql`LOWER(BTRIM(COALESCE(${listingsTable.company}, ''))) IN ('belirtilmedi', 'belirtilmemiş', 'firma')`,
       ))
       .returning({ id: listingsTable.id });
+    emitRealtime("company:logo-updated", {
+      companyId: null,
+      logoUrl: versionedUrl,
+      appliedListings: updated.length,
+    });
     res.json({ success: true, logoUrl: versionedUrl, appliedListings: updated.length });
   },
 );
@@ -252,6 +258,7 @@ router.post(
       }
       const logoUrl = await saveKnownCompanyLogoBuffer(id, req.file.buffer);
       const applied = await applyKnownLogoToListings(id);
+      emitRealtime("company:logo-updated", { companyId: id, logoUrl, appliedListings: applied });
       res.json({ success: true, logoUrl, appliedListings: applied });
     } catch (e) {
       console.error("[known-companies] logo", e);

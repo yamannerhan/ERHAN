@@ -273,6 +273,9 @@ export function Layout({
           });
         }
       });
+      socket.on("company:logo-updated", () => {
+        void queryClient.invalidateQueries();
+      });
       onVis = () => emitPresence();
       document.addEventListener("visibilitychange", onVis);
       if (socket.connected && authenticate) authenticate();
@@ -284,7 +287,7 @@ export function Layout({
       if (socket && authenticate) socket.off("connect", authenticate);
       socket?.disconnect();
     };
-  }, [refetchNotifs, refetchUnread, user, isLite]);
+  }, [queryClient, refetchNotifs, refetchUnread, user, isLite]);
 
   /* Click outside notification panel */
   useEffect(() => {

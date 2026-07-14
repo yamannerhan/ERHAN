@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import sharp from "sharp";
 import { db, knownCompaniesTable, knownCompanyAliasesTable, listingsTable } from "@workspace/db";
-import { and, eq, isNull, or, sql, ilike } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql, ilike } from "drizzle-orm";
 
 const LOGO_DIR = path.join(process.cwd(), "data", "known-company-logos");
 try {
@@ -268,7 +268,7 @@ export async function applyKnownLogoToListings(companyId: number): Promise<numbe
   await ensureKnownCompaniesSchema();
   const [co] = await db.select().from(knownCompaniesTable).where(eq(knownCompaniesTable.id, companyId)).limit(1);
   if (!co || !co.isActive) return 0;
-  const logoUrl = `/api/known-company-logos/${co.id}`;
+  const logoUrl = `/api/known-company-logos/${co.id}?v=${co.updatedAt.getTime()}`;
   const aliases = await db
     .select()
     .from(knownCompanyAliasesTable)
@@ -279,12 +279,10 @@ export async function applyKnownLogoToListings(companyId: number): Promise<numbe
   ].filter(Boolean));
 
   const rows = await db
-    .select({ id: listingsTable.id, company: listingsTable.company, companyLogoUrl: listingsTable.companyLogoUrl })
-    .from(listingsTable)
-    .where(and(eq(listingsTable.isActive, true), eq(listingsTable.status, "active")))
-    .limit(5000);
+    .select({ id: listingsTable.id, company: listingsTable.company })
+    .from(listingsTable);
 
-  let updated = 0;
+  const matchedIds: number[] = [];
   for (const row of rows) {
     const k = normalizeCompanyKey(row.company);
     if (!k) continue;
@@ -298,16 +296,14 @@ export async function applyKnownLogoToListings(companyId: number): Promise<numbe
       }
     }
     if (!hit) continue;
-    if (!isPlaceholderListingLogo(row.companyLogoUrl) && row.companyLogoUrl?.includes("/api/known-company-logos/")) {
-      // zaten bilinen logo — id güncelle
-    } else if (!isPlaceholderListingLogo(row.companyLogoUrl) && !row.companyLogoUrl?.includes("/api/known-company-logos/")) {
-      // kullanıcı/profil logosu var — dokunma
-      continue;
-    }
-    await db.update(listingsTable).set({ companyLogoUrl: logoUrl }).where(eq(listingsTable.id, row.id));
-    updated += 1;
+    matchedIds.push(row.id);
   }
-  return updated;
+  for (let start = 0; start < matchedIds.length; start += 1000) {
+    await db.update(listingsTable)
+      .set({ companyLogoUrl: logoUrl })
+      .where(inArray(listingsTable.id, matchedIds.slice(start, start + 1000)));
+  }
+  return matchedIds.length;
 }
 
 export async function saveKnownCompanyLogoBuffer(companyId: number, buf: Buffer): Promise<string> {
@@ -324,10 +320,11 @@ export async function saveKnownCompanyLogoBuffer(companyId: number, buf: Buffer)
     // Kalıcı kaynak DB'deki logoData; salt-okunur/geçici diskte yükleme yine başarılı olsun.
   }
   const b64 = cropped.toString("base64");
-  const logoUrl = `/api/known-company-logos/${companyId}`;
+  const updatedAt = new Date();
+  const logoUrl = `/api/known-company-logos/${companyId}?v=${updatedAt.getTime()}`;
   await db
     .update(knownCompaniesTable)
-    .set({ logoData: b64, logoUrl, updatedAt: new Date() })
+    .set({ logoData: b64, logoUrl, updatedAt })
     .where(eq(knownCompaniesTable.id, companyId));
   invalidateKnownCompanyCache();
   return logoUrl;
