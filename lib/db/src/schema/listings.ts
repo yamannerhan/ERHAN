@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, integer, index, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -41,10 +41,20 @@ export const listingsTable = pgTable(
     authorId: integer("author_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     autoDeleteOnExpiry: boolean("auto_delete_on_expiry").notNull().default(true),
+    /** Yakın ilan araması — WGS84 */
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    /** exact | district | city | estimated */
+    locationAccuracy: text("location_accuracy"),
+    /** employer | geocoded | district_center | manual | ai_extracted */
+    locationSource: text("location_source"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
-  (t) => [index("listings_company_profile_id_idx").on(t.companyProfileId)],
+  (t) => [
+    index("listings_company_profile_id_idx").on(t.companyProfileId),
+    index("listings_lat_lng_idx").on(t.latitude, t.longitude),
+  ],
 );
 
 export const listingLikesTable = pgTable("listing_likes", {

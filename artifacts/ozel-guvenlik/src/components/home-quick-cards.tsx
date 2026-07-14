@@ -6,7 +6,7 @@ import "./home-ref-ui.css";
 const QUICK_CARDS_ENABLED = {
   news: false,
   tools: false,
-  near: false,
+  near: true,
 } as const;
 
 type HomeQuickCardsProps = {
@@ -85,16 +85,17 @@ export function HomeQuickCards({
           <div className="og-ref-quick-icon" aria-hidden>
             <MapPin className="w-4 h-4" strokeWidth={2.25} />
           </div>
-          <div className="og-ref-quick-title">Yakınımdaki</div>
-          <div className="og-ref-quick-sub">İlan Bul</div>
+          <div className="og-ref-quick-title">Yakınımdaki İlanlar</div>
+          <div className="og-ref-quick-sub">Konumuna en yakın iş fırsatlarını keşfet</div>
+          <div className="og-ref-quick-value" style={{ fontSize: "0.7rem", marginTop: 4, opacity: 0.85 }}>10 km çevrende</div>
         </button>
       ) : (
         <SoonQuickCard>
           <div className="og-ref-quick-icon" aria-hidden>
             <MapPin className="w-4 h-4" strokeWidth={2.25} />
           </div>
-          <div className="og-ref-quick-title">Yakınımdaki</div>
-          <div className="og-ref-quick-sub">İlan Bul</div>
+          <div className="og-ref-quick-title">Yakınımdaki İlanlar</div>
+          <div className="og-ref-quick-sub">Konumuna en yakın iş fırsatlarını keşfet</div>
         </SoonQuickCard>
       )}
     </section>

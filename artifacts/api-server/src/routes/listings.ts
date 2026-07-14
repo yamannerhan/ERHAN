@@ -655,6 +655,9 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
 
   if (!resolvedCompany) resolvedCompany = "Belirtilmedi";
 
+  const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+  const coords = assignCoordsFromCity(String(city));
+
   const [listing] = await db.insert(listingsTable).values({
     title,
     company: resolvedCompany,
@@ -672,6 +675,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     isActive: true,
     expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
+    ...(coords ?? {}),
   }).returning();
 
   // İlk 3 ilan → 3 gün ücretsiz öne çıkarma

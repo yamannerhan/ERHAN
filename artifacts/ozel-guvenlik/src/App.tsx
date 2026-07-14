@@ -23,6 +23,7 @@ const Favorites = lazy(() => import("@/pages/favorites"));
 const Destek = lazy(() => import("@/pages/destek"));
 const CvOlustur = lazy(() => import("@/pages/cv-olustur"));
 const PartTime = lazy(() => import("@/pages/part-time"));
+const NearbyListings = lazy(() => import("@/pages/nearby-listings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function lazyNamed<T extends ComponentType>(
@@ -64,6 +65,7 @@ function Router() {
           <Route path="/favoriler" component={Favorites} />
           <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
           <Route path="/part-time" component={PartTime} />
+          <Route path="/yakindaki-ilanlar" component={NearbyListings} />
           <Route path="/admin" component={AdminDashboard} />
           <Route path="/moderator/:page" component={ModeratorApp} />
           <Route path="/moderator" component={ModeratorApp} />

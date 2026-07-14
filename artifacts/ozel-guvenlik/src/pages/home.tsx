@@ -26,6 +26,7 @@ import { getHomeTickerLines } from "@/lib/home-ticker";
 import { DisplayModeToggle } from "@/components/display-mode-toggle";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { DesktopListingsTable } from "@/components/desktop-listings-table";
+import { NearbySearchModal } from "@/components/nearby/nearby-search-modal";
 import {
   matchesIstanbulSide,
   type IstanbulSide,
@@ -252,6 +253,7 @@ export default function Home() {
   const [activePill, setActivePill] = useState<string>(savedHome.activePill);
   const [otherCity, setOtherCity] = useState<string | null>(savedHome.otherCity);
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
+  const [nearbyOpen, setNearbyOpen] = useState(false);
   const [sortNewest, setSortNewest] = useState<"new" | "old">(savedHome.sortNewest);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const listingsTopRef = useRef<HTMLElement | null>(null);
@@ -454,16 +456,8 @@ export default function Home() {
   }, []);
 
   const handleNearClick = useCallback(() => {
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        () => scrollToListings(),
-        () => scrollToListings(),
-        { timeout: 8000, maximumAge: 60000 },
-      );
-      return;
-    }
-    scrollToListings();
-  }, [scrollToListings]);
+    setNearbyOpen(true);
+  }, []);
 
   const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";
 
@@ -820,6 +814,7 @@ export default function Home() {
         </div>
         </div>
       </div>
+      <NearbySearchModal open={nearbyOpen} onClose={() => setNearbyOpen(false)} />
     </Layout>
   );
 }

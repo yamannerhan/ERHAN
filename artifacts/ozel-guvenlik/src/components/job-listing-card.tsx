@@ -27,6 +27,11 @@ export type JobCardListing = {
   authorId?: number | null;
   sourceTag?: string | null;
   createdAt: string;
+  /** Yakındaki ilanlar — km (null + sameDistrict = aynı ilçe) */
+  distanceKm?: number | null;
+  sameDistrict?: boolean;
+  approximate?: boolean;
+  hasService?: boolean;
 };
 
 function splitCity(city: string): { city: string; district: string | null } {
@@ -121,6 +126,18 @@ export function JobListingCard({
   const applyIsTel = applyHref.startsWith("tel:");
 
   const chips: Chip[] = [];
+  if (listing.sameDistrict && listing.distanceKm == null) {
+    chips.push({ key: "dist", label: "Aynı ilçede", Icon: MapPin, tone: "shift" });
+  } else if (typeof listing.distanceKm === "number" && Number.isFinite(listing.distanceKm)) {
+    const d = listing.distanceKm;
+    const distLabel =
+      d < 1
+        ? `${Math.round(d * 1000)} metre uzakta`
+        : listing.approximate
+          ? `${d.toLocaleString("tr-TR", { maximumFractionDigits: 1 })} km uzaklıkta`
+          : `${d.toLocaleString("tr-TR", { maximumFractionDigits: 1 })} km uzakta`;
+    chips.push({ key: "dist", label: distLabel, Icon: MapPin, tone: "shift" });
+  }
   chips.push({ key: "loc", label: location, Icon: MapPin });
   const shift = detectShift(blob);
   if (shift) chips.push({ key: "shift", label: shift, Icon: Clock, tone: "shift" });
@@ -128,7 +145,13 @@ export function JobListingCard({
   if (workType) chips.push({ key: "work", label: workType, Icon: Briefcase });
   const gender = detectGender(blob);
   if (gender) chips.push({ key: "gender", label: gender, Icon: User });
-  const visibleChips = chips.slice(0, compact ? 2 : 4);
+  if (listing.hasService) chips.push({ key: "svc", label: "Servis Var", Icon: BadgeCheck, tone: "shift" });
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  if (new Date(listing.createdAt).getTime() >= dayStart.getTime()) {
+    chips.push({ key: "today", label: "Bugün Eklendi", Icon: Clock, tone: "shift" });
+  }
+  const visibleChips = chips.slice(0, compact ? 3 : 5);
 
   const markReadAndNavigate = () => {
     markListingRead(listing.id);
