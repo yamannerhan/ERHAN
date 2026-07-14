@@ -19,6 +19,16 @@ const ACTIVE = [...SUPPORT_ACTIVE_STATUSES];
 const ALL_STATUSES = [
   "waiting", "reviewing", "answered", "awaiting_user", "resolved", "closed", "cancelled",
 ];
+const USER_CLOSED_TICKET_VISIBLE_MS = 24 * 60 * 60 * 1000;
+
+function isClosedTicketExpiredForUser(ticket: typeof supportTicketsTable.$inferSelect): boolean {
+  if (ACTIVE.includes(ticket.status)) return false;
+  const closedAt = ticket.status === "resolved"
+    ? ticket.resolvedAt
+    : ticket.closedAt;
+  const hiddenAfter = (closedAt ?? ticket.updatedAt).getTime() + USER_CLOSED_TICKET_VISIBLE_MS;
+  return hiddenAfter <= Date.now();
+}
 
 function sanitizeText(input: string, max: number): string {
   return input
@@ -297,7 +307,18 @@ router.get("/support", authMiddleware, async (req, res): Promise<void> => {
     await ensureSupportSchema();
     const userId = req.user!.id;
     const tickets = await db.select().from(supportTicketsTable)
-      .where(and(eq(supportTicketsTable.userId, userId), isNull(supportTicketsTable.deletedAt)))
+      .where(and(
+        eq(supportTicketsTable.userId, userId),
+        isNull(supportTicketsTable.deletedAt),
+        sql`(
+          ${supportTicketsTable.status} IN ('waiting', 'reviewing', 'answered', 'awaiting_user')
+          OR CASE
+            WHEN ${supportTicketsTable.status} = 'resolved'
+              THEN COALESCE(${supportTicketsTable.resolvedAt}, ${supportTicketsTable.updatedAt})
+            ELSE COALESCE(${supportTicketsTable.closedAt}, ${supportTicketsTable.updatedAt})
+          END > NOW() - INTERVAL '24 hours'
+        )`,
+      ))
       .orderBy(desc(supportTicketsTable.updatedAt));
 
     res.json(tickets.map(t => mapTicket(t)));
@@ -337,6 +358,10 @@ router.get("/support/:id", authMiddleware, async (req, res): Promise<void> => {
       .where(and(eq(supportTicketsTable.id, id), isNull(supportTicketsTable.deletedAt)));
     if (!ticket) { res.status(404).json({ error: "Bulunamadı" }); return; }
     if (ticket.userId !== userId && !staff) { res.status(403).json({ error: "Erişim reddedildi" }); return; }
+    if (!staff && isClosedTicketExpiredForUser(ticket)) {
+      res.status(404).json({ error: "Bu destek kaydı artık kullanıcı görünümünde değil" });
+      return;
+    }
 
     const messages = await db.select({
       id: supportMessagesTable.id,

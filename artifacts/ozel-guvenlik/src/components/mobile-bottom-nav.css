@@ -8,8 +8,8 @@
   bottom: 0;
   z-index: 40;
   pointer-events: none;
-  padding-left: 12px;
-  padding-right: 12px;
+  padding-left: 0;
+  padding-right: 0;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
   box-sizing: border-box;
   background: #071221;
@@ -46,19 +46,18 @@ html.og-chat-open .og-bottom-nav,
   position: relative;
   pointer-events: auto;
   width: 100%;
-  max-width: var(--og-shell-max, 28rem);
-  margin-left: auto;
-  margin-right: auto;
+  max-width: none;
+  margin: 0;
 }
 
 .og-bottom-nav-shell {
   position: relative;
   height: 72px;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: end;
   overflow: hidden;
-  border-radius: 30px;
+  border-radius: 0;
   background: linear-gradient(180deg, #111d2e 0%, #071221 100%);
   border: 1px solid #d99a00;
   border-top: none;
@@ -201,6 +200,7 @@ html.og-chat-open .og-bottom-nav,
   align-items: stretch;
   justify-content: center;
   min-width: 0;
+  overflow: hidden;
   z-index: 2;
 }
 
@@ -225,7 +225,7 @@ html.og-chat-open .og-bottom-nav,
   justify-content: flex-end;
   width: 100%;
   min-height: 72px;
-  padding: 0 3px 6px;
+  padding: 0 2px 6px;
   box-sizing: border-box;
   text-decoration: none;
   color: #d9e0ea;
@@ -248,15 +248,17 @@ html.og-chat-open .og-bottom-nav,
 }
 
 .og-bn-label {
-  font-size: 13px;
+  font-size: clamp(10px, 2.9vw, 12px);
   font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
   margin-top: 6px;
+  padding-inline: 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  text-align: center;
   color: #d9e0ea;
   transition: color 180ms ease;
 }
@@ -294,7 +296,7 @@ html.og-chat-open .og-bottom-nav,
   margin-top: 0;
   padding-top: 46px;
   color: #d9e0ea;
-  font-size: 13px;
+  font-size: clamp(10px, 2.9vw, 12px);
   font-weight: 600;
   line-height: 1;
   text-align: center;

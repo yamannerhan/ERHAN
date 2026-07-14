@@ -30,6 +30,20 @@ export default function NearbyListingsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const openSearch = () => {
+      try {
+        sessionStorage.removeItem("og_open_nearby_search");
+      } catch { /* ignore */ }
+      setModalOpen(true);
+    };
+    try {
+      if (sessionStorage.getItem("og_open_nearby_search") === "1") openSearch();
+    } catch { /* ignore */ }
+    window.addEventListener("og:open-nearby-search", openSearch);
+    return () => window.removeEventListener("og:open-nearby-search", openSearch);
+  }, []);
+
   const queryBase = useMemo(() => {
     const sp = new URLSearchParams(params);
     sp.delete("page");

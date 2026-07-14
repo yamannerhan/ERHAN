@@ -130,6 +130,16 @@ function MobileBottomNav() {
                 href={item.path}
                 className={`og-bn-item${active ? " og-bn-item-active" : ""}`}
                 aria-current={active ? "page" : undefined}
+                onClick={(event) => {
+                  if (item.path !== "/yakindaki-ilanlar") return;
+                  try {
+                    sessionStorage.setItem("og_open_nearby_search", "1");
+                  } catch { /* ignore */ }
+                  if (active) {
+                    event.preventDefault();
+                    window.dispatchEvent(new Event("og:open-nearby-search"));
+                  }
+                }}
               >
                 <Icon className="og-bn-icon" strokeWidth={2.2} />
                 <span className="og-bn-label">{item.label}</span>
