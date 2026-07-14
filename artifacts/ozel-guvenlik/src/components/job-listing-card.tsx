@@ -8,6 +8,7 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
+import { ListingSourceBadges } from "@/components/listing-source-badges";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -26,6 +27,19 @@ export type JobCardListing = {
   isFavoritedByMe?: boolean;
   authorId?: number | null;
   sourceTag?: string | null;
+  sourceType?: string | null;
+  sourceName?: string | null;
+  verifiedPublisher?: boolean | null;
+  lastCheckedAt?: string | null;
+  lastSeenAt?: string | null;
+  badges?: {
+    showDirect?: boolean;
+    showVerified?: boolean;
+    showCompiled?: boolean;
+    showPlatform?: boolean;
+    sourceName?: string;
+    lastCheckedAt?: string | Date | null;
+  } | null;
   createdAt: string;
   /** Yakındaki ilanlar — km (null + sameDistrict = aynı ilçe) */
   distanceKm?: number | null;
@@ -180,6 +194,7 @@ export function JobListingCard({
                 </span>
               )}
             </div>
+            <ListingSourceBadges listing={listing} compact={compact} />
           </div>
 
           <div className="og-job__aside">

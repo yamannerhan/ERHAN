@@ -180,6 +180,12 @@
   font-weight: 600;
   color: #f87171;
 }
+.og-cl-hint {
+  font-size: 9px;
+  color: rgba(148, 163, 184, 0.85);
+  margin: 4px 0 0;
+  line-height: 1.35;
+}
 
 /* Toggle pills */
 .og-cl-pills {

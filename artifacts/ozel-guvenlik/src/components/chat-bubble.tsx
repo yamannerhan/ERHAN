@@ -14,6 +14,7 @@ import { SwipeableMessage } from "@/components/swipeable-message";
 import { FramedAvatar } from "@/components/framed-avatar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useGpuSafeMode } from "@/hooks/use-gpu-safe-mode";
+import { useStaffChatPerms } from "@/hooks/use-staff-chat-perms";
 import {
   fetchChatSyncPayload,
   loadCachedHumans,
@@ -173,6 +174,7 @@ function ChatFabIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
 export function ChatBubble() {
   const gpuSafeMode = useGpuSafeMode();
   const { user } = useAuth();
+  const { canClearChat } = useStaffChatPerms();
   const [location, navigate] = useLocation();
   const keyboardInset = useKeyboardInset();
   const [open, setOpen] = useState(false);
@@ -180,7 +182,12 @@ export function ChatBubble() {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("og-chat-open", open);
-    return () => root.classList.remove("og-chat-open");
+    const prevOverflow = document.body.style.overflow;
+    if (open) document.body.style.overflow = "hidden";
+    return () => {
+      root.classList.remove("og-chat-open");
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open]);
   const [messages, setMessages] = useState<AnyMsg[]>(() => loadCachedHumans() as ExtMsg[]);
   const [content, setContent] = useState("");
@@ -203,6 +210,9 @@ export function ChatBubble() {
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState("Evet\nHayır");
+  const [typingUsers, setTypingUsers] = useState<Array<{ userId: number; name: string }>>([]);
+  const typingClearRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const typingEmitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Array<{
     id: number; username: string; displayName?: string | null; avatarUrl: string | null; role: string;
@@ -422,11 +432,35 @@ export function ChatBubble() {
     s.on("online_count", ({ count }: { count: number }) => {
       if (typeof count === "number") setOnlineCount(count);
     });
+    s.on("chat:typing", (data: {
+      userId: number; username?: string; displayName?: string | null; typing?: boolean;
+    }) => {
+      if (!data?.userId || data.userId === userRef.current?.id) return;
+      const name = (data.displayName || data.username || "Birisi").trim();
+      const clearMap = typingClearRef.current;
+      const prev = clearMap.get(data.userId);
+      if (prev) clearTimeout(prev);
+      if (!data.typing) {
+        setTypingUsers((list) => list.filter((u) => u.userId !== data.userId));
+        clearMap.delete(data.userId);
+        return;
+      }
+      setTypingUsers((list) => {
+        const rest = list.filter((u) => u.userId !== data.userId);
+        return [...rest, { userId: data.userId, name }].slice(-3);
+      });
+      clearMap.set(data.userId, setTimeout(() => {
+        setTypingUsers((list) => list.filter((u) => u.userId !== data.userId));
+        clearMap.delete(data.userId);
+      }, 3200));
+    });
     if (s.connected) authenticate();
     return () => {
       s.off("connect", authenticate);
       s.disconnect();
       setSocket(null);
+      typingClearRef.current.forEach((t) => clearTimeout(t));
+      typingClearRef.current.clear();
     };
   }, [user?.id, addMsg, isOnChatPage]);
 
@@ -563,6 +597,7 @@ export function ChatBubble() {
       }
       if (r.ok) {
         const sent = await r.json().catch(() => null) as ExtMsg | null;
+        emitTyping(false);
         setContent("");
         setReplyTo(null);
         setMentionQuery(null);
@@ -647,15 +682,44 @@ export function ChatBubble() {
     return () => clearTimeout(t);
   }, [mentionQuery]);
 
+  const emitTyping = (typing: boolean) => {
+    if (!socket?.connected || !user) return;
+    socket.emit("chat:typing", {
+      typing,
+      username: user.username,
+      displayName: (user as { displayName?: string | null }).displayName ?? null,
+    });
+  };
+
   const handleInputChange = (val: string) => {
-    setContent(val);
-    const lastAt = val.lastIndexOf("@");
+    const next = val.slice(0, 500);
+    setContent(next);
+    const lastAt = next.lastIndexOf("@");
     if (lastAt !== -1) {
-      const after = val.slice(lastAt + 1);
+      const after = next.slice(lastAt + 1);
       if (!after.includes(" ")) { setMentionQuery(after); return; }
     }
     setMentionQuery(null);
+    if (next.trim()) {
+      emitTyping(true);
+      if (typingEmitRef.current) clearTimeout(typingEmitRef.current);
+      typingEmitRef.current = setTimeout(() => emitTyping(false), 2200);
+    } else {
+      emitTyping(false);
+    }
   };
+
+  const resizeComposer = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(Math.max(el.scrollHeight, 22), 120);
+    el.style.height = `${next}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [content, resizeComposer]);
 
   const insertMention = (username: string) => {
     const lastAt = content.lastIndexOf("@");
@@ -736,8 +800,8 @@ export function ChatBubble() {
         memberStyle={!isSystemBot(chatMsg)}
         onActivate={() => setActiveMsgId((id) => (id === chatMsg.id ? null : chatMsg.id))}
         onReply={user && !isMe ? (m) => startReply(m as ExtMsg) : undefined}
-        onReact={undefined}
-        reactions={[]}
+        onReact={user ? handleReact : undefined}
+        reactions={chatMsg.reactions ?? []}
         onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
         onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
           !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
@@ -799,10 +863,23 @@ export function ChatBubble() {
 
       <AnimatePresence>
         {open && (
+          <>
+          <motion.button
+            type="button"
+            key="og-chat-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="og-chat-backdrop"
+            aria-label="Sohbeti kapat"
+            onClick={() => { setExpanded(false); setOpen(false); }}
+          />
           <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.92 }}
+            key="og-chat-win"
+            initial={{ opacity: 0, y: 28, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 24, scale: 0.92 }}
+            exit={{ opacity: 0, y: 28, scale: 0.96 }}
             transition={{ type: "spring", stiffness: 320, damping: 28 }}
             className={`og-chat-win fixed z-[10050] flex flex-col ${expanded ? "og-chat-win-expanded" : ""}${keyboardInset > 0 ? " og-chat-win--kb" : ""}`}
             style={{
@@ -812,21 +889,21 @@ export function ChatBubble() {
               left: keyboardInset > 0 || expanded
                 ? "max(0.5rem, env(safe-area-inset-left))"
                 : "auto",
-              /* WhatsApp: pencere + yazma kutusu klavyenin tam üstünde */
+              /* Alta genişler; klavye açılınca yazma kutusu klavyenin üstüne oturur */
               bottom: keyboardInset > 0
                 ? `${keyboardInset}px`
                 : expanded
                   ? "max(0.5rem, env(safe-area-inset-bottom))"
-                  : "calc(6rem + 56px)",
+                  : "max(0.75rem, env(safe-area-inset-bottom))",
               width: keyboardInset > 0 || expanded
                 ? "auto"
                 : "min(460px, calc(100vw - 1.25rem))",
               maxWidth: keyboardInset > 0 ? "100%" : expanded ? "760px" : "460px",
               height: keyboardInset > 0
-                ? `min(100dvh, calc(100dvh - ${keyboardInset}px - env(safe-area-inset-top, 0px) - 0.5rem))`
+                ? `min(52dvh, calc(100dvh - ${keyboardInset}px - env(safe-area-inset-top, 0px) - 0.5rem))`
                 : expanded
                   ? "min(92dvh, calc(100dvh - 1rem))"
-                  : "min(560px, calc(100dvh - 10.5rem))",
+                  : "min(72dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 1.25rem))",
               marginLeft: keyboardInset > 0 || expanded ? "auto" : undefined,
               marginRight: keyboardInset > 0 || expanded ? "auto" : undefined,
             }}
@@ -853,7 +930,7 @@ export function ChatBubble() {
                     <BarChart2 className="w-4 h-4 text-white/70" />
                   </button>
                 )}
-                {(user?.role === "admin" || user?.role === "moderator") && (
+                {canClearChat && (
                   <button type="button" onClick={handleClearChat} className="og-chat-icon-btn" title="Sohbeti Temizle" aria-label="Sil">
                     <Trash2 className="w-4 h-4 text-red-400" />
                   </button>
@@ -913,6 +990,20 @@ export function ChatBubble() {
 
             {showPollForm && user && (user.role === "admin" || user.role === "moderator") && (
               <div className="shrink-0 px-3 py-2 space-y-1.5 border-b border-white/10 bg-black/40">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold text-white/70">Anket oluştur</p>
+                  <button
+                    type="button"
+                    className="h-7 px-2 rounded-md bg-white/10 text-white/80 text-[10px] font-bold hover:bg-white/15"
+                    onClick={() => {
+                      setShowPollForm(false);
+                      setPollQuestion("");
+                      setPollOptions("Evet\nHayır");
+                    }}
+                  >
+                    Vazgeç
+                  </button>
+                </div>
                 <input
                   value={pollQuestion}
                   onChange={(e) => setPollQuestion(e.target.value)}
@@ -925,28 +1016,41 @@ export function ChatBubble() {
                   placeholder="Her satıra bir seçenek"
                   className="w-full min-h-[56px] rounded-md bg-white/5 border border-white/10 px-2 py-1 text-[11px] text-white"
                 />
-                <button
-                  type="button"
-                  className="w-full h-8 rounded-md bg-sky-500 text-black text-[11px] font-bold"
-                  onClick={async () => {
-                    const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
-                    if (!pollQuestion.trim() || options.length < 2) return;
-                    const res = await fetch("/api/chat/polls", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-                      body: JSON.stringify({ question: pollQuestion.trim(), options }),
-                    });
-                    if (res.ok) {
-                      const sent = await res.json() as ExtMsg;
-                      addMsg(sent);
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className="flex-1 h-8 rounded-md bg-white/10 text-white/80 text-[11px] font-bold"
+                    onClick={() => {
                       setShowPollForm(false);
                       setPollQuestion("");
                       setPollOptions("Evet\nHayır");
-                    }
-                  }}
-                >
-                  Anketi Paylaş
-                </button>
+                    }}
+                  >
+                    Kapat
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-[1.4] h-8 rounded-md bg-sky-500 text-black text-[11px] font-bold"
+                    onClick={async () => {
+                      const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
+                      if (!pollQuestion.trim() || options.length < 2) return;
+                      const res = await fetch("/api/chat/polls", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+                        body: JSON.stringify({ question: pollQuestion.trim(), options }),
+                      });
+                      if (res.ok) {
+                        const sent = await res.json() as ExtMsg;
+                        addMsg(sent);
+                        setShowPollForm(false);
+                        setPollQuestion("");
+                        setPollOptions("Evet\nHayır");
+                      }
+                    }}
+                  >
+                    Anketi Paylaş
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1080,6 +1184,18 @@ export function ChatBubble() {
                   </div>
                 )}
 
+                {typingUsers.length > 0 && feedMode !== "support" && (
+                  <div className="og-chat-typing" aria-live="polite">
+                    <strong>
+                      {typingUsers.map((u) => u.name).join(", ")}
+                    </strong>
+                    <span>yazıyor</span>
+                    <span className="og-chat-typing-dots" aria-hidden>
+                      <span /><span /><span />
+                    </span>
+                  </div>
+                )}
+
                 {/* Input */}
                 <div className="og-chat-input-wrap">
                   {!user ? (
@@ -1187,6 +1303,7 @@ export function ChatBubble() {
                             rows={1}
                             onChange={e => handleInputChange(e.target.value)}
                             onFocus={() => {
+                              if (expanded) setExpanded(false);
                               setTimeout(() => {
                                 inputRef.current?.scrollIntoView({ block: "nearest" });
                                 scrollToBottom();
@@ -1213,12 +1330,16 @@ export function ChatBubble() {
                           )}
                         </motion.button>
                       </div>
+                      {content.length > 0 && (
+                        <div className="text-[10px] text-white/35 text-right px-1">{content.length}/500</div>
+                      )}
                     </div>
                   )}
                 </div>
               </>
             )}
           </motion.div>
+          </>
         )}
       </AnimatePresence>
     </>

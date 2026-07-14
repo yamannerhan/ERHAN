@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  CornerUpLeft, Pin, PinOff, Trash2, Bot, MoreHorizontal,
+  CornerUpLeft, Pin, PinOff, Trash2, Bot, MoreHorizontal, Ban,
 } from "lucide-react";
 import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { resolveRankKey, type RankKey } from "@/components/rank-badge";
 import { ChatPollCard } from "@/components/chat-poll-card";
 import { Link } from "wouter";
+import { CHAT_MUTE_PRESETS } from "@/components/chat-mod-actions";
 
 export type ChatMsgView = {
   id: number;
@@ -91,9 +92,10 @@ type Props = {
   active?: boolean;
   onActivate?: () => void;
   memberStyle?: boolean;
+  onMuted?: (userId: number) => void;
 };
 
-const QUICK_EMOJIS: string[] = []; // emoji tepki UI kaldırıldı
+const QUICK_EMOJIS = ["👍", "❤️", "🔥", "😂"] as const;
 
 /**
  * Ortak sohbet mesaj yerleşimi.
@@ -120,11 +122,16 @@ export function ChatMessageItem({
   active,
   onActivate,
   memberStyle,
+  onMuted,
 }: Props) {
   const { isLite } = useDisplayMode();
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [muteOpen, setMuteOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const muteRef = useRef<HTMLDivElement>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
 
   const systemBot =
     msg.isBot === true ||
@@ -145,7 +152,6 @@ export function ChatMessageItem({
   const level = msg.level != null && msg.level > 0 ? Math.max(1, msg.level) : null;
   const pill = ROLE_PILL[tone];
   const showRolePill = !isLite && pill.show;
-  /* Korunan animasyon class'ları — silinmez / yeniden yazılmaz */
   const nameAnimClass = isLite ? "" :
     tone === "admin" ? "name-admin" :
     tone === "moderator" ? "name-mod" :
@@ -155,17 +161,28 @@ export function ChatMessageItem({
     msg.chatBubble ||
     (tone === "admin" ? "admin" : tone === "moderator" ? "mod" : msg.isVip ? "vip" : systemBot ? "neon" : null);
 
+  const canMuteTarget =
+    !!canModerate &&
+    !bot &&
+    !isOwn &&
+    msg.userId > 0 &&
+    role !== "admin" &&
+    role !== "bot";
+
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !muteOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      if (menuRef.current?.contains(e.target as Node)) return;
+      if (muteRef.current?.contains(e.target as Node)) return;
+      setMenuOpen(false);
+      setMuteOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [menuOpen]);
+  }, [menuOpen, muteOpen]);
 
-  const deleteMessage = async () => {
-    if (!window.confirm("Bu mesaj silinsin mi?")) return;
+  const deleteMessage = async (skipConfirm = false) => {
+    if (!skipConfirm && !window.confirm("Bu mesaj silinsin mi?")) return;
     setBusy(true);
     try {
       const r = await fetch(`/api/chat/messages/${msg.id}`, {
@@ -194,11 +211,68 @@ export function ChatMessageItem({
     }
   };
 
+  const muteUser = async (preset: (typeof CHAT_MUTE_PRESETS)[number]) => {
+    if (!canMuteTarget) return;
+    if (!window.confirm(`${name} için ${preset.label} sohbet yasağı uygulansın mı?`)) return;
+    setBusy(true);
+    try {
+      const body =
+        "hours" in preset && preset.hours
+          ? { hours: preset.hours }
+          : { days: (preset as { days: number }).days };
+      const r = await fetch(`/api/admin/users/${msg.userId}/mute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        onMuted?.(msg.userId);
+        setMuteOpen(false);
+      } else {
+        const d = await r.json().catch(() => ({})) as { error?: string };
+        window.alert(d.error ?? "Susturma başarısız");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+
+  const startLongPress = () => {
+    if (!canModerate || !isDbMessageId(msg.id)) return;
+    longPressFired.current = false;
+    clearLongPress();
+    longPressRef.current = setTimeout(() => {
+      longPressFired.current = true;
+      void deleteMessage(false);
+    }, 550);
+  };
+
   const canShowModTools = !!(canModerate || canPin) && isDbMessageId(msg.id);
   const hasMenu =
     (!isOwn && !!(onReply || onGreet || (onReact && isDbMessageId(msg.id)))) ||
     canShowModTools ||
     !bot;
+
+  const reactionGroups = (() => {
+    const map = new Map<string, { emoji: string; count: number; mine: boolean }>();
+    for (const r of reactions) {
+      const cur = map.get(r.emoji) ?? { emoji: r.emoji, count: 0, mine: false };
+      cur.count += 1;
+      if (currentUserId != null && r.userId === currentUserId) cur.mine = true;
+      map.set(r.emoji, cur);
+    }
+    return [...map.values()];
+  })();
 
   return (
     <article
@@ -211,10 +285,26 @@ export function ChatMessageItem({
         active ? "cmc--active" : "",
         isLite ? "og-lite-chat-plain" : "",
       ].filter(Boolean).join(" ")}
-      onClick={() => onActivate?.()}
+      onClick={() => {
+        if (longPressFired.current) {
+          longPressFired.current = false;
+          return;
+        }
+        onActivate?.();
+      }}
       data-rank={rank}
     >
-      <div className="cmc-avatar">
+      <div
+        className="cmc-avatar"
+        onClick={(e) => {
+          if (!canMuteTarget) return;
+          e.stopPropagation();
+          setMuteOpen((v) => !v);
+          setMenuOpen(false);
+        }}
+        role={canMuteTarget ? "button" : undefined}
+        title={canMuteTarget ? "Sustur" : undefined}
+      >
         {bot ? (
           <div className="cmc-bot-avatar" aria-hidden>
             <Bot />
@@ -238,12 +328,19 @@ export function ChatMessageItem({
             {showRolePill && (
               <span className={`cmc-role-pill cmc-role-pill--${tone}`}>{pill.label}</span>
             )}
-            <span
-              className={["cmc-name", nameAnimClass].filter(Boolean).join(" ")}
-              title={name}
+            <button
+              type="button"
+              className={["cmc-name", nameAnimClass, canMuteTarget ? "cmc-name--clickable" : ""].filter(Boolean).join(" ")}
+              title={canMuteTarget ? "Susturmak için tıkla" : name}
+              onClick={(e) => {
+                if (!canMuteTarget) return;
+                e.stopPropagation();
+                setMuteOpen((v) => !v);
+                setMenuOpen(false);
+              }}
             >
               {name}
-            </span>
+            </button>
             {level != null && !bot && (
               <span className={`cmc-level cmc-level--${tone}`}>Lv.{level}</span>
             )}
@@ -257,7 +354,7 @@ export function ChatMessageItem({
                 className="cmc-more-btn"
                 aria-label="Mesaj işlemleri"
                 aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((v) => !v)}
+                onClick={() => { setMenuOpen((v) => !v); setMuteOpen(false); }}
               >
                 <MoreHorizontal />
               </button>
@@ -278,6 +375,11 @@ export function ChatMessageItem({
                       {msg.isPinned ? <><PinOff className="cmc-menu-ico" /> Sabiti kaldır</> : <><Pin className="cmc-menu-ico" /> Sabitle</>}
                     </button>
                   )}
+                  {canMuteTarget && (
+                    <button type="button" onClick={() => { setMuteOpen(true); setMenuOpen(false); }}>
+                      <Ban className="cmc-menu-ico" /> Sustur
+                    </button>
+                  )}
                   {canModerate && (
                     <button type="button" className="is-danger" disabled={busy} onClick={() => void deleteMessage()}>
                       <Trash2 className="cmc-menu-ico" /> Sil
@@ -293,6 +395,28 @@ export function ChatMessageItem({
             </div>
           )}
         </div>
+
+        {muteOpen && canMuteTarget && (
+          <div
+            ref={muteRef}
+            className="cmc-mute-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="cmc-mute-title"><Ban className="w-3 h-3" /> {name} — sustur</p>
+            <div className="cmc-mute-presets">
+              {CHAT_MUTE_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void muteUser(p)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {msg.isPinned && (
           <div className="cmc-pinned-badge">
@@ -310,7 +434,23 @@ export function ChatMessageItem({
           </div>
         )}
 
-        <div className={`cmc-bubble ${chatBubbleClass(bubbleStyle, isOwn)}`}>
+        <div
+          className={`cmc-bubble ${chatBubbleClass(bubbleStyle, isOwn)}`}
+          onTouchStart={startLongPress}
+          onTouchEnd={clearLongPress}
+          onTouchCancel={clearLongPress}
+          onMouseDown={(e) => {
+            if (e.button === 0) startLongPress();
+          }}
+          onMouseUp={clearLongPress}
+          onMouseLeave={clearLongPress}
+          onContextMenu={(e) => {
+            if (canModerate && isDbMessageId(msg.id)) {
+              e.preventDefault();
+              void deleteMessage(false);
+            }
+          }}
+        >
           {msg.poll ? (
             <ChatPollCard
               poll={msg.poll}
@@ -321,6 +461,44 @@ export function ChatMessageItem({
             <div className="cmc-text">{renderContent(msg.content)}</div>
           )}
         </div>
+
+        {isDbMessageId(msg.id) && onReact && !msg.poll && (
+          <div className="cmc-reactions" onClick={(e) => e.stopPropagation()}>
+            {reactionGroups.map((g) => (
+              <button
+                key={g.emoji}
+                type="button"
+                className={`cmc-reaction ${g.mine ? "is-mine" : ""}`}
+                onClick={() => onReact(msg.id, g.emoji)}
+                title={`${g.count} beğeni`}
+              >
+                <span>{g.emoji}</span>
+                {g.count > 0 && <span>{g.count}</span>}
+              </button>
+            ))}
+            {!reactionGroups.some((g) => g.emoji === "👍" && g.mine) && (
+              <button
+                type="button"
+                className="cmc-reaction cmc-reaction--add"
+                onClick={() => onReact(msg.id, "👍")}
+                title="Beğen"
+              >
+                👍
+              </button>
+            )}
+            {QUICK_EMOJIS.filter((e) => e !== "👍" && !reactionGroups.some((g) => g.emoji === e)).slice(0, 2).map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="cmc-reaction cmc-reaction--add"
+                onClick={() => onReact(msg.id, emoji)}
+                title="Tepki"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </article>
   );

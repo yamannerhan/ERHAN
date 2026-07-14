@@ -857,6 +857,36 @@ io.on("connection", (socket) => {
     }).catch(() => {});
   });
 
+  /** Destek ticket odasına katıl — canlı mesaj için */
+  socket.on("support:join", (data: { ticketId?: number }) => {
+    const ticketId = Number(data?.ticketId);
+    if (!Number.isInteger(ticketId) || ticketId <= 0) return;
+    void socket.join(`support:ticket:${ticketId}`);
+  });
+
+  socket.on("support:leave", (data: { ticketId?: number }) => {
+    const ticketId = Number(data?.ticketId);
+    if (!Number.isInteger(ticketId) || ticketId <= 0) return;
+    void socket.leave(`support:ticket:${ticketId}`);
+  });
+
+  /** Canlı sohbet: yazıyor göstergesi */
+  socket.on("chat:typing", (data: {
+    typing?: boolean;
+    username?: string;
+    displayName?: string | null;
+  }) => {
+    const entry = onlineSockets.get(socketId);
+    if (!entry?.userId) return;
+    const typing = !!data?.typing;
+    socket.broadcast.emit("chat:typing", {
+      userId: entry.userId,
+      username: String(data?.username ?? "").slice(0, 40) || "Birisi",
+      displayName: data?.displayName ? String(data.displayName).slice(0, 40) : null,
+      typing,
+    });
+  });
+
   socket.on("disconnect", () => {
     const entry = onlineSockets.get(socketId);
     if (entry?.userId) {
@@ -1029,6 +1059,19 @@ process.on("unhandledRejection", (err) => {
 process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
 });
+
+// Kaynak / yayıncı doğrulama şeması + backfill
+void import("./lib/listing-source-schema").then(async (m) => {
+  await m.ensureListingSourceSchema();
+  await m.ensurePublisherVerifySchema();
+  await m.backfillListingSourceTypes();
+  logger.info("Listing source + publisher verify schema ready");
+}).catch((err) => logger.warn({ err }, "listing source schema bootstrap skipped"));
+
+void import("./lib/listing-aging").then((m) => m.startListingAgingWorker()).catch(() => {});
+void import("./lib/listing-merge").then((m) => {
+  setInterval(() => { void m.scanListingMerges(20).catch(() => {}); }, 6 * 60 * 60 * 1000);
+}).catch(() => {});
 
 // Süresi dolan ilanlar (expiresAt geçmişse) otomatik silinir.
 void purgeExpiredListings();

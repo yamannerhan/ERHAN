@@ -5,7 +5,7 @@ import { useParams, Link, useLocation } from "wouter";
 import {
   MapPin, Briefcase, Bookmark, Calendar, ArrowLeft, Share2,
   ShieldAlert, LogIn, UserPlus, Shield, Trash2, Star, Eye, Clock,
-  GraduationCap, Users, Flag, Lock, FileText, BadgeCheck, Send, Copy,
+  GraduationCap, Users, Flag, Lock, FileText, BadgeCheck, Send, Copy, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,16 +17,37 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getListingImage } from "@/lib/listing-image";
 import { displayCompany } from "@/lib/utils";
 import { markListingRead } from "@/lib/read-listings";
-import { resolveApplyHref, extractPhoneFromText } from "@/lib/apply-url";
+import { resolveApplyHref, collectListingPhones } from "@/lib/apply-url";
 import {
   SEO_BASE_URL, SEO_OG_IMAGE, buildListingTitle, buildListingDescription,
   buildJobPostingSchema, breadcrumbSchema,
 } from "@/lib/seo-config";
+import { ListingSourceInfoCard } from "@/components/listing-source-badges";
 import "@/components/listing-detail-page.css";
 
 type ExtListing = {
   expiresAt?: string | null;
   companyVerified?: boolean;
+  isFeatured?: boolean;
+  featuredUntil?: string | null;
+  authorUsername?: string | null;
+  authorId?: number | null;
+  sourceTag?: string | null;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  sourceName?: string | null;
+  verifiedPublisher?: boolean | null;
+  lastCheckedAt?: string | null;
+  lastSeenAt?: string | null;
+  messageId?: string | null;
+  badges?: {
+    showDirect?: boolean;
+    showVerified?: boolean;
+    showCompiled?: boolean;
+    showPlatform?: boolean;
+    sourceName?: string;
+    lastCheckedAt?: string | Date | null;
+  } | null;
 };
 
 function MaskedDescription({ text }: { text: string }) {
@@ -142,7 +163,9 @@ export default function ListingDetail() {
   }, [listing?.id]);
 
   const toggleFavorite = useToggleListingFavorite();
-  const canManageListing = user?.role === "admin" || user?.role === "moderator";
+  const canManageListing = user?.role === "admin" || user?.role === "moderator" || user?.role === "senior_moderator";
+  const isAdminOnly = user?.role === "admin";
+  const canDeleteListing = user?.role === "admin";
   const ext = listing as (typeof listing & ExtListing) | undefined;
 
   const pageUrl = `${SEO_BASE_URL}/ilan/${listingId}`;
@@ -248,14 +271,38 @@ export default function ListingDetail() {
     if (!window.confirm(`#${listingId} numaralı ilan silinsin mi?`)) return;
     const token = localStorage.getItem("auth_token") ?? "";
     const res = await fetch(`/api/admin/listings/${listingId}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
-      toast({ title: "İlan silinemedi", variant: "destructive" });
+      toast({ title: "Silinemedi", variant: "destructive" });
       return;
     }
     toast({ title: "İlan silindi" });
     navigate("/ilanlar");
+  };
+
+  const toggleStaffFeature = async () => {
+    if (!listing) return;
+    const token = localStorage.getItem("auth_token") ?? "";
+    const featured = !!(ext?.isFeatured ?? listing.isFeatured);
+    const path = featured
+      ? `/api/admin/listings/${listingId}/unfeature`
+      : `/api/admin/listings/${listingId}/feature`;
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast({ title: "İşlem başarısız", description: data.error || "Hata", variant: "destructive" });
+      return;
+    }
+    toast({
+      title: featured ? "Öne çıkarma kaldırıldı" : "3 gün öne çıkarıldı",
+      description: featured ? undefined : "İlan öne çıkanlarda görünecek.",
+    });
+    await queryClient.invalidateQueries({ queryKey: getGetListingQueryKey(listingId) });
   };
 
   const handleFavorite = async () => {
@@ -343,7 +390,12 @@ export default function ListingDetail() {
     requirements: listing.requirements,
     title: listing.title,
   });
-  const phone = extractPhoneFromText([listing.applyUrl, listing.description, listing.requirements].join("\n"));
+  const phones = collectListingPhones({
+    applyUrl: listing.applyUrl,
+    description: listing.description,
+    requirements: listing.requirements,
+    title: listing.title,
+  });
   const shareUrl = encodeURIComponent(window.location.href);
   const shareText = encodeURIComponent(`${listing.title} — ${companyName}`);
   const deadline = ext?.expiresAt ? formatDateTr(ext.expiresAt) : null;
@@ -357,6 +409,16 @@ export default function ListingDetail() {
             İlanlara Geri Dön
           </Link>
           <div className="og-ld-top-actions">
+            {canManageListing && (
+              <button
+                type="button"
+                className={`og-ld-top-btn ${(ext?.isFeatured ?? listing.isFeatured) ? "is-active" : ""}`}
+                onClick={() => void toggleStaffFeature()}
+              >
+                <Star fill={(ext?.isFeatured ?? listing.isFeatured) ? "currentColor" : "none"} />
+                {(ext?.isFeatured ?? listing.isFeatured) ? "Öne Çıkarmayı Kaldır" : "3 Gün Öne Çıkar"}
+              </button>
+            )}
             <button type="button" className="og-ld-top-btn" onClick={() => void shareListing()}>
               <Share2 /> Paylaş
             </button>
@@ -406,6 +468,16 @@ export default function ListingDetail() {
                   )}
                 </div>
               </div>
+
+              <ListingSourceInfoCard listing={{
+                sourceType: ext?.sourceType,
+                sourceName: ext?.sourceName,
+                verifiedPublisher: ext?.verifiedPublisher,
+                lastCheckedAt: ext?.lastCheckedAt,
+                lastSeenAt: ext?.lastSeenAt,
+                sourceUrl: ext?.sourceUrl,
+                badges: ext?.badges,
+              }} />
 
               {listing.description && (
                 <>
@@ -468,10 +540,44 @@ export default function ListingDetail() {
             {canManageListing && (
               <div className="og-ld-admin">
                 <p className="text-xs font-bold text-primary mb-2">Admin / Moderatör</p>
+                {(ext?.authorUsername || companyName) && (
+                  <div className="mb-2 text-[11px] text-sky-200/90 break-words space-y-0.5">
+                    <div><span className="text-muted-foreground">Firma:</span> <strong className="text-emerald-300">{companyName}</strong></div>
+                    {ext?.authorUsername && (
+                      <div><span className="text-muted-foreground">Yayınlayan:</span> @{ext.authorUsername}</div>
+                    )}
+                    {ext?.sourceTag ? (
+                      <div><span className="text-muted-foreground">Kaynak:</span>{" "}
+                        {ext.sourceTag === "telegram" ? "Telegram" : ext.sourceTag === "whatsapp" ? "WhatsApp" : ext.sourceTag === "eleman" ? "Eleman.net" : ext.sourceTag}
+                      </div>
+                    ) : (
+                      <div><span className="text-muted-foreground">Kaynak:</span> Kullanıcı ilanı</div>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2 mb-2">
+                  {isAdminOnly && ext?.sourceUrl && (
+                    <Button size="sm" variant="outline" asChild className="h-8 text-[10px] border-sky-500/40 text-sky-300">
+                      <a href={ext.sourceUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={12} className="mr-1" />
+                        {ext.sourceTag === "telegram" ? "Telegram mesajına git" : ext.sourceTag === "whatsapp" ? "WhatsApp kaynağına git" : ext.sourceTag === "eleman" ? "Eleman.net ilanına git" : "Kaynak mesaja git"}
+                      </a>
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={toggleStaffFeature}
+                    className="h-8 text-[10px] border-amber-500/40 text-amber-300"
+                  >
+                    <Star size={12} className="mr-1" />
+                    {(ext?.isFeatured ?? listing.isFeatured) ? "Öne çıkarmayı kaldır" : "3 gün öne çıkar"}
+                  </Button>
                   <Button size="sm" variant="outline" onClick={changeCity} className="h-8 text-[10px]">İl Değiştir</Button>
                   <Button size="sm" variant="outline" onClick={openEdit} className="h-8 text-[10px]">Düzenle</Button>
-                  <Button size="sm" onClick={deleteListing} className="h-8 text-[10px] bg-destructive">Sil</Button>
+                  {canDeleteListing && (
+                    <Button size="sm" onClick={deleteListing} className="h-8 text-[10px] bg-destructive">Sil</Button>
+                  )}
                 </div>
                 {editing && (
                   <div className="space-y-2 border-t border-white/10 pt-2">
@@ -509,7 +615,13 @@ export default function ListingDetail() {
               <p className="og-ld-side-text">
                 {companyName} güvenlik sektöründe faaliyet gösteren bir kuruluştur.
               </p>
-              {phone && <span className="og-ld-side-link">📞 {phone}</span>}
+              {phones.length > 0 && (
+                <div className="og-ld-phones">
+                  {phones.map((p) => (
+                    <a key={p} href={`tel:${p}`} className="og-ld-side-link">📞 {p}</a>
+                  ))}
+                </div>
+              )}
               <Link href={`/ilanlar?search=${encodeURIComponent(companyName)}`} className="og-ld-side-outline">
                 Tüm İlanları Gör &gt;
               </Link>

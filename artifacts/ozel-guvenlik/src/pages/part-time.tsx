@@ -366,7 +366,7 @@ export default function PartTime() {
             <Star fill="currentColor" />
             Öne Çıkan
           </div>
-          <h2 className="og-pt-hero-title">PartTime Çalışmak İsteyenler</h2>
+          <h2 className="og-pt-hero-title">İş Arayanlar</h2>
           <p className="og-pt-hero-desc">
             Müsait olduğun günleri paylaş, firmalar sana kolayca ulaşsın. Saatlik, günlük ve vardiyalı işler için ilan ver.
           </p>
@@ -385,12 +385,12 @@ export default function PartTime() {
               <ClipboardList className="og-pt-art-clipboard" />
               <Clock className="og-pt-art-clock" />
               <ShieldCheck className="og-pt-art-shield" />
-              <span className="og-pt-art-card">PARTTIME</span>
+              <span className="og-pt-art-card">İŞ ARAYAN</span>
             </div>
           </div>
         </section>
 
-        <section className="og-pt-stats" aria-label="PartTime istatistikleri">
+        <section className="og-pt-stats" aria-label="İş arayan istatistikleri">
           <div className="og-pt-stat">
             <div className="og-pt-stat__ico"><Users /></div>
             <div className="og-pt-stat__val">{statActive}</div>
@@ -418,7 +418,7 @@ export default function PartTime() {
             >
               <div className="og-pt-form-panel space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-extrabold text-amber-400">{myListing ? "Kaydımı Düzenle" : "PartTime İlanı Ver"}</h2>
+                  <h2 className="text-sm font-extrabold text-amber-400">{myListing ? "Kaydımı Düzenle" : "İş Arayan İlanı Ver"}</h2>
                   <button type="button" onClick={() => setTab("liste")} className="og-icon-btn p-1"><X className="w-4 h-4" /></button>
                 </div>
 

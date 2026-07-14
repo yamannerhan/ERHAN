@@ -11,6 +11,7 @@ export const PERMISSIONS = [
   "users.view", "users.warn", "users.suspend_temporarily", "users.unsuspend", "users.view_activity", "users.view_reports",
   "comments.view", "comments.hide", "comments.restore", "comments.soft_delete",
   "messages.view_reported", "messages.hide", "messages.soft_delete",
+  "chat.clear",
   "notifications.view", "notifications.send",
   "reports.view", "reports.assign", "reports.resolve", "reports.reject", "reports.escalate",
   "ip_devices.view", "ip_devices.flag", "ip_devices.block",
@@ -24,12 +25,13 @@ export const PERMISSIONS = [
 
 export type PermissionKey = (typeof PERMISSIONS)[number];
 
+/** Varsayılan moderatör yetkileri — silme (soft_delete) yok; admin ayrı atayabilir */
 const MODERATOR_PERMS: PermissionKey[] = [
   "dashboard.view",
-  "listings.view", "listings.edit", "listings.approve", "listings.reject", "listings.archive", "listings.soft_delete",
+  "listings.view", "listings.edit", "listings.approve", "listings.reject", "listings.archive",
   "companies.view", "companies.edit", "companies.verify", "companies.reject",
   "users.view", "users.warn", "users.suspend_temporarily", "users.unsuspend", "users.view_activity", "users.view_reports",
-  "messages.view_reported", "messages.hide", "messages.soft_delete",
+  "messages.view_reported", "messages.hide",
   "notifications.view",
   "reports.view", "reports.assign", "reports.resolve", "reports.reject", "reports.escalate",
   "ip_devices.view", "ip_devices.flag",
@@ -38,6 +40,15 @@ const MODERATOR_PERMS: PermissionKey[] = [
   "logs.view",
   "statistics.view",
   "settings.profile", "settings.notifications",
+];
+
+/** Rol varsayılanından kaldırılan silme yetkileri (seed sırasında DB'den temizlenir) */
+export const DEFAULT_REMOVED_DELETE_PERMS: PermissionKey[] = [
+  "listings.soft_delete",
+  "messages.soft_delete",
+  "comments.soft_delete",
+  "announcements.delete",
+  "chat.clear",
 ];
 
 const SENIOR_EXTRA: PermissionKey[] = [

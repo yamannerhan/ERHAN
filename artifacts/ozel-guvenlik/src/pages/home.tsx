@@ -42,22 +42,30 @@ type HomeSavedState = {
   page: number;
   activePill: string;
   otherCity: string | null;
-  sortNewest: "new" | "old";
+  sortMode: "recommended" | "newest" | "oldest";
 };
 
 function getSavedHomeState(): HomeSavedState {
   try {
     const saved = sessionStorage.getItem(HOME_STATE_KEY);
-    if (!saved) return { page: 1, activePill: "all", otherCity: null, sortNewest: "new" };
-    const parsed = JSON.parse(saved) as Partial<HomeSavedState>;
+    if (!saved) return { page: 1, activePill: "all", otherCity: null, sortMode: "recommended" };
+    const parsed = JSON.parse(saved) as Partial<HomeSavedState> & { sortNewest?: "new" | "old" };
+    const sortMode =
+      parsed.sortMode === "newest" || parsed.sortMode === "oldest" || parsed.sortMode === "recommended"
+        ? parsed.sortMode
+        : parsed.sortNewest === "old"
+          ? "oldest"
+          : parsed.sortNewest === "new"
+            ? "newest"
+            : "recommended";
     return {
       page: Math.max(1, parsed.page ?? 1),
       activePill: parsed.activePill ?? "all",
       otherCity: parsed.otherCity ?? null,
-      sortNewest: parsed.sortNewest === "old" ? "old" : "new",
+      sortMode,
     };
   } catch {
-    return { page: 1, activePill: "all", otherCity: null, sortNewest: "new" };
+    return { page: 1, activePill: "all", otherCity: null, sortMode: "recommended" };
   }
 }
 
@@ -296,7 +304,7 @@ export default function Home() {
   const [otherCity, setOtherCity] = useState<string | null>(savedHome.otherCity);
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
   const [nearbyOpen, setNearbyOpen] = useState(false);
-  const [sortNewest, setSortNewest] = useState<"new" | "old">(savedHome.sortNewest);
+  const [sortMode, setSortMode] = useState<"recommended" | "newest" | "oldest">(savedHome.sortMode);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
@@ -340,6 +348,7 @@ export default function Home() {
   const { data: listingsData, isLoading, isFetching, refetch } = useGetListings({
     page,
     limit: pageSize,
+    sort: sortMode,
     ...(cityFilter ? { city: cityFilter } : {}),
   } as Parameters<typeof useGetListings>[0]);
 
@@ -347,11 +356,12 @@ export default function Home() {
     page: 1,
     limit: 20,
     featured: true,
+    sort: "recommended",
   } as Parameters<typeof useGetListings>[0]);
 
   useEffect(() => {
-    sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify({ page, activePill, otherCity, sortNewest }));
-  }, [page, activePill, otherCity, sortNewest]);
+    sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify({ page, activePill, otherCity, sortMode }));
+  }, [page, activePill, otherCity, sortMode]);
 
   // İlk yüklemede detaydan dönüş scroll'unu geri yükle; her sayfa değişiminde ilk ilana git
   useEffect(() => {
@@ -472,14 +482,16 @@ export default function Home() {
   }, [allListings, activePill, otherCity]);
 
   const sorted = useMemo(() => {
+    // recommended: sunucu sırası korunur; newest/oldest yalnızca fallback client sort
+    if (sortMode === "recommended") return filtered;
     const arr = [...filtered];
     arr.sort((a, b) => {
-      const ta = new Date(a.createdAt).getTime();
-      const tb = new Date(b.createdAt).getTime();
-      return sortNewest === "new" ? tb - ta : ta - tb;
+      const ta = new Date((a as { sourcePublishedAt?: string }).sourcePublishedAt || a.createdAt).getTime();
+      const tb = new Date((b as { sourcePublishedAt?: string }).sourcePublishedAt || b.createdAt).getTime();
+      return sortMode === "newest" ? tb - ta : ta - tb;
     });
     return arr;
-  }, [filtered, sortNewest]);
+  }, [filtered, sortMode]);
 
   const featuredList = useMemo(() => featuredData?.listings ?? [], [featuredData]);
   const displayFeaturedList = useMemo(
@@ -502,6 +514,7 @@ export default function Home() {
   }, []);
 
   const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";
+  const canQuickDeleteListing = user?.role === "admin";
 
   const quickChangeCity = async (listingId: number, currentCity: string) => {
     const nextCity = window.prompt("İlanın il / ilçe / semt bilgisini değiştir", currentCity);
@@ -545,6 +558,10 @@ export default function Home() {
       />
       <div className="og-home-top">
         <div className="og-home-mode-row mobile-home">
+          <button type="button" className="og-home-total-count" onClick={scrollToListings}>
+            <span>Toplam İlan</span>
+            <strong>{totalCount.toLocaleString("tr-TR")}</strong>
+          </button>
           <DisplayModeToggle />
         </div>
 
@@ -559,9 +576,7 @@ export default function Home() {
         {/* ── Hızlı kartlar — kart HTML/CSS'ine dokunulmaz; yalnızca dış wrap ── */}
         <div className="desktop-coming-soon-wrap">
         <HomeQuickCards
-          totalCount={totalCount}
           showNewsBadge={announcements.length > 0 || newToday > 0}
-          onTotalClick={scrollToListings}
           onNearClick={handleNearClick}
         />
         </div>
@@ -688,10 +703,10 @@ export default function Home() {
               Tüm İlanlar <span className="og-text-muted text-sm font-semibold">({totalCount})</span>
             </h2>
             <button
-              onClick={() => setSortNewest(s => s === "new" ? "old" : "new")}
+              onClick={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
               className="og-sort-btn"
             >
-              {sortNewest === "new" ? "En Yeni" : "En Eski"}
+              {sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -730,17 +745,19 @@ export default function Home() {
                         >
                           İl Değiştir
                         </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void quickDeleteListing(listing.id);
-                          }}
-                          className="rounded-full bg-red-600/90 px-1.5 py-0.5 text-[8px] font-black text-white border border-red-200/30"
-                        >
-                          Sil
-                        </button>
+                        {canQuickDeleteListing && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void quickDeleteListing(listing.id);
+                            }}
+                            className="rounded-full bg-red-600/90 px-1.5 py-0.5 text-[8px] font-black text-white border border-red-200/30"
+                          >
+                            Sil
+                          </button>
+                        )}
                       </>
                     ) : undefined}
                   />
@@ -775,8 +792,9 @@ export default function Home() {
             <DesktopListingsTable
               listings={sorted}
               totalCount={totalCount}
-              sortNewest={sortNewest}
-              onToggleSort={() => setSortNewest((s) => (s === "new" ? "old" : "new"))}
+              sortNewest={sortMode === "oldest" ? "old" : "new"}
+              sortLabel={sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
+              onToggleSort={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
               onNavigate={saveHomeScroll}
               savedIds={favIds}
               onToggleSave={handleToggleFav}

@@ -21,3 +21,12 @@ export function emitRealtimeToUser(userId: number, event: string, data: unknown)
   }
   realtimeServer.emit(event, data);
 }
+
+/** Belirli odaya yayın (ör. support:ticket:12). */
+export function emitRealtimeToRoom(room: string, event: string, data: unknown): void {
+  if (!realtimeServer) return;
+  if (typeof realtimeServer.to === "function") {
+    realtimeServer.to(room).emit(event, data);
+  }
+  realtimeServer.emit(event, data);
+}

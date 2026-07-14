@@ -43,7 +43,7 @@ function maskIp(ip: string | null | undefined, full: boolean): string {
 /** Me + permissions */
 router.get("/me", async (req, res) => {
   await ensureModerationPermissionsSeeded();
-  const permissions = await loadUserPermissions(req.user!.role);
+  const permissions = await loadUserPermissions(req.user!.role, req.user!.id);
   res.json({
     id: req.user!.id,
     username: req.user!.username,
@@ -258,6 +258,13 @@ router.post("/listings/bulk", requirePermission("listings.bulk_action"), async (
   const action = body.action ?? "";
   const reason = body.reason ?? "";
   if (!ids.length || !action) { res.status(400).json({ error: "ids ve action gerekli" }); return; }
+  if (action === "delete") {
+    const canDelete = await loadUserPermissions(req.user!.role, req.user!.id);
+    if (!canDelete.includes("listings.soft_delete")) {
+      res.status(403).json({ error: "Silme yetkiniz yok", code: "FORBIDDEN_PERMISSION", permission: "listings.soft_delete" });
+      return;
+    }
+  }
   let updated = 0;
   for (const id of ids) {
     if (action === "approve") await db.update(listingsTable).set({ isActive: true, status: "active" }).where(eq(listingsTable.id, id));

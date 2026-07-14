@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Redirect, Link as WouterLink, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,9 @@ import { useToast } from "@/hooks/use-toast";
 import { ManagementTeamAdminSection } from "@/components/management-team-admin";
 import { ChatBannersAdminSection } from "@/components/chat-banners-admin";
 import { HomeBannersAdminSection } from "@/components/home-banners-admin";
+import { KnownCompaniesAdminSection } from "@/components/known-companies-admin";
+import { FeaturedListingsAdminSection } from "@/components/featured-listings-admin";
+import { VerifiedPublishersAdminSection } from "@/components/verified-publishers-admin";
 import { LocationReviewSection } from "@/components/location-review-admin";
 
 function getToken() {
@@ -417,23 +420,115 @@ function SupportAdminSection({ apiCall, toast }: {
   apiCall: (path: string, method: string, body?: unknown) => Promise<unknown>;
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
 }) {
+  const { user } = useAuth();
   const [tickets, setTickets] = useState<AdminSupportTicket[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("all");
   const [activeTicket, setActiveTicket] = useState<AdminSupportDetail | null>(null);
   const [reply, setReply] = useState("");
+  const [confirmResolve, setConfirmResolve] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeTicketIdRef = useRef<number | null>(null);
+  const filterRef = useRef(filter);
+  const socketRef = useRef<ReturnType<typeof socketIo> | null>(null);
 
-  const loadTickets = async () => {
+  const loadTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const path = filter === "all" ? "/admin/support" : `/admin/support?status=${filter}`;
+      const f = filterRef.current;
+      const path = f === "all" ? "/admin/support" : `/admin/support?status=${f}`;
       const data = await apiCall(path, "GET");
       setTickets(Array.isArray(data) ? data as AdminSupportTicket[] : []);
     } catch {} finally { setLoading(false); }
-  };
+  }, [apiCall]);
 
-  useEffect(() => { void loadTickets(); }, [filter]);
+  useEffect(() => { filterRef.current = filter; }, [filter]);
+  useEffect(() => { void loadTickets(); }, [filter, loadTickets]);
+
+  useEffect(() => {
+    activeTicketIdRef.current = activeTicket?.id ?? null;
+  }, [activeTicket?.id]);
+
+  // Canlı destek soketi
+  useEffect(() => {
+    if (!user) return;
+    const s = socketIo(window.location.origin, {
+      path: "/ws",
+      transports: ["websocket", "polling"],
+      secure: window.location.protocol === "https:",
+      withCredentials: true,
+    });
+    socketRef.current = s;
+    const auth = () => {
+      if (user.id && s.connected) s.emit("authenticate", { userId: user.id });
+      if (activeTicketIdRef.current) s.emit("support:join", { ticketId: activeTicketIdRef.current });
+    };
+    s.on("connect", auth);
+
+    s.on("support:message", (msg: AdminSupportMessage & { ticketId?: number; status?: string }) => {
+      const ticketId = msg.ticketId;
+      if (!ticketId) return;
+      setTickets((prev) => prev.map((t) =>
+        t.id === ticketId
+          ? {
+              ...t,
+              status: msg.status ?? t.status,
+              msgCount: (t.msgCount ?? 0) + 1,
+              updatedAt: msg.createdAt ?? t.updatedAt,
+            }
+          : t,
+      ));
+      if (activeTicketIdRef.current !== ticketId) return;
+      setActiveTicket((prev) => {
+        if (!prev || prev.id !== ticketId) return prev;
+        if (prev.messages.some((m) => m.id === msg.id)) return prev;
+        return {
+          ...prev,
+          status: msg.status ?? prev.status,
+          messages: [...prev.messages, msg],
+        };
+      });
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    });
+
+    s.on("support:ticket-update", () => {
+      void loadTickets();
+    });
+
+    if (s.connected) auth();
+    return () => {
+      s.disconnect();
+      socketRef.current = null;
+    };
+  }, [user?.id, loadTickets]);
+
+  // Açık thread: odaya katıl + yedek poll (3.5s)
+  useEffect(() => {
+    const id = activeTicket?.id;
+    const s = socketRef.current;
+    if (id && s?.connected) s.emit("support:join", { ticketId: id });
+    if (!id) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void (async () => {
+        try {
+          const data = await apiCall(`/support/${id}`, "GET") as AdminSupportDetail;
+          if (!data?.messages) return;
+          setActiveTicket((prev) => {
+            if (!prev || prev.id !== id) return prev;
+            const prevIds = new Set(prev.messages.map((m) => m.id));
+            const hasNew = data.messages.some((m) => !prevIds.has(m.id));
+            if (!hasNew && prev.status === data.status) return prev;
+            return { ...data, messages: data.messages };
+          });
+        } catch { /* ignore */ }
+      })();
+    }, 3500);
+    return () => {
+      window.clearInterval(timer);
+      if (id && s?.connected) s.emit("support:leave", { ticketId: id });
+    };
+  }, [activeTicket?.id, apiCall]);
 
   const loadTicketDetail = async (id: number) => {
     try {
@@ -443,6 +538,7 @@ function SupportAdminSection({ apiCall, toast }: {
         ...data,
         messages: Array.isArray(data.messages) ? data.messages : [],
       });
+      socketRef.current?.emit("support:join", { ticketId: id });
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch {}
   };
@@ -452,18 +548,35 @@ function SupportAdminSection({ apiCall, toast }: {
     try {
       const msg = await apiCall(`/support/${activeTicket.id}/reply`, "POST", { message: reply.trim() }) as AdminSupportMessage;
       setReply("");
-      setActiveTicket(prev => prev ? { ...prev, status: "answered", messages: [...prev.messages, msg] } : prev);
+      setActiveTicket(prev => {
+        if (!prev) return prev;
+        if (prev.messages.some((m) => m.id === msg.id)) {
+          return { ...prev, status: "answered" };
+        }
+        return { ...prev, status: "answered", messages: [...prev.messages, msg] };
+      });
+      setConfirmResolve(false);
       void loadTickets();
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
   };
 
   const changeStatus = async (id: number, status: string) => {
     try {
       await apiCall(`/support/${id}/status`, "PATCH", { status });
-      toast({ title: "Durum güncellendi" });
+      toast({ title: status === "resolved" ? "Çözüldü olarak işaretlendi" : "Durum güncellendi" });
       if (activeTicket?.id === id) setActiveTicket(prev => prev ? { ...prev, status } : prev);
+      setConfirmResolve(false);
       void loadTickets();
     } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
+  };
+
+  const markResolved = async (id: number) => {
+    if (!confirmResolve) {
+      setConfirmResolve(true);
+      return;
+    }
+    await changeStatus(id, "resolved");
   };
 
   const formatTime = (iso: string) => new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -492,7 +605,7 @@ function SupportAdminSection({ apiCall, toast }: {
         {activeTicket ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setActiveTicket(null)} className="text-muted-foreground hover:text-foreground">
+              <button type="button" onClick={() => { setActiveTicket(null); setConfirmResolve(false); }} className="text-muted-foreground hover:text-foreground">
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <div className="flex-1 min-w-0">
@@ -502,18 +615,46 @@ function SupportAdminSection({ apiCall, toast }: {
               <StatusBadge status={activeTicket.status} />
             </div>
 
-            <div className="space-y-1.5 flex gap-1 flex-wrap">
-              {["waiting", "answered", "resolved"].map(s => (
-                <button key={s} type="button" onClick={() => void changeStatus(activeTicket.id, s)}
-                  disabled={activeTicket.status === s}
-                  className={`text-[10px] px-2 py-1 rounded-lg font-medium disabled:opacity-40 transition-colors ${
-                    s === "waiting" ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" :
-                    s === "answered" ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" :
-                    "bg-green-500/20 text-green-400 hover:bg-green-500/30"
-                  }`}>
-                  {{ waiting: "Bekliyor", answered: "Yanıtlandı", resolved: "Çözüldü" }[s]}
+            <div className="space-y-2">
+              <div className="flex gap-1 flex-wrap">
+                <button type="button" onClick={() => void changeStatus(activeTicket.id, "waiting")}
+                  disabled={activeTicket.status === "waiting"}
+                  className="text-[10px] px-2 py-1 rounded-lg font-medium disabled:opacity-40 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30">
+                  Bekliyor
                 </button>
-              ))}
+                <button type="button" onClick={() => void changeStatus(activeTicket.id, "answered")}
+                  disabled={activeTicket.status === "answered"}
+                  className="text-[10px] px-2 py-1 rounded-lg font-medium disabled:opacity-40 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30">
+                  {activeTicket.status === "resolved" ? "Yeniden Aç" : "Yanıtlandı"}
+                </button>
+              </div>
+
+              {activeTicket.status !== "resolved" && !confirmResolve && (
+                <div className="flex justify-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void markResolved(activeTicket.id)}
+                    className="text-[10px] px-3 py-2 rounded-xl font-semibold bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25"
+                  >
+                    Çözüldü olarak işaretle
+                  </button>
+                </div>
+              )}
+
+              {confirmResolve && activeTicket.status !== "resolved" && (
+                <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-center space-y-2">
+                  <p className="text-xs font-semibold text-green-200">Talebi çözüldü yap?</p>
+                  <p className="text-[10px] text-green-200/70">Sonra yeniden açıp yanıtlamaya devam edebilirsin.</p>
+                  <div className="flex gap-2 justify-center">
+                    <button type="button" onClick={() => setConfirmResolve(false)} className="text-[10px] px-3 py-1.5 rounded-lg bg-white/10 text-muted-foreground">
+                      Hayır
+                    </button>
+                    <button type="button" onClick={() => void markResolved(activeTicket.id)} className="text-[10px] px-3 py-1.5 rounded-lg bg-green-400 text-black font-bold">
+                      Evet, çözüldü
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="max-h-[50vh] overflow-y-auto space-y-2 bg-white/5 rounded-xl p-3">
@@ -531,17 +672,18 @@ function SupportAdminSection({ apiCall, toast }: {
               <div ref={messagesEndRef} />
             </div>
 
-            {activeTicket.status !== "resolved" && (
-              <div className="flex gap-2">
-                <textarea value={reply} onChange={e => setReply(e.target.value)}
-                  placeholder="Yanıt yaz..."
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendReply(); }}}
-                  rows={2} className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-primary/50 resize-none text-foreground placeholder:text-muted-foreground" />
-                <button type="button" onClick={() => void sendReply()} disabled={!reply.trim()}
-                  className="w-9 h-9 self-end rounded-xl bg-primary flex items-center justify-center disabled:opacity-40">
-                  <Send className="w-3.5 h-3.5 text-white" />
-                </button>
-              </div>
+            <div className="flex gap-2">
+              <textarea value={reply} onChange={e => setReply(e.target.value)}
+                placeholder={activeTicket.status === "resolved" ? "Yanıt yaz (talep yeniden açılır)…" : "Yanıt yaz..."}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendReply(); }}}
+                rows={2} className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-primary/50 resize-none text-foreground placeholder:text-muted-foreground" />
+              <button type="button" onClick={() => void sendReply()} disabled={!reply.trim()}
+                className="w-9 h-9 self-end rounded-xl bg-primary flex items-center justify-center disabled:opacity-40">
+                <Send className="w-3.5 h-3.5 text-white" />
+              </button>
+            </div>
+            {activeTicket.status === "resolved" && (
+              <p className="text-[10px] text-center text-green-400/80">Çözüldü — yanıt yazınca veya Yeniden Aç ile devam edebilirsin.</p>
             )}
           </div>
         ) : (
@@ -1089,6 +1231,9 @@ interface AdminUser {
   isVip?: boolean; vipUntil?: string | null;
   xp?: number; level?: number;
   avatarFrame?: string; chatBubble?: string; chatBubbleExpiresAt?: string | null;
+  isVerifiedPublisher?: boolean;
+  verificationStatus?: string;
+  verificationType?: string | null;
 }
 
 interface BanEntry {
@@ -1131,6 +1276,135 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
   const [userBadges, setUserBadges] = useState<Record<number, { id: number; name: string; emoji: string; color: string }[]>>({});
   const [badgeBusy, setBadgeBusy] = useState<string | null>(null);
   const [cosmoBusy, setCosmoBusy] = useState<number | null>(null);
+  const [permEditorUserId, setPermEditorUserId] = useState<number | null>(null);
+  const [permLoading, setPermLoading] = useState(false);
+  const [permSaving, setPermSaving] = useState(false);
+  const [permDraft, setPermDraft] = useState<Set<string>>(new Set());
+  const [permDefaults, setPermDefaults] = useState<Set<string>>(new Set());
+  const [permCatalog, setPermCatalog] = useState<string[]>([]);
+
+  const PERM_LABELS: Record<string, string> = {
+    "dashboard.view": "Panel görüntüle",
+    "listings.view": "İlanları gör",
+    "listings.create": "İlan oluştur",
+    "listings.edit": "İlan düzenle",
+    "listings.approve": "İlan onayla",
+    "listings.reject": "İlan reddet",
+    "listings.archive": "İlan arşivle",
+    "listings.soft_delete": "İlan sil",
+    "listings.feature": "Öne çıkar",
+    "listings.remove_feature": "Öne çıkarmayı kaldır",
+    "listings.bulk_action": "Toplu ilan işlemi",
+    "companies.view": "Firmaları gör",
+    "companies.edit": "Firma düzenle",
+    "companies.verify": "Firma doğrula",
+    "companies.reject": "Firma reddet",
+    "companies.suspend": "Firma askıya al",
+    "companies.unsuspend": "Firma askıyı kaldır",
+    "users.view": "Kullanıcıları gör",
+    "users.warn": "Kullanıcı uyar",
+    "users.suspend_temporarily": "Kullanıcı askıya al",
+    "users.unsuspend": "Kullanıcı askıyı kaldır",
+    "users.view_activity": "Aktivite gör",
+    "users.view_reports": "Kullanıcı raporları",
+    "comments.view": "Yorumları gör",
+    "comments.hide": "Yorum gizle",
+    "comments.restore": "Yorum geri al",
+    "comments.soft_delete": "Yorum sil",
+    "messages.view_reported": "Raporlu mesajlar",
+    "messages.hide": "Mesaj gizle",
+    "messages.soft_delete": "Mesaj sil",
+    "chat.clear": "Sohbeti temizle",
+    "notifications.view": "Bildirimleri gör",
+    "notifications.send": "Bildirim gönder",
+    "reports.view": "Raporları gör",
+    "reports.assign": "Rapor ata",
+    "reports.resolve": "Rapor çöz",
+    "reports.reject": "Rapor reddet",
+    "reports.escalate": "Rapor yükselt",
+    "ip_devices.view": "IP/cihaz gör",
+    "ip_devices.flag": "IP/cihaz işaretle",
+    "ip_devices.block": "IP/cihaz engelle",
+    "blacklist.view": "Kara liste gör",
+    "blacklist.add": "Kara liste ekle",
+    "blacklist.remove": "Kara liste sil",
+    "word_filter.view": "Kelime filtresi gör",
+    "word_filter.add": "Kelime ekle",
+    "word_filter.edit": "Kelime düzenle",
+    "word_filter.remove": "Kelime sil",
+    "logs.view": "Logları gör",
+    "announcements.view": "Duyuruları gör",
+    "announcements.create": "Duyuru oluştur",
+    "announcements.edit": "Duyuru düzenle",
+    "announcements.publish": "Duyuru yayınla",
+    "announcements.unpublish": "Duyuru yayından kaldır",
+    "announcements.delete": "Duyuru sil",
+    "statistics.view": "İstatistikler",
+    "settings.profile": "Profil ayarı",
+    "settings.notifications": "Bildirim ayarı",
+  };
+
+  const openPermEditor = async (userId: number) => {
+    if (permEditorUserId === userId) {
+      setPermEditorUserId(null);
+      return;
+    }
+    setPermEditorUserId(userId);
+    setPermLoading(true);
+    try {
+      const d = await apiCall(`/admin/users/${userId}/permissions`, "GET") as {
+        all: string[];
+        defaults: string[];
+        effective: string[];
+      };
+      setPermCatalog(d.all ?? []);
+      setPermDefaults(new Set(d.defaults ?? []));
+      setPermDraft(new Set(d.effective ?? []));
+    } catch (e: any) {
+      toast({ title: "Yetkiler yüklenemedi", description: e.message, variant: "destructive" });
+      setPermEditorUserId(null);
+    } finally {
+      setPermLoading(false);
+    }
+  };
+
+  const togglePerm = (key: string) => {
+    setPermDraft(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const savePerms = async (userId: number) => {
+    setPermSaving(true);
+    try {
+      await apiCall(`/admin/users/${userId}/permissions`, "PUT", {
+        permissions: [...permDraft],
+      });
+      toast({ title: "Yetkiler kaydedildi" });
+    } catch (e: any) {
+      toast({ title: "Yetkiler kaydedilemedi", description: e.message, variant: "destructive" });
+    } finally {
+      setPermSaving(false);
+    }
+  };
+
+  const resetPermsToDefaults = async (userId: number) => {
+    setPermDraft(new Set(permDefaults));
+    setPermSaving(true);
+    try {
+      await apiCall(`/admin/users/${userId}/permissions`, "PUT", {
+        permissions: [...permDefaults],
+      });
+      toast({ title: "Varsayılan yetkilere dönüldü" });
+    } catch (e: any) {
+      toast({ title: "Sıfırlama başarısız", description: e.message, variant: "destructive" });
+    } finally {
+      setPermSaving(false);
+    }
+  };
 
   const searchUsers = async () => {
     setLoading(true);
@@ -1491,6 +1765,11 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                         </span>
                       )}
                       {u.isBanned && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-destructive/20 text-destructive">Yasaklı</span>}
+                      {u.isVerifiedPublisher && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center gap-0.5">
+                          <ShieldCheck className="w-2.5 h-2.5" /> Doğrulanmış
+                        </span>
+                      )}
                       {isMuted && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400">Susturulmuş</span>}
                       <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-400/30">
                         Lv.{u.level ?? 1}
@@ -1739,7 +2018,7 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                 {/* Role + ban + IP/device ban buttons */}
                 {u.role !== "admin" && (
                   <div className="flex gap-1.5 flex-wrap">
-                    {u.role !== "moderator" ? (
+                    {u.role !== "moderator" && u.role !== "senior_moderator" ? (
                       <button onClick={() => changeRole(u.id, "moderator")}
                         className="text-[10px] px-2 py-1 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors flex items-center gap-0.5">
                         <Shield className="w-3 h-3" /> Mod Yap
@@ -1748,6 +2027,16 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                       <button onClick={() => changeRole(u.id, "user")}
                         className="text-[10px] px-2 py-1 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors flex items-center gap-0.5">
                         <User className="w-3 h-3" /> Üye Yap
+                      </button>
+                    )}
+                    {viewerIsAdmin && (u.role === "moderator" || u.role === "senior_moderator") && (
+                      <button
+                        type="button"
+                        onClick={() => void openPermEditor(u.id)}
+                        className="text-[10px] px-2 py-1 bg-violet-500/20 text-violet-300 rounded-lg hover:bg-violet-500/30 transition-colors flex items-center gap-0.5"
+                      >
+                        <Shield className="w-3 h-3" />
+                        {permEditorUserId === u.id ? "Yetkileri Gizle" : "Yetki Ata"}
                       </button>
                     )}
                     <button onClick={() => banUser(u.id, u.isBanned)}
@@ -1760,6 +2049,66 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                           className={`text-[10px] px-2 py-1 rounded-lg transition-colors flex items-center gap-0.5 disabled:opacity-40 ${u.isVip ? "bg-amber-500/20 text-amber-300 hover:bg-amber-500/30" : "bg-cyan-400/15 text-cyan-300 hover:bg-cyan-400/25"}`}>
                           {u.isVip ? <><Gem className="w-3 h-3" /> VIP Kaldır</> : <><Crown className="w-3 h-3" /> VIP Ver</>}
                         </button>
+                        {!u.isVerifiedPublisher ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await apiCall(`/admin/users/${u.id}/verify-publisher`, "PATCH", {
+                                  verificationType: "company",
+                                  note: "Admin panelinden doğrulandı",
+                                  syncCompanyProfile: true,
+                                });
+                                setUsers((prev) => prev.map((x) => x.id === u.id
+                                  ? { ...x, isVerifiedPublisher: true, verificationStatus: "verified" }
+                                  : x));
+                                toast({ title: "Hesap doğrulandı" });
+                              } catch {
+                                toast({ title: "Doğrulama başarısız", variant: "destructive" });
+                              }
+                            }}
+                            className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 flex items-center gap-0.5"
+                          >
+                            <ShieldCheck className="w-3 h-3" /> Yayıncı Doğrula
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiCall(`/admin/users/${u.id}/suspend-verification`, "PATCH", { note: "Askıya alındı" });
+                                  setUsers((prev) => prev.map((x) => x.id === u.id
+                                    ? { ...x, isVerifiedPublisher: false, verificationStatus: "suspended" }
+                                    : x));
+                                  toast({ title: "Doğrulama askıya alındı" });
+                                } catch {
+                                  toast({ title: "İşlem başarısız", variant: "destructive" });
+                                }
+                              }}
+                              className="text-[10px] px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 flex items-center gap-0.5"
+                            >
+                              Askıya Al
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiCall(`/admin/users/${u.id}/remove-verification`, "PATCH", {});
+                                  setUsers((prev) => prev.map((x) => x.id === u.id
+                                    ? { ...x, isVerifiedPublisher: false, verificationStatus: "unverified" }
+                                    : x));
+                                  toast({ title: "Doğrulama kaldırıldı" });
+                                } catch {
+                                  toast({ title: "İşlem başarısız", variant: "destructive" });
+                                }
+                              }}
+                              className="text-[10px] px-2 py-1 rounded-lg bg-red-500/20 text-red-300 flex items-center gap-0.5"
+                            >
+                              Doğrulamayı Kaldır
+                            </button>
+                          </>
+                        )}
                         <button onClick={() => ipBanUser(u.id)} disabled={ipBanLoading === u.id || !u.lastKnownIp}
                           title={u.lastKnownIp ? `IP: ${u.lastKnownIp}` : "IP henüz bilinmiyor"}
                           className="text-[10px] px-2 py-1 bg-red-900/30 text-red-400 rounded-lg hover:bg-red-900/50 transition-colors flex items-center gap-0.5 disabled:opacity-40">
@@ -1771,6 +2120,67 @@ function UserManagementSection({ apiCall, toast, viewerIsAdmin }: {
                           <Lock className="w-3 h-3" /> {deviceBanLoading === u.id ? "..." : "Cihaz Ban"}
                         </button>
                       </>
+                    )}
+                  </div>
+                )}
+
+                {viewerIsAdmin && permEditorUserId === u.id && (
+                  <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="text-[11px] font-semibold text-violet-200">Moderatör yetkileri</p>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          disabled={permSaving || permLoading}
+                          onClick={() => void resetPermsToDefaults(u.id)}
+                          className="text-[10px] px-2 py-1 rounded-lg bg-white/10 text-muted-foreground hover:bg-white/15 disabled:opacity-50"
+                        >
+                          Varsayılana dön
+                        </button>
+                        <button
+                          type="button"
+                          disabled={permSaving || permLoading}
+                          onClick={() => void savePerms(u.id)}
+                          className="text-[10px] px-2 py-1 rounded-lg bg-violet-500/30 text-violet-200 hover:bg-violet-500/40 disabled:opacity-50"
+                        >
+                          {permSaving ? "Kaydediliyor..." : "Kaydet"}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground">
+                      Varsayılan yetkiler silme içermez. İstediğin yetkiyi açıp kapatabilirsin.
+                    </p>
+                    {permLoading ? (
+                      <p className="text-[10px] text-muted-foreground py-2">Yükleniyor...</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-56 overflow-y-auto pr-1">
+                        {permCatalog.map((key) => {
+                          const checked = permDraft.has(key);
+                          const isDefault = permDefaults.has(key);
+                          const isDelete = key.includes("delete") || key.includes("soft_delete");
+                          return (
+                            <label
+                              key={key}
+                              className={`flex items-start gap-2 rounded-lg px-2 py-1.5 cursor-pointer text-[10px] ${
+                                checked ? "bg-white/10 text-white" : "bg-black/20 text-muted-foreground"
+                              } ${isDelete ? "border border-red-500/30" : "border border-transparent"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => togglePerm(key)}
+                                className="mt-0.5 accent-violet-400 shrink-0"
+                              />
+                              <span className="min-w-0">
+                                <span className="font-medium">{PERM_LABELS[key] ?? key}</span>
+                                {isDefault && (
+                                  <span className="ml-1 text-[8px] text-emerald-400/80">varsayılan</span>
+                                )}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1823,7 +2233,7 @@ function PartTimeAdminSection({ apiCall, toast }: {
   };
 
   return (
-    <Section title="Part Time Yönetimi" icon={Clock}>
+    <Section title="İş Arayanlar Yönetimi" icon={Clock}>
       {loading && <p className="text-xs text-muted-foreground py-2">Yükleniyor...</p>}
       {!loading && !workers?.length && <p className="text-xs text-muted-foreground py-2 text-center">Henüz kayıt yok</p>}
       <div className="space-y-2">
@@ -3645,8 +4055,8 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
 // ====================================================================
 
 type AdminTab =
-  | "dashboard" | "ilanlar" | "ilan-olustur" | "cv-olustur" | "part-time"
-  | "kullanicilar" | "yetkiler" | "ilan-haklari" | "yonetim-ekibi" | "anasayfa-banner" | "sohbet-banner"
+  | "dashboard" | "ilanlar" | "one-cikan" | "ilan-olustur" | "cv-olustur" | "part-time"
+  | "kullanicilar" | "dogrulanmis-hesaplar" | "yetkiler" | "ilan-haklari" | "yonetim-ekibi" | "anasayfa-banner" | "hazir-sirketler" | "sohbet-banner"
   | "telegram" | "whatsapp" | "eleman" | "mesajlar" | "destek"
   | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar" | "konum-dogrulama";
 
@@ -3668,16 +4078,19 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
     title: "YÖNETİM",
     items: [
       { id: "ilanlar", label: "İlanlar", icon: Briefcase, hasChevron: true },
+      { id: "one-cikan", label: "Öne Çıkanlar", icon: Star },
       { id: "ilan-olustur", label: "İlan Oluştur", icon: Plus },
       { id: "anasayfa-banner", label: "Anasayfa Banner", icon: Image },
+      { id: "hazir-sirketler", label: "Hazır Şirket Logoları", icon: Building2 },
       { id: "cv-olustur", label: "CV Oluştur", icon: FileText, href: "/cv-olustur" },
-      { id: "part-time", label: "Part Time", icon: Clock, href: "/part-time" },
+      { id: "part-time", label: "İş Arayanlar", icon: Clock, href: "/part-time" },
     ],
   },
   {
     title: "KULLANICILAR",
     items: [
       { id: "kullanicilar", label: "Kullanıcılar", icon: Users },
+      { id: "dogrulanmis-hesaplar", label: "Doğrulanmış Hesaplar", icon: ShieldCheck },
       { id: "yetkiler", label: "Yetki Yönetimi", icon: Shield },
       { id: "ilan-haklari", label: "Aktif İlan Hakkı", icon: Award },
       { id: "yonetim-ekibi", label: "Yönetim Ekibi", icon: UserCheck },
@@ -4227,7 +4640,7 @@ function AdminDashboardHome({
   const quickAccess = [
     { icon: Plus, title: "Yeni İlan Oluştur", subtitle: "Hızlı ilan ekle", color: "from-emerald-500 to-teal-500", tab: "ilan-olustur" as AdminTab },
     { icon: FileText, title: "CV Oluştur", subtitle: "Yeni CV oluştur", color: "from-blue-500 to-cyan-500", href: "/cv-olustur" },
-    { icon: Clock, title: "Part Time Ekle", subtitle: "Part time ilan", color: "from-violet-500 to-purple-500", tab: "part-time" as AdminTab },
+    { icon: Clock, title: "İş Arayan Ekle", subtitle: "İş arayan ilanı", color: "from-violet-500 to-purple-500", tab: "part-time" as AdminTab },
     { icon: Users, title: "Kullanıcı Yönetimi", subtitle: "Kullanıcıları yönet", color: "from-pink-500 to-rose-500", tab: "kullanicilar" as AdminTab },
     { icon: CreditCard, title: "Bakiye İşlemleri", subtitle: "Bakiye ekle/çıkar", color: "from-amber-500 to-orange-500", tab: "bakiye" as AdminTab },
     { icon: Headphones, title: "Destek Talepleri", subtitle: "Destek taleplerini gör", color: "from-fuchsia-500 to-purple-500", tab: "bakiye" as AdminTab },
@@ -4474,11 +4887,20 @@ export default function AdminDashboard() {
   const [listingStatusFilter, setListingStatusFilter] = useState("all");
   const [listingSearch, setListingSearch] = useState("");
   const [listingCityFilter, setListingCityFilter] = useState("all");
-  const listingQuery = `/admin/listings?page=${listingPage}&limit=50${listingStatusFilter !== "all" ? `&status=${listingStatusFilter}` : ""}${listingSearch.trim() ? `&search=${encodeURIComponent(listingSearch.trim())}` : ""}${listingCityFilter !== "all" ? `&city=${encodeURIComponent(listingCityFilter)}` : ""}`;
+  const [listingSourceFilter, setListingSourceFilter] = useState("all");
+  const listingQuery = `/admin/listings?page=${listingPage}&limit=50${listingStatusFilter !== "all" ? `&status=${listingStatusFilter}` : ""}${listingSearch.trim() ? `&search=${encodeURIComponent(listingSearch.trim())}` : ""}${listingCityFilter !== "all" ? `&city=${encodeURIComponent(listingCityFilter)}` : ""}${listingSourceFilter !== "all" ? `&source=${listingSourceFilter}` : ""}`;
   const { data: listingsData, refetch: refetchListings } = useAdminApi<{
-    listings: { id: number; title: string; company: string; city: string; salary: string | null; workType: string; description: string | null; requirements: string | null; applyUrl: string | null; status: string; isFeatured: boolean; cardTheme: string | null; createdAt: string; expiresAt: string | null; sourceTag: string | null }[];
+    listings: {
+      id: number; title: string; company: string; city: string; salary: string | null; workType: string;
+      description: string | null; requirements: string | null; applyUrl: string | null; status: string;
+      isFeatured: boolean; cardTheme: string | null; createdAt: string; expiresAt: string | null;
+      sourceTag: string | null; sourceUrl?: string | null; messageId?: string | null;
+      featuredUntil?: string | null; authorId?: number | null;
+      authorUsername?: string | null; authorDisplayName?: string | null; companyProfileName?: string | null;
+      companyPhone?: string | null; contactName?: string | null; isUserListing?: boolean;
+    }[];
     total: number;
-  }>(listingQuery, [listingPage, listingStatusFilter, listingSearch, listingCityFilter]);
+  }>(listingQuery, [listingPage, listingStatusFilter, listingSearch, listingCityFilter, listingSourceFilter]);
 
   const { data: adminListingCities, refetch: refetchAdminListingCities } = useAdminApi<{
     cities: { city: string; count: number }[];
@@ -4777,9 +5199,17 @@ export default function AdminDashboard() {
 
   const toggleFeatured = async (id: number, cur: boolean) => {
     try {
-      await apiCall(`/admin/listings/${id}/status`, "PATCH", { isFeatured: !cur });
+      if (cur) {
+        await apiCall(`/admin/listings/${id}/unfeature`, "POST");
+        toast({ title: "Öne çıkarma kaldırıldı" });
+      } else {
+        await apiCall(`/admin/listings/${id}/feature`, "POST");
+        toast({ title: "3 gün öne çıkarıldı", description: `İlan #${id} öne çıkanlarda görünecek.` });
+      }
       refetchListings();
-    } catch (e: any) { toast({ title: "Hata", description: e.message, variant: "destructive" }); }
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
   };
 
   const republishListing = async (id: number) => {
@@ -5292,6 +5722,24 @@ export default function AdminDashboard() {
           </Section>
         )}
 
+        {activeTab === "hazir-sirketler" && (
+          <Section title="Hazır Şirket Logoları" icon={Building2}>
+            <KnownCompaniesAdminSection apiCall={apiCall} toast={toast} getToken={getToken} />
+          </Section>
+        )}
+
+        {activeTab === "one-cikan" && (
+          <Section title="Öne Çıkan İlanlar" icon={Star} defaultOpen>
+            <FeaturedListingsAdminSection apiCall={apiCall} toast={toast} canDelete={isAdmin} />
+          </Section>
+        )}
+
+        {activeTab === "dogrulanmis-hesaplar" && (
+          <Section title="Doğrulanmış Hesaplar" icon={ShieldCheck} defaultOpen>
+            <VerifiedPublishersAdminSection apiCall={apiCall} toast={toast} canApprove={isAdmin} />
+          </Section>
+        )}
+
         {activeTab === "ilan-olustur" && (
         <Section title="İlan Ekle (Admin)" icon={Briefcase}>
           <div className="space-y-3">
@@ -5622,7 +6070,7 @@ export default function AdminDashboard() {
         {activeTab === "ilanlar" && (
         <Section title="İlan Listesi" icon={Briefcase}>
           <div className="space-y-2 mb-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <Input
                 value={listingSearch}
                 onChange={e => { setListingSearch(e.target.value); setListingPage(1); }}
@@ -5650,10 +6098,19 @@ export default function AdminDashboard() {
                 <option value="pending">Bekleyen</option>
                 <option value="rejected">Reddedilen</option>
               </select>
+              <select
+                value={listingSourceFilter}
+                onChange={e => { setListingSourceFilter(e.target.value); setListingPage(1); }}
+                className="text-xs px-2 py-1.5 rounded-lg bg-[#111827] border border-white/10 text-white outline-none"
+              >
+                <option value="all">Tüm kaynaklar</option>
+                <option value="user">Kullanıcı şirket ilanları</option>
+                <option value="bot">Bot / dış kaynak</option>
+              </select>
             </div>
-            {(listingSearch || listingCityFilter !== "all" || listingStatusFilter !== "all") && (
+            {(listingSearch || listingCityFilter !== "all" || listingStatusFilter !== "all" || listingSourceFilter !== "all") && (
               <button
-                onClick={() => { setListingSearch(""); setListingCityFilter("all"); setListingStatusFilter("all"); setListingPage(1); }}
+                onClick={() => { setListingSearch(""); setListingCityFilter("all"); setListingStatusFilter("all"); setListingSourceFilter("all"); setListingPage(1); }}
                 className="text-[10px] px-2 py-1 bg-white/10 rounded-lg text-muted-foreground"
               >
                 Filtreleri temizle
@@ -5676,7 +6133,7 @@ export default function AdminDashboard() {
                 />
                 Tümünü seç
               </label>
-              {selectedListings.size > 0 && (
+              {isAdmin && selectedListings.size > 0 && (
                 <button onClick={bulkDeleteListings} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-destructive/20 text-destructive rounded-lg hover:bg-destructive/30 transition-colors">
                   <Trash2 className="w-3 h-3" /> Seçilenleri Sil ({selectedListings.size})
                 </button>
@@ -5698,7 +6155,18 @@ export default function AdminDashboard() {
                       <span className="text-[10px] font-black px-1.5 py-0.5 rounded-lg bg-primary/20 text-primary">#{l.id}</span>
                       <div className="text-sm font-medium line-clamp-1">{l.title}</div>
                     </div>
-                    <div className="text-xs text-muted-foreground">{l.company} · {l.city}</div>
+                    <div className="text-xs text-muted-foreground break-words">
+                      <span className="text-emerald-300 font-semibold">{l.companyProfileName || l.company}</span>
+                      {" · "}{l.city}
+                    </div>
+                    {l.isUserListing && (
+                      <div className="text-[11px] text-sky-300/90 mt-0.5 break-words">
+                        Kullanıcı şirketi
+                        {l.authorUsername ? ` · @${l.authorUsername}` : ""}
+                        {l.contactName ? ` · ${l.contactName}` : ""}
+                        {l.companyPhone ? ` · ${l.companyPhone}` : ""}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                         l.status === "active" ? "bg-green-500/20 text-green-400" :
@@ -5706,10 +6174,12 @@ export default function AdminDashboard() {
                         l.status === "pending" ? "bg-amber-500/20 text-amber-400" :
                         "bg-destructive/20 text-destructive"
                       }`}>{l.status === "active" ? "Aktif" : l.status === "inactive" ? "Pasif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
+                      {l.isUserListing && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Kullanıcı</span>}
                       {l.sourceTag === "eleman" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Eleman.net</span>}
                       {l.sourceTag === "whatsapp" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 font-medium">WhatsApp</span>}
                       {l.sourceTag === "telegram" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Telegram</span>}
                       {l.isFeatured && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">Öne Çıkan</span>}
+                      {l.featuredUntil && <span className="text-[10px] text-amber-200/80">Öne: {formatDate(l.featuredUntil)}</span>}
                       {l.expiresAt && <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5" />{formatDate(l.expiresAt)}</span>}
                       <span className="text-[10px] text-muted-foreground">{formatDate(l.createdAt)}</span>
                     </div>
@@ -5755,6 +6225,26 @@ export default function AdminDashboard() {
                   <button onClick={() => startEditListing(l)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-primary/15 text-primary rounded-lg hover:bg-primary/25 transition-colors">
                     <Edit2 className="w-3 h-3" /> Düzenle
                   </button>
+                  {isAdmin && l.sourceUrl && (
+                    <a
+                      href={l.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-sky-500/15 text-sky-300 rounded-lg hover:bg-sky-500/25 transition-colors"
+                      title={`${l.sourceTag === "telegram" ? "Telegram" : l.sourceTag === "whatsapp" ? "WhatsApp" : l.sourceTag === "eleman" ? "Eleman.net" : "Kaynak"} mesajına git`}
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      {l.sourceTag === "telegram" ? "Telegram mesajı" : l.sourceTag === "whatsapp" ? "WhatsApp kaynağı" : l.sourceTag === "eleman" ? "Eleman.net ilanı" : "Kaynak mesaj"}
+                    </a>
+                  )}
+                  <a
+                    href={`/ilan/${l.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors"
+                  >
+                    <Eye className="w-3 h-3" /> Site ilanı
+                  </a>
                   {l.status === "active" && (
                     <button onClick={() => setListingStatus(l.id, "inactive")} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-white/10 text-muted-foreground rounded-lg hover:bg-white/20 transition-colors">
                       <Power className="w-3 h-3" /> Pasif yap
@@ -5776,7 +6266,7 @@ export default function AdminDashboard() {
                     </button>
                   )}
                   <button onClick={() => toggleFeatured(l.id, l.isFeatured)} className={`text-[10px] flex items-center gap-0.5 px-2 py-1 rounded-lg transition-colors ${l.isFeatured ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" : "bg-white/10 text-muted-foreground hover:bg-white/20"}`}>
-                    {l.isFeatured ? <><StarOff className="w-3 h-3" /> Öne çıkarmayı kaldır</> : <><Star className="w-3 h-3" /> Öne çıkar</>}
+                    {l.isFeatured ? <><StarOff className="w-3 h-3" /> Öne çıkarmayı kaldır</> : <><Star className="w-3 h-3" /> 3 gün öne çıkar</>}
                   </button>
                   <select
                     value={l.cardTheme ?? "auto"}
@@ -5787,9 +6277,11 @@ export default function AdminDashboard() {
                       <option key={option.value} value={option.value} className="bg-[#111827] text-white">{option.label}</option>
                     ))}
                   </select>
-                  <button onClick={() => deleteListing(l.id)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-destructive/10 text-destructive/80 rounded-lg hover:bg-destructive/20 transition-colors ml-auto">
-                    <Trash2 className="w-3 h-3" /> Sil
-                  </button>
+                  {isAdmin && (
+                    <button onClick={() => deleteListing(l.id)} className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-destructive/10 text-destructive/80 rounded-lg hover:bg-destructive/20 transition-colors ml-auto">
+                      <Trash2 className="w-3 h-3" /> Sil
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

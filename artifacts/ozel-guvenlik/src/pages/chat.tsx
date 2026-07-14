@@ -14,6 +14,7 @@ import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
 import { SwipeableMessage } from "@/components/swipeable-message";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { useStaffChatPerms } from "@/hooks/use-staff-chat-perms";
 import {
   fetchChatSyncPayload,
   loadCachedHumans,
@@ -98,14 +99,15 @@ interface UserSuggestion { id: number; username: string; displayName?: string | 
 
 export default function Chat() {
   const { user } = useAuth();
+  const { canClearChat } = useStaffChatPerms();
   const { isLite } = useDisplayMode();
   const keyboardInset = useKeyboardInset();
   const [content, setContent] = useState("");
   const [replyTo, setReplyTo] = useState<ExtMsg | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const msgContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [, setSocket] = useState<Socket | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [messages, setMessages] = useState<AnyMsg[]>(() => loadCachedHumans() as ExtMsg[]);
   const [feedMode, setFeedMode] = useState<"all" | "members">("all");
   const [sending, setSending] = useState(false);
@@ -118,6 +120,11 @@ export default function Chat() {
   const [showPollForm, setShowPollForm] = useState(false);
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState("Evet\nHayır");
+  const [typingUsers, setTypingUsers] = useState<Array<{ userId: number; name: string }>>([]);
+  const typingClearRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const typingEmitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userIdRef = useRef(user?.id);
+  userIdRef.current = user?.id;
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncInFlightRef = useRef(false);
   const messageIdsRef = useRef<Set<number>>(new Set());
@@ -289,10 +296,34 @@ export default function Chat() {
     s.on("chat:cleared", () => {
       setMessages([]);
     });
+    s.on("chat:typing", (data: {
+      userId: number; username?: string; displayName?: string | null; typing?: boolean;
+    }) => {
+      if (!data?.userId || data.userId === userIdRef.current) return;
+      const name = (data.displayName || data.username || "Birisi").trim();
+      const clearMap = typingClearRef.current;
+      const prev = clearMap.get(data.userId);
+      if (prev) clearTimeout(prev);
+      if (!data.typing) {
+        setTypingUsers((list) => list.filter((u) => u.userId !== data.userId));
+        clearMap.delete(data.userId);
+        return;
+      }
+      setTypingUsers((list) => {
+        const rest = list.filter((u) => u.userId !== data.userId);
+        return [...rest, { userId: data.userId, name }].slice(-3);
+      });
+      clearMap.set(data.userId, setTimeout(() => {
+        setTypingUsers((list) => list.filter((u) => u.userId !== data.userId));
+        clearMap.delete(data.userId);
+      }, 3200));
+    });
     if (s.connected) authenticate();
     return () => {
       s.off("connect", authenticate);
       s.disconnect();
+      typingClearRef.current.forEach((t) => clearTimeout(t));
+      typingClearRef.current.clear();
     };
   }, [user?.id, addMsg]);
 
@@ -318,15 +349,43 @@ export default function Chat() {
     return () => clearTimeout(t);
   }, [mentionQuery]);
 
+  const emitTyping = (typing: boolean) => {
+    if (!socket?.connected || !user) return;
+    socket.emit("chat:typing", {
+      typing,
+      username: user.username,
+      displayName: (user as { displayName?: string | null }).displayName ?? null,
+    });
+  };
+
   const handleInputChange = (val: string) => {
-    setContent(val);
-    const lastAt = val.lastIndexOf("@");
+    const next = val.slice(0, 500);
+    setContent(next);
+    const lastAt = next.lastIndexOf("@");
     if (lastAt !== -1) {
-      const after = val.slice(lastAt + 1);
+      const after = next.slice(lastAt + 1);
       if (!after.includes(" ")) { setMentionQuery(after); return; }
     }
     setMentionQuery(null);
+    if (next.trim()) {
+      emitTyping(true);
+      if (typingEmitRef.current) clearTimeout(typingEmitRef.current);
+      typingEmitRef.current = setTimeout(() => emitTyping(false), 2200);
+    } else {
+      emitTyping(false);
+    }
   };
+
+  const resizeComposer = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 24), 120)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [content, resizeComposer]);
 
   const insertMention = (username: string) => {
     const lastAt = content.lastIndexOf("@");
@@ -393,6 +452,7 @@ export default function Chat() {
       }
       if (r.ok) {
         const sent = await r.json().catch(() => null) as ExtMsg | null;
+        emitTyping(false);
         setContent("");
         setReplyTo(null);
         setMentionQuery(null);
@@ -487,8 +547,8 @@ export default function Chat() {
         memberStyle={!isSystemBot(chatMsg)}
         onActivate={() => setActiveMsg(isActive ? null : chatMsg.id)}
         onReply={user && !isMe ? (m) => { setReplyTo(m as ExtMsg); setActiveMsg(null); } : undefined}
-        onReact={undefined}
-        reactions={[]}
+        onReact={user ? handleReact : undefined}
+        reactions={chatMsg.reactions ?? []}
         onDeleted={(id) => setMessages((prev) => prev.filter((m) => isSystem(m) || (m as ExtMsg).id !== id))}
         onPinned={(id, pinned) => setMessages((prev) => prev.map((m) =>
           !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned: pinned } : m
@@ -552,12 +612,14 @@ export default function Chat() {
                   <BarChart2 className="w-3.5 h-3.5" />
                   Anket
                 </button>
-                <button
-                  onClick={handleClearChat}
-                  className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400/70 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all active:scale-95">
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Temizle
-                </button>
+                {canClearChat && (
+                  <button
+                    onClick={handleClearChat}
+                    className="flex items-center gap-1.5 text-[11px] font-semibold text-red-400/70 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all active:scale-95">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Temizle
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -569,6 +631,21 @@ export default function Chat() {
         )}
         {showPollForm && user && (user.role === "admin" || user.role === "moderator") && (
           <div className="px-4 py-3 border-b border-white/5 bg-black/40 shrink-0 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-white/70">Anket oluştur</p>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 px-3 text-xs"
+                onClick={() => {
+                  setShowPollForm(false);
+                  setPollQuestion("");
+                  setPollOptions("Evet\nHayır");
+                }}
+              >
+                Vazgeç
+              </Button>
+            </div>
             <Input
               value={pollQuestion}
               onChange={(e) => setPollQuestion(e.target.value)}
@@ -581,28 +658,42 @@ export default function Chat() {
               placeholder={"Her satıra bir seçenek\nEvet\nHayır"}
               className="w-full min-h-[72px] rounded-md bg-white/5 border border-white/10 px-3 py-2 text-sm"
             />
-            <Button
-              type="button"
-              className="w-full h-9 bg-sky-500 hover:bg-sky-400 text-black font-bold"
-              onClick={async () => {
-                const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
-                if (!pollQuestion.trim() || options.length < 2) return;
-                const res = await fetch("/api/chat/polls", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-                  body: JSON.stringify({ question: pollQuestion.trim(), options }),
-                });
-                if (res.ok) {
-                  const sent = await res.json() as ExtMsg;
-                  addMsg(sent);
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 h-9"
+                onClick={() => {
                   setShowPollForm(false);
                   setPollQuestion("");
                   setPollOptions("Evet\nHayır");
-                }
-              }}
-            >
-              Anketi Paylaş
-            </Button>
+                }}
+              >
+                Kapat
+              </Button>
+              <Button
+                type="button"
+                className="flex-[1.4] h-9 bg-sky-500 hover:bg-sky-400 text-black font-bold"
+                onClick={async () => {
+                  const options = pollOptions.split("\n").map(s => s.trim()).filter(Boolean);
+                  if (!pollQuestion.trim() || options.length < 2) return;
+                  const res = await fetch("/api/chat/polls", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+                    body: JSON.stringify({ question: pollQuestion.trim(), options }),
+                  });
+                  if (res.ok) {
+                    const sent = await res.json() as ExtMsg;
+                    addMsg(sent);
+                    setShowPollForm(false);
+                    setPollQuestion("");
+                    setPollOptions("Evet\nHayır");
+                  }
+                }}
+              >
+                Anketi Paylaş
+              </Button>
+            </div>
           </div>
         )}
         <div className="flex gap-1 px-3 py-1.5 border-b border-white/5 shrink-0">
@@ -667,6 +758,15 @@ export default function Chat() {
         </div>
 
         <div className="shrink-0 bg-background/90 backdrop-blur-xl border-t border-white/10 p-3 space-y-2">
+          {typingUsers.length > 0 && (
+            <div className="og-chat-typing" aria-live="polite">
+              <strong>{typingUsers.map((u) => u.name).join(", ")}</strong>
+              <span>yazıyor</span>
+              <span className="og-chat-typing-dots" aria-hidden>
+                <span /><span /><span />
+              </span>
+            </div>
+          )}
           {user && pendingWelcome && canGreetUser(pendingWelcome.username, user.username) && (
             <div className="og-chat-welcome-bar">
               <div className="og-chat-welcome-meta">
@@ -758,10 +858,11 @@ export default function Chat() {
                   <span className="text-[11px] text-amber-400 font-bold shrink-0">{cooldownLeft}s</span>
                 </div>
               )}
-              <div className="flex space-x-2">
-                <Input
+              <div className="flex items-end space-x-2">
+                <textarea
                   ref={inputRef}
                   value={content}
+                  rows={1}
                   onChange={e => handleInputChange(e.target.value)}
                   onFocus={() => {
                     setTimeout(() => {
@@ -786,7 +887,7 @@ export default function Chat() {
                     }
                   }}
                   placeholder={cooldownLeft > 0 ? `${cooldownLeft}s sonra mesaj gönderebilirsin...` : replyTo ? `${chatName(replyTo)}'e yanıtla...` : "Mesajınızı yazın... (@ ile etiketle)"}
-                  className="glass-card border-white/10 rounded-full h-12 px-5 text-sm"
+                  className="glass-card border-white/10 rounded-2xl min-h-12 max-h-[120px] px-5 py-3 text-sm flex-1 resize-none overflow-y-auto"
                   maxLength={500}
                   autoComplete="off"
                   disabled={cooldownLeft > 0}
@@ -796,6 +897,9 @@ export default function Chat() {
                   {sending ? <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" /> : cooldownLeft > 0 ? <span className="text-xs font-bold">{cooldownLeft}</span> : <Send className="w-5 h-5" />}
                 </Button>
               </div>
+              {content.length > 0 && (
+                <div className="text-[10px] text-muted-foreground text-right mt-1 px-1">{content.length}/500</div>
+              )}
             </form>
           )}
         </div>

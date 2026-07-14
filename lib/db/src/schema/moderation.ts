@@ -27,6 +27,23 @@ export const rolePermissionsTable = pgTable(
   ],
 );
 
+/** Per-moderator overrides: granted=true adds, granted=false removes from role defaults */
+export const userPermissionsTable = pgTable(
+  "user_permissions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    permissionKey: text("permission_key").notNull(),
+    granted: boolean("granted").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("user_permissions_unique").on(t.userId, t.permissionKey),
+    index("user_permissions_user_idx").on(t.userId),
+  ],
+);
+
 export const moderationReportsTable = pgTable(
   "moderation_reports",
   {

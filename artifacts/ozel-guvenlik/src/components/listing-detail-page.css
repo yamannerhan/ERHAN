@@ -8,6 +8,9 @@
   padding: 0 14px 88px;
   max-width: 1100px;
   margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: clip;
 }
 
 .og-ld-top {
@@ -37,6 +40,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 70%;
 }
 .og-ld-top-btn {
   display: inline-flex;
@@ -63,6 +69,8 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
+  min-width: 0;
+  max-width: 100%;
 }
 @media (min-width: 900px) {
   .og-ld-layout {
@@ -77,6 +85,10 @@
   background: var(--ld-card);
   padding: 16px;
   position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .og-ld-featured {
@@ -96,10 +108,11 @@
 
 .og-ld-head {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
   margin-bottom: 14px;
+  min-width: 0;
 }
 .og-ld-title {
   font-size: 20px;
@@ -107,12 +120,16 @@
   color: #f8fafc;
   line-height: 1.25;
   margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .og-ld-salary {
   font-size: 15px;
   font-weight: 800;
   color: var(--ld-gold);
   margin-bottom: 10px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .og-ld-quick {
@@ -158,7 +175,10 @@
 
 .og-ld-company-box {
   text-align: center;
-  min-width: 88px;
+  min-width: 72px;
+  max-width: 110px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .og-ld-company-logo {
   width: 72px;
@@ -212,6 +232,10 @@
   color: #cbd5e1;
   margin-bottom: 18px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .og-ld-cols {
@@ -237,9 +261,13 @@
   font-size: 11px;
   line-height: 1.6;
   color: #94a3b8;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .og-ld-list li {
   margin-bottom: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .og-ld-stats {
@@ -282,6 +310,8 @@
   font-weight: 800;
   color: #e2e8f0;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Sidebar cards */
@@ -335,12 +365,17 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 .og-ld-side-text {
   font-size: 11px;
   line-height: 1.5;
   color: #94a3b8;
   margin-bottom: 8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .og-ld-side-link {
   display: block;
@@ -348,6 +383,12 @@
   color: #cbd5e1;
   margin-bottom: 4px;
   word-break: break-all;
+}
+.og-ld-phones {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
 }
 .og-ld-side-outline {
   width: 100%;

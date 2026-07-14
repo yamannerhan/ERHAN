@@ -28,20 +28,13 @@ export const usersTable = pgTable("users", {
   mutedUntil: timestamp("muted_until", { withTimezone: true }),
   lastKnownIp: text("last_known_ip"),
   lastDeviceId: text("last_device_id"),
-  /** Kullanılan ücretsiz öne çıkarma hakkı (max 3) */
   freeFeatureUsed: integer("free_feature_used").notNull().default(0),
-  /** Sohbet / sitede vakit — seviye sistemi */
   xp: integer("xp").notNull().default(0),
   level: integer("level").notNull().default(1),
-  /** Avatar çerçevesi (chat-cosmetics key) */
   avatarFrame: text("avatar_frame").notNull().default("none"),
-  /** Geçici çerçeve bitiş (günlük/haftalık/aylık hediye) */
   avatarFrameExpiresAt: timestamp("avatar_frame_expires_at", { withTimezone: true }),
-  /** Mesaj balonu stili */
   chatBubble: text("chat_bubble").notNull().default("default"),
-  /** Geçici balon (günlük hediye) bitiş */
   chatBubbleExpiresAt: timestamp("chat_bubble_expires_at", { withTimezone: true }),
-  /** Kullanıcı bildirim tercihleri (push + site) */
   notifListings: boolean("notif_listings").notNull().default(true),
   notifJoin: boolean("notif_join").notNull().default(true),
   notifSite: boolean("notif_site").notNull().default(true),
@@ -49,6 +42,17 @@ export const usersTable = pgTable("users", {
   notifSound: boolean("notif_sound").notNull().default(true),
   notifChatSound: boolean("notif_chat_sound").notNull().default(true),
   notifOnlyBackground: boolean("notif_only_background").notNull().default(true),
+  /** user | bot | system */
+  accountType: text("account_type").notNull().default("user"),
+  isSystemAccount: boolean("is_system_account").notNull().default(false),
+  isVerifiedPublisher: boolean("is_verified_publisher").notNull().default(false),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  verifiedBy: integer("verified_by"),
+  /** individual | company | authorized_representative */
+  verificationType: text("verification_type"),
+  verificationNote: text("verification_note"),
+  /** unverified | pending | verified | rejected | suspended */
+  verificationStatus: text("verification_status").notNull().default("unverified"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

@@ -24,6 +24,7 @@ type Props = {
   listings: JobCardListing[];
   totalCount: number;
   sortNewest: "new" | "old";
+  sortLabel?: string;
   onToggleSort: () => void;
   onNavigate?: () => void;
   savedIds: Set<number>;
@@ -34,6 +35,7 @@ export function DesktopListingsTable({
   listings,
   totalCount,
   sortNewest,
+  sortLabel,
   onToggleSort,
   onNavigate,
   savedIds,
@@ -56,7 +58,7 @@ export function DesktopListingsTable({
         </div>
         <div className="desktop-listings-table__controls">
           <button type="button" className="desktop-listings-table__sort" onClick={onToggleSort}>
-            Sırala: <strong>{sortNewest === "new" ? "Yeni Eklenen" : "Eski Önce"}</strong>
+            Sırala: <strong>{sortLabel ?? (sortNewest === "new" ? "Yeni Eklenen" : "Eski Önce")}</strong>
           </button>
           <span className="desktop-listings-table__view-toggle" aria-hidden>
             <button type="button" className="desktop-listings-table__view-btn" title="Grid" disabled>

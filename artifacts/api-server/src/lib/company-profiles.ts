@@ -1,5 +1,5 @@
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { db, companyProfilesTable, usersTable, listingsTable } from "@workspace/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 let schemaReady = false;
 
@@ -33,4 +33,86 @@ export async function ensureCompanySchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS company_profile_id INTEGER`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_company_profile_id_idx ON listings (company_profile_id)`);
   schemaReady = true;
+}
+
+function cleanPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).replace(/^tel:/i, "").trim().slice(0, 40);
+  return s || null;
+}
+
+/**
+ * İlan formundaki temel işveren bilgilerini hatırla (sonraki ilanda otomatik gelsin).
+ * Açıklama (listing description) ASLA şirket profiline yazılmaz.
+ */
+export async function rememberEmployerBasics(
+  userId: number,
+  opts: {
+    companyName?: string | null;
+    phone?: string | null;
+    logoPath?: string | null;
+    contactName?: string | null;
+  },
+): Promise<number | null> {
+  await ensureCompanySchema();
+
+  const companyName = (opts.companyName ?? "").trim();
+  const phone = cleanPhone(opts.phone);
+  const logoPath = opts.logoPath?.trim() || null;
+  const contactName = opts.contactName?.trim().slice(0, 64) || null;
+  const usableName = companyName && companyName !== "Belirtilmedi" ? companyName.slice(0, 120) : null;
+
+  const [existing] = await db
+    .select()
+    .from(companyProfilesTable)
+    .where(and(eq(companyProfilesTable.userId, userId), isNull(companyProfilesTable.deletedAt)))
+    .limit(1);
+
+  let profileId: number | null = existing?.id ?? null;
+
+  if (existing) {
+    const patch: Partial<typeof companyProfilesTable.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    if (usableName) patch.companyName = usableName;
+    if (phone) patch.phone = phone;
+    if (logoPath) patch.logoPath = logoPath;
+    // description dokunulmaz
+    if (Object.keys(patch).length > 1) {
+      await db.update(companyProfilesTable).set(patch).where(eq(companyProfilesTable.id, existing.id));
+    }
+  } else if (usableName) {
+    const [inserted] = await db
+      .insert(companyProfilesTable)
+      .values({
+        userId,
+        companyName: usableName,
+        phone,
+        logoPath,
+        isActive: true,
+      })
+      .returning({ id: companyProfilesTable.id });
+    profileId = inserted?.id ?? null;
+
+    if (profileId) {
+      await db
+        .update(listingsTable)
+        .set({ companyProfileId: profileId })
+        .where(
+          and(
+            eq(listingsTable.authorId, userId),
+            sql`(${listingsTable.companyProfileId} IS NULL OR ${listingsTable.companyProfileId} = ${profileId})`,
+          ),
+        );
+    }
+  }
+
+  const userPatch: Partial<typeof usersTable.$inferInsert> = {};
+  if (contactName) userPatch.fullName = contactName;
+  if (phone) userPatch.phone = phone;
+  if (Object.keys(userPatch).length > 0) {
+    await db.update(usersTable).set(userPatch).where(eq(usersTable.id, userId));
+  }
+
+  return profileId;
 }

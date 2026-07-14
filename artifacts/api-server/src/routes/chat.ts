@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, chatMessagesTable, usersTable, adminSettingsTable, chatReactionsTable, notificationsTable } from "@workspace/db";
 import { eq, desc, and, lt, gt, inArray, sql, or } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
+import { userHasPermission } from "../middlewares/moderation";
 import { triggerContextualReply } from "../lib/chat-bot";
 import { filterProfanity } from "../lib/profanity";
 import { getExtraBannedWords } from "../lib/banned-words-cache";
@@ -353,6 +354,7 @@ router.post("/chat/messages/:id/react", authMiddleware, async (req, res): Promis
       eq(chatReactionsTable.emoji, emoji)
     )).limit(1);
 
+  let added = false;
   if (existing) {
     await db.delete(chatReactionsTable).where(eq(chatReactionsTable.id, existing.id));
   } else {
@@ -362,6 +364,7 @@ router.post("/chat/messages/:id/react", authMiddleware, async (req, res): Promis
       eq(chatReactionsTable.userId, userId),
     ));
     await db.insert(chatReactionsTable).values({ messageId: msgId, userId, emoji, username, displayName });
+    added = true;
   }
 
   const updatedReactions = await db.select().from(chatReactionsTable)
@@ -372,6 +375,39 @@ router.post("/chat/messages/:id/react", authMiddleware, async (req, res): Promis
   const io = (req as unknown as { app: { get: (key: string) => unknown } }).app.get("io") as { emit: (event: string, data: unknown) => void } | null;
   if (io) {
     io.emit("chat:react", { messageId: msgId, reactions });
+  }
+
+  // Beğeni bildirimi — mesaj sahibine (kendi mesajı değilse)
+  if (added) {
+    try {
+      const [orig] = await db.select({
+        userId: chatMessagesTable.userId,
+        content: chatMessagesTable.content,
+      }).from(chatMessagesTable).where(eq(chatMessagesTable.id, msgId)).limit(1);
+      if (orig && orig.userId > 0 && orig.userId !== userId) {
+        const actor = displayName || username;
+        const title = "Mesajın beğenildi";
+        const message = `${actor} mesajını beğendi ${emoji}`;
+        await db.insert(notificationsTable).values({
+          userId: orig.userId,
+          type: "message",
+          title,
+          message,
+          relatedId: msgId,
+          linkUrl: "/sohbet",
+          isRead: false,
+        });
+        emitRealtimeToUser(orig.userId, "notification:new", {
+          type: "message",
+          title,
+          message,
+          relatedId: msgId,
+          linkUrl: "/sohbet",
+          userId: orig.userId,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch { /* ignore */ }
   }
 
   res.json({ reactions });
@@ -406,6 +442,13 @@ router.delete("/chat/messages/:id", authMiddleware, requireAdminOrModerator, asy
 });
 
 router.delete("/chat/messages", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  // Sohbeti tamamen temizleme: admin her zaman; moderatör yalnızca chat.clear yetkisiyle
+  const canClear = await userHasPermission(req.user!.role, req.user!.id, "chat.clear");
+  if (!canClear) {
+    res.status(403).json({ error: "Sohbeti temizleme yetkiniz yok", code: "FORBIDDEN_PERMISSION", permission: "chat.clear" });
+    return;
+  }
+
   await db.update(chatMessagesTable).set({ isDeleted: true }).where(eq(chatMessagesTable.isDeleted, false));
 
   const clearedBy = (req.user as any).displayName || req.user!.username;

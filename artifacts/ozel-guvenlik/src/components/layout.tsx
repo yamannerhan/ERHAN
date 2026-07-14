@@ -82,7 +82,7 @@ function MobileBottomNav() {
     { icon: HomeIcon, label: "Anasayfa", path: "/" },
     { icon: Tag, label: "İlanlar", path: "/ilanlar" },
     { icon: Plus, label: "İlan Oluştur", path: "/ilan-ekle", center: true },
-    { icon: Clock3, label: "PartTime", path: "/part-time" },
+    { icon: Clock3, label: "İş Arayanlar", path: "/part-time" },
     { icon: FileText, label: "CV", path: "/cv-olustur" },
   ];
 
@@ -336,7 +336,7 @@ export function Layout({
   const customHeader = !isDesktop && headerVariant === "listings"
     ? { title: "ilanlar", subtitle: "Güncel güvenlik iş ilanları", searchId: "og-listings-search", titleLower: true }
     : !isDesktop && headerVariant === "parttime"
-      ? { title: "PartTime", subtitle: "Saatlik, günlük ve kısa süreli işler", searchId: "og-parttime-search", titleLower: false }
+      ? { title: "İş Arayanlar", subtitle: "Saatlik, günlük ve kısa süreli işler", searchId: "og-parttime-search", titleLower: false }
       : !isDesktop && headerVariant === "create-listing"
         ? { title: "İlan Oluştur", subtitle: "Metni yapıştır, ilanı hızlıca oluştur", searchId: "og-create-listing-search", titleLower: false }
         : null;
@@ -417,7 +417,7 @@ export function Layout({
               { label: "Anasayfa", path: "/" },
               { label: "İlanlar", path: "/ilanlar" },
               { label: "İlan Oluştur", path: "/ilan-ekle" },
-              { label: "Part Time", path: "/part-time" },
+              { label: "İş Arayanlar", path: "/part-time" },
               { label: "CV Oluştur", path: "/cv-olustur" },
               { label: "Destek", path: "/destek" },
             ].map((item) => {

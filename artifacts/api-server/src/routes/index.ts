@@ -16,9 +16,11 @@ import telegramAuthRouter from "./telegram-auth";
 import pushRouter from "./push";
 import managementTeamRouter from "./management-team";
 import chatBannersRouter from "./chat-banners";
+import knownCompaniesRouter from "./known-companies";
 import companyProfilesRouter from "./company-profiles";
 import locationAdminRouter from "./location-admin";
 import moderatorRouter from "./moderator";
+import publisherVerifyRouter from "./publisher-verify";
 
 const router: IRouter = Router();
 
@@ -31,6 +33,7 @@ router.use(usersRouter);
 router.use(notificationsRouter);
 router.use(announcementsRouter);
 router.use(adminRouter);
+router.use(publisherVerifyRouter);
 router.use(locationAdminRouter);
 router.use("/moderator", moderatorRouter);
 router.use(supportRouter);
@@ -41,6 +44,7 @@ router.use(telegramAuthRouter);
 router.use(pushRouter);
 router.use(managementTeamRouter);
 router.use(chatBannersRouter);
+router.use(knownCompaniesRouter);
 router.use(companyProfilesRouter);
 
 export default router;

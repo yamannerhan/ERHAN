@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, pendingJobsTable, importedPostsTable, listingsTable, sourcesTable } from "@workspace/db";
 import { eq, desc, and } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
-import { buildListingRequirements, createSmartListingImage, extractBenefits, extractGender, extractLocation, extractProjectType, extractWorkType } from "../lib/job-parsing";
+import { buildListingRequirements, extractBenefits, extractGender, extractLocation, extractPhoneNumbers, extractProjectType, extractWorkType, formatTelApplyUrl } from "../lib/job-parsing";
 import { announceNewListing } from "../lib/listing-announcements";
 
 const router = Router();
@@ -94,9 +94,21 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
   const city = location.display ?? location.city ?? job.city ?? "Türkiye";
   const { assignCoordsFromCity } = await import("../lib/nearby-listings");
   const coords = assignCoordsFromCity(city);
+  let companyName = (job.company ?? "").trim() || "Belirtilmemiş";
+  let companyLogoUrl: string | null = null;
+  try {
+    const { matchKnownCompany, matchKnownCompanyInBlob } = await import("../lib/known-companies");
+    const brand =
+      (await matchKnownCompany(companyName)) ||
+      matchKnownCompanyInBlob(`${companyName} ${title} ${job.description ?? job.rawText ?? ""}`);
+    if (brand) {
+      companyName = companyName === "Belirtilmemiş" ? brand.name : companyName;
+      companyLogoUrl = brand.logoUrl;
+    }
+  } catch { /* ignore */ }
   const [listing] = await db.insert(listingsTable).values({
     title,
-    company: job.company ?? "Belirtilmemiş",
+    company: companyName,
     city,
     salary: job.salary ?? undefined,
     workType: extractWorkType(job.rawText),
@@ -104,11 +116,18 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     requirements: buildListingRequirements({ gender, location, benefits, projectType, source: `${platformTag} | ${job.sourceUrl ?? ""}` }),
     status: "active",
     sourceTag: job.platform,
-    companyLogoUrl: createSmartListingImage(job.rawText, title),
-    // Başvuru doğrudan iletişim numarasına gitsin (Telegram'a değil)
-    applyUrl: job.phone ? `tel:${job.phone}` : undefined,
+    sourceType: "bot_imported",
+    sourceName: job.platform === "telegram" ? "Telegram"
+      : job.platform === "whatsapp" ? "WhatsApp"
+      : job.platform === "eleman" ? "Eleman.net"
+      : (job.platform || "Kaynak"),
+    sourcePublishedAt: job.createdAt ?? new Date(),
+    verifiedPublisher: false,
+    lastCheckedAt: new Date(),
+    sourceUrl: job.sourceUrl ?? null,
+    companyLogoUrl,
+    applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "")),
     autoDeleteOnExpiry: true,
-    // 30 gün = onay/siteye yayın anı (kaynak mesaj tarihi değil)
     expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     publishedAt: job.createdAt ?? new Date(),
     lastSeenAt: new Date(),
@@ -116,7 +135,11 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     ...(coords ?? {}),
   }).returning();
   if (listing) {
-    await announceNewListing(listing);
+    const label = job.platform === "telegram" ? "Telegram"
+      : job.platform === "whatsapp" ? "WhatsApp"
+      : job.platform === "eleman" ? "Eleman.net"
+      : (job.platform || "Kaynak");
+    await announceNewListing(listing, { adminOnly: true, skipChat: true, sourceLabel: label });
   }
 
   // Update pending job status

@@ -122,7 +122,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     resolveIstanbulSideFromLabel(initialCity ?? savedState.city),
   );
   const [categoryFilter, setCategoryFilter] = useState<CategoryId>("all");
-  const [sortNewest, setSortNewest] = useState<"new" | "old">("new");
+  const [sortMode, setSortMode] = useState<"recommended" | "newest" | "oldest">("recommended");
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
   const gpuSafeMode = useGpuSafeMode();
@@ -162,15 +162,18 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     limit: 20,
     search: search || undefined,
     city: effectiveCity,
-  });
+    sort: sortMode,
+  } as Parameters<typeof useGetListings>[0]);
 
   const { data: featuredData } = useGetListings({
     page: 1,
     limit: 20,
     featured: true,
+    sort: "recommended",
   } as Parameters<typeof useGetListings>[0]);
 
   const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";
+  const canQuickDeleteListing = user?.role === "admin";
 
   const { data: favData } = useGetMyFavorites({
     query: { queryKey: getGetMyFavoritesQueryKey(), enabled: !!user },
@@ -290,13 +293,15 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
         `${l.title} ${l.company} ${l.city}`.toLocaleLowerCase("tr-TR").includes(q),
       );
     }
-    list.sort((a, b) => {
-      const ta = new Date(a.createdAt).getTime();
-      const tb = new Date(b.createdAt).getTime();
-      return sortNewest === "new" ? tb - ta : ta - tb;
-    });
+    if (sortMode !== "recommended") {
+      list.sort((a, b) => {
+        const ta = new Date((a as { sourcePublishedAt?: string }).sourcePublishedAt || a.createdAt).getTime();
+        const tb = new Date((b as { sourcePublishedAt?: string }).sourcePublishedAt || b.createdAt).getTime();
+        return sortMode === "newest" ? tb - ta : ta - tb;
+      });
+    }
     return list;
-  }, [listings, sideFilter, city, categoryFilter, search, sortNewest]);
+  }, [listings, sideFilter, city, categoryFilter, search, sortMode]);
 
   const dayAgo = Date.now() - 86_400_000;
   const newToday = displayListings.filter(l => new Date(l.createdAt).getTime() > dayAgo).length;
@@ -329,17 +334,19 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
               >
                 İl Değiştir
               </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void quickDeleteListing(listing.id);
-                }}
-                className="rounded-full bg-red-600/90 px-1.5 py-0.5 text-[8px] font-black text-white border border-red-200/30"
-              >
-                Sil
-              </button>
+              {canQuickDeleteListing && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void quickDeleteListing(listing.id);
+                  }}
+                  className="rounded-full bg-red-600/90 px-1.5 py-0.5 text-[8px] font-black text-white border border-red-200/30"
+                >
+                  Sil
+                </button>
+              )}
             </>
           ) : undefined}
         />
@@ -423,10 +430,10 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
           <button
             type="button"
             className="og-lp-sort"
-            onClick={() => setSortNewest(s => (s === "new" ? "old" : "new"))}
+            onClick={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
           >
             <ArrowUpDown className="w-3 h-3" />
-            {sortNewest === "new" ? "En Yeni" : "En Eski"}
+            {sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
           </button>
         </div>
 
@@ -508,8 +515,9 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
             <DesktopListingsTable
               listings={displayListings}
               totalCount={statActive}
-              sortNewest={sortNewest}
-              onToggleSort={() => setSortNewest((s) => (s === "new" ? "old" : "new"))}
+              sortNewest={sortMode === "oldest" ? "old" : "new"}
+              sortLabel={sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
+              onToggleSort={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
               savedIds={favIds}
               onToggleSave={handleToggleFav}
             />

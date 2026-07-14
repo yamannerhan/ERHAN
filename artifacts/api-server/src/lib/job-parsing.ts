@@ -117,6 +117,26 @@ function formatTL(n: number): string {
   return `${n.toLocaleString("tr-TR")} TL`;
 }
 
+/**
+ * Kullanıcı / ayıklama maaşı → standart "45.300 TL" (veya günlük).
+ * Zaten metinsel ("Asgari Ücret") ise olduğu gibi bırakır.
+ */
+export function normalizeSalaryString(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (/asgari\s*[üu]cret/i.test(s) && !/\d/.test(s)) return "Asgari Ücret";
+
+  const isDaily = /g[üu]nl[üu]k|yevmiye/i.test(s);
+  const isTotal = /toplam/i.test(s);
+  const n = moneyToNumber(s, isDaily ? 400 : 1000);
+  if (!n) return s;
+  if (n > 500_000) return s; // telefon / abartı rakam
+  if (isDaily && n <= 25_000) return `${formatTL(n)} / Günlük`;
+  if (isTotal) return `${formatTL(n)} Toplam`;
+  return formatTL(n);
+}
+
 function extractLabeledAmount(text: string, labels: string[]): number | null {
   const tl = normalizeTr(text);
   for (const label of labels) {
@@ -194,21 +214,23 @@ export function extractSalary(text: string): string | null {
   const bin = binLabeled ?? binCur ?? binBare;
   if (bin) {
     const n = parseInt(bin[1]!, 10);
-    // Aylık: 10-200 bin; günlük bağlamda 1-15 bin de kabul
     if (isDaily && n >= 1 && n <= 15) return `${formatTL(n * 1000)} / Günlük`;
-    if (n >= 10 && n <= 200) return `${n}.000 TL`;
+    if (n >= 10 && n <= 200) return formatTL(n * 1000);
   }
 
   const labeled = tl.match(new RegExp(`(?:maa[şs]|[üu]cret|ayl[ıi]k|net\\s+maa[şs]|ele\\s+ge[çc]en|hakedi[şs])\\s*[:\\-]?\\s*${NUM}\\s*${CUR}?`))
     ?? tl.match(new RegExp(`(?:maa[şs]|[üu]cret|ayl[ıi]k|net\\s+maa[şs]|hakedi[şs])\\s*[:\\-]?\\s*${NUM}(?!\\s*[-–])`));
   if (labeled?.[1]) {
     const n = moneyToNumber(labeled[1], isDaily ? 400 : 1000);
-    if (n) return isDaily && n < 20000 ? `${formatTL(n)} / Günlük` : `${formatTL(n)}`;
-    return `${labeled[1]} TL`;
+    if (n) return isDaily && n < 20000 ? `${formatTL(n)} / Günlük` : formatTL(n);
   }
 
-  const range = tl.match(new RegExp(`${NUM}\\s*[-–]\\s*${NUM}\\s*${CUR}`));
-  if (range) return `${range[1]}-${range[2]} TL`;
+  const range = tl.match(new RegExp(`${NUM}\\s*[-–]\\s*${NUM}\\s*${CUR}?`));
+  if (range) {
+    const a = moneyToNumber(range[1]);
+    const b = moneyToNumber(range[2]);
+    if (a && b) return `${formatTL(a).replace(" TL", "")}-${formatTL(b)}`;
+  }
 
   const generic = tl.match(new RegExp(`${NUM}\\s*${CUR}`));
   if (generic?.[1]) {
@@ -226,6 +248,13 @@ export function extractSalary(text: string): string | null {
       const n = moneyToNumber(bare[1], 400);
       if (n && n <= 20000) return `${formatTL(n)} / Günlük`;
     }
+  }
+
+  // Çıplak aylık maaş: 45300 / 45.300 (etiketsiz ama makul aralık)
+  const bareMonthly = tl.match(/(?<!\d)(\d{1,3}(?:[.,]\d{3}){1,2}|\d{5,6})(?!\d)/);
+  if (bareMonthly?.[1]) {
+    const n = moneyToNumber(bareMonthly[1], 15_000);
+    if (n && n <= 250_000) return formatTL(n);
   }
 
   if (/asgari\s+[üu]cret/.test(tl)) return "Asgari Ücret";
@@ -365,8 +394,11 @@ export function extractLocation(text: string): ParsedLocation {
   };
 }
 
-/** Açıklama içindeki TR cep numaralarını yakala (boşluk/tire/nokta ile yazılmış dahil). */
-export function extractPhoneNumber(text: string): string | null {
+/** Açıklama içindeki tüm TR cep numaralarını yakala (benzersiz, 05XXXXXXXXX). */
+export function extractPhoneNumbers(text: string): string[] {
+  if (!text) return [];
+  const found: string[] = [];
+  const seen = new Set<string>();
   const patterns = [
     /(?:\+90|0)?[\s\-./()]*(?:5(?:[\s\-./()]*\d){9})/g,
     /(?<!\d)5(?:[\s\-./()]*\d){9}(?!\d)/g,
@@ -383,14 +415,46 @@ export function extractPhoneNumber(text: string): string | null {
       if (normalized.length === 10 && normalized.startsWith("5")) {
         normalized = "0" + normalized;
       }
-      // 05XXXXXXXXX — baştaki fazla 0'ları düzelt
       if (/^0+5\d{9}$/.test(normalized)) {
         normalized = "0" + normalized.slice(-10);
       }
-      if (/^05\d{9}$/.test(normalized)) return normalized;
+      if (/^05\d{9}$/.test(normalized) && !seen.has(normalized)) {
+        seen.add(normalized);
+        found.push(normalized);
+      }
     }
   }
-  return null;
+  return found;
+}
+
+/** İlk bulunan numara — geriye uyumlu. */
+export function extractPhoneNumber(text: string): string | null {
+  return extractPhoneNumbers(text)[0] ?? null;
+}
+
+/** Birden fazla numarayı tek applyUrl alanında sakla: tel:05...,05... */
+export function formatTelApplyUrl(phones: string[]): string | null {
+  const list = [...new Set(
+    phones
+      .map((p) => {
+        const digits = String(p ?? "").replace(/\D/g, "");
+        let n = digits;
+        if (n.startsWith("90") && n.length >= 12) n = "0" + n.slice(2);
+        if (n.length === 10 && n.startsWith("5")) n = "0" + n;
+        if (/^0+5\d{9}$/.test(n)) n = "0" + n.slice(-10);
+        return /^05\d{9}$/.test(n) ? n : "";
+      })
+      .filter(Boolean),
+  )];
+  if (list.length === 0) return null;
+  return `tel:${list.join(",")}`;
+}
+
+/** applyUrl / serbest metinden tüm telefonları çıkar. */
+export function parseApplyUrlPhones(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const body = raw.replace(/^tel:/i, "");
+  return extractPhoneNumbers(body);
 }
 
 const HIRING_SIGNAL = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacakt[ıi]r|al[ıi]n[ıi]cakt[ıi]r|al[ıi]m[ıi]\s+yap[ıi]lacak|al[ıi]m[ıi]\s+olacak|personel\s+al[ıi]m[ıi]|personeli\s+al[ıi]m[ıi]|eleman\s+al[ıi]m[ıi]|görevlisi\s+aran[ıi]yor|ihtiyac[ıi]m[ıi]z|ihtiya[çc][ıi]m[ıi]z|istihdam|kontenjan|görevlendirilmek|çalışma\s+arkadaşları\s+aran|ekip\s+arkadaş)/;

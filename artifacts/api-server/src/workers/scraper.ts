@@ -14,7 +14,7 @@ import {
   finalizeElemanListingText,
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
-import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -41,7 +41,11 @@ function normalizeText(text: string): string {
 }
 
 function extractPhone(text: string): string | null {
-  return extractPhoneNumber(text);
+  return extractPhoneNumbers(text)[0] ?? null;
+}
+
+function extractPhones(text: string): string[] {
+  return extractPhoneNumbers(text);
 }
 
 function extractContactName(text: string): string | null {
@@ -339,12 +343,13 @@ function listingExpiryFrom(_postedAt?: Date): Date {
   return new Date(Date.now() + LISTING_TTL_MS);
 }
 
-/** Tekrar görülen ilan: lastSeen güncelle, yayın/bitiş tarihini değiştirme. */
+/** Tekrar görülen ilan: lastSeen / lastChecked güncelle, yayın tarihini değiştirme. */
 async function touchListingSeen(listingId: number): Promise<void> {
   const now = new Date();
   await db.update(listingsTable)
     .set({
       lastSeenAt: now,
+      lastCheckedAt: now,
       status: "active",
       isActive: true,
     })
@@ -550,19 +555,26 @@ async function processMessage(
   });
   const city = v2City.city;
   const salary = extractSalary(text);
-  const phone = extractPhone(text);
+  const phones = extractPhones(text);
+  const phone = phones[0] ?? null;
+  const phoneField = phones.length ? phones.join(",") : null;
   const gender = extractGender(text);
   const workType = extractWorkType(text);
   const { assignCoordsFromCity } = await import("../lib/nearby-listings");
   const coords = assignCoordsFromCity(city);
+  const { matchKnownCompany, matchKnownCompanyInBlob } = await import("../lib/known-companies");
+  const { extractCompany } = await import("../lib/job-parsing");
+  const parsedCo = extractCompany(text);
+  const brand = (await matchKnownCompany(parsedCo)) || matchKnownCompanyInBlob(text);
+  const companyName = brand?.name ?? (parsedCo !== "Belirtilmemiş" ? parsedCo : "Belirtilmemiş");
   const listingMeta = {
     sourceId: source.id,
     messageId,
     sourceUrl,
-    // publishedAt: kaynak tarihi (bilgi); createdAt/firstSeen: siteye eklenme — 30g buna göre
     publishedAt: postedAt ?? now,
     firstSeenAt: now,
     lastSeenAt: now,
+    lastCheckedAt: now,
     rawText: text,
   };
 
@@ -572,10 +584,10 @@ async function processMessage(
       importedPostId: imported.id,
       rawText: text,
       title,
-      company: null,
+      company: companyName !== "Belirtilmemiş" ? companyName : null,
       city,
       salary,
-      phone,
+      phone: phoneField,
       description: text,
       applicationUrl: null,
       sourceUrl,
@@ -588,7 +600,7 @@ async function processMessage(
 
   const [newListing] = await db.insert(listingsTable).values({
     title: title ?? "Güvenlik Personeli Aranıyor",
-    company: "Belirtilmemiş",
+    company: companyName,
     city,
     salary: salary ?? undefined,
     workType,
@@ -598,19 +610,44 @@ async function processMessage(
     isActive: true,
     autoDeleteOnExpiry: true,
     sourceTag: source.platform,
-    applyUrl: phone ? `tel:${phone}` : null,
+    sourceType: "bot_imported",
+    sourceName: source.platform === "telegram" ? "Telegram"
+      : source.platform === "whatsapp" ? "WhatsApp"
+      : source.platform === "eleman" ? "Eleman.net"
+      : (source.platform || "Kaynak"),
+    sourcePublishedAt: postedAt ?? now,
+    verifiedPublisher: false,
+    applyUrl: formatTelApplyUrl(phones),
+    companyLogoUrl: brand?.logoUrl ?? null,
     expiresAt: listingExpiryFrom(postedAt),
     ...listingMeta,
     ...(coords ?? {}),
   }).returning();
   if (!newListing) return "skipped";
 
+  try {
+    const { logListingSourceHistory } = await import("../lib/listing-rank");
+    void logListingSourceHistory(newListing.id, {
+      sourceType: "bot_imported",
+      sourceName: newListing.sourceName,
+      sourceUrl: sourceUrl ?? null,
+      sourcePublishedAt: postedAt ?? now,
+      verifiedPublisher: false,
+      verificationSnapshot: null,
+      directPriorityUntil: null,
+      freshnessConfirmedAt: null,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      lastCheckedAt: now,
+    });
+  } catch { /* ignore */ }
+
   await db.update(importedPostsTable)
     .set({ status: "approved" })
     .where(eq(importedPostsTable.id, imported.id));
 
-  // WhatsApp: her yayınlanan ilanda sadece admin bildirimi (sohbet/herkese gitmez)
-  // Telegram: ilk tarama dışında herkese duyuru
+  // WhatsApp / Eleman: admin bildirimi + kaynak adı
+  // Telegram: duyuruda ve bildirimde "Telegram" yazsın (ilk taramada sadece admin)
   if (source.platform === "whatsapp") {
     void announceNewListing({
       id: newListing.id,
@@ -619,13 +656,24 @@ async function processMessage(
       company: newListing.company,
     }, { adminOnly: true, skipChat: true, sourceLabel: "WhatsApp" })
       .catch((err) => logger.error({ err }, "scraper: wa admin notify failed"));
+  } else if (source.platform === "telegram") {
+    void announceNewListing({
+      id: newListing.id,
+      title: newListing.title,
+      city: newListing.city,
+      company: newListing.company,
+    }, isInitialScan
+      ? { adminOnly: true, skipChat: true, sourceLabel: "Telegram" }
+      : { sourceLabel: "Telegram" })
+      .catch((err) => logger.error({ err }, "scraper: telegram announce failed"));
   } else if (!isInitialScan) {
     void announceNewListing({
       id: newListing.id,
       title: newListing.title,
       city: newListing.city,
       company: newListing.company,
-    }).catch((err) => logger.error({ err }, "scraper: announceNewListing failed"));
+    }, { sourceLabel: source.platform === "eleman" ? "Eleman.net" : (source.name || source.platform) })
+      .catch((err) => logger.error({ err }, "scraper: announceNewListing failed"));
   }
 
   return "added";
@@ -909,7 +957,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
       const nextOff = result.nextOffsetId > 0 ? result.nextOffsetId : currentOffset;
       if (nextOff === currentOffset && result.minIdInBatch > 0 && result.minIdInBatch < (currentOffset || Infinity)) {
         currentOffset = result.minIdInBatch;
-      } else {
+    } else {
         currentOffset = nextOff;
       }
 
@@ -1066,8 +1114,8 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
 
   const cumulativeStats = mergeScanStats(source, stats);
   await patchSourceProgress(source.id, {
-    lastCheckedAt: new Date(),
-    lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
+      lastCheckedAt: new Date(),
+      lastTelegramMessageId: maxId > lastId ? String(maxId) : source.lastTelegramMessageId,
     initialScanOffsetId: initialComplete ? null : source.initialScanOffsetId,
     initialScanDone: initialComplete ? true : source.initialScanDone,
     initialScanPhase: initialComplete ? null : (isInitialScan ? "forward" : source.initialScanPhase),
@@ -1201,8 +1249,8 @@ async function scanOneTelegramSource(
         lastCheckedAt: now,
         isScanning: false,
         lastScanErrors: (source.lastScanErrors ?? 0) + 1,
-      })
-      .where(eq(sourcesTable.id, source.id));
+    })
+    .where(eq(sourcesTable.id, source.id));
   } finally {
     await releaseSourceScanLock(source.id);
   }
@@ -1328,14 +1376,23 @@ async function publishElemanJob(
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
   const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
   const gender = extractGender(job.rawText);
-  const cleanDescription = finalizeElemanListingText(job.description || job.rawText, job.phone);
+  const cleanDescription = finalizeElemanListingText(
+    job.description || job.rawText,
+    extractPhoneNumbers(`${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`).join(", ") || job.phone,
+  );
 
   const postedAt = job.postedAt ?? now;
   const { assignCoordsFromCity } = await import("../lib/nearby-listings");
   const coords = assignCoordsFromCity(city);
+  const { matchKnownCompany, matchKnownCompanyInBlob } = await import("../lib/known-companies");
+  let companyName = job.companyName ?? "Belirtilmemiş";
+  const brand =
+    (await matchKnownCompany(companyName)) ||
+    matchKnownCompanyInBlob(`${companyName} ${job.title} ${job.rawText}`);
+  if (brand && (!job.companyName || companyName === "Belirtilmemiş")) companyName = brand.name;
   const [newListing] = await db.insert(listingsTable).values({
     title: job.title || "Güvenlik Personeli Aranıyor",
-    company: job.companyName ?? "Belirtilmemiş",
+    company: companyName,
     city,
     salary: extractSalary(job.rawText) ?? undefined,
     workType: extractWorkType(job.rawText),
@@ -1348,7 +1405,13 @@ async function publishElemanJob(
     messageId,
     sourceUrl: job.url,
     sourceTag: "eleman",
-    applyUrl: `tel:${job.phone}`,
+    sourceType: "bot_imported",
+    sourceName: "Eleman.net",
+    sourcePublishedAt: postedAt,
+    verifiedPublisher: false,
+    lastCheckedAt: now,
+    applyUrl: formatTelApplyUrl(extractPhoneNumbers(`${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`)),
+    companyLogoUrl: brand?.logoUrl ?? null,
     publishedAt: postedAt,
     firstSeenAt: now,
     lastSeenAt: now,
@@ -1488,7 +1551,7 @@ async function runScraperCycle(force = false): Promise<void> {
   try {
     do {
       cycleQueued = false;
-      await runScraperCycleInner(force);
+    await runScraperCycleInner(force);
       force = true;
     } while (cycleQueued);
   } finally {
@@ -1602,8 +1665,8 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     historyExhausted = fetched.historyExhausted;
     fetchRounds = fetched.rounds;
     oldestTs = fetched.oldestTs || Date.now();
-  } catch (e) {
-    const errMsg = e instanceof Error ? e.message : String(e);
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
       lastError: errMsg.slice(0, 500),
       isScanning: false,
@@ -1775,7 +1838,7 @@ export function onWhatsAppReady(): void {
           lastCheckedAt: new Date(),
         });
       }
-      await db.update(sourcesTable)
+          await db.update(sourcesTable)
         .set({ status: "active" })
         .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.active, true)));
     } catch (e) {
@@ -1876,7 +1939,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
               });
               emptyBySource.delete(source.id);
             }
-          } else {
+        } else {
             emptyBySource.delete(source.id);
           }
         } else {
@@ -1886,7 +1949,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
         logger.warn(`scraper: whatsapp source ${source.id} failed: ${errMsg}`);
-        await db.update(sourcesTable)
+          await db.update(sourcesTable)
           .set({
             lastError: errMsg.slice(0, 500),
             lastCheckedAt: new Date(),
@@ -1894,7 +1957,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
             initialScanDone: false,
             lastScanErrors: (source.lastScanErrors ?? 0) + 1,
           })
-          .where(eq(sourcesTable.id, source.id));
+            .where(eq(sourcesTable.id, source.id));
       } finally {
         await releaseSourceScanLock(source.id);
       }
@@ -2292,9 +2355,9 @@ export function startScraperWorker(): void {
   if (isBotTokenSet()) {
     void (async () => {
       const minutes = await getTelegramScanIntervalMinutes();
-      setInterval(async () => {
-        try { await processBotUpdates(); }
-        catch (e) { logger.error(e, "scraper: bot poll error"); }
+    setInterval(async () => {
+      try { await processBotUpdates(); }
+      catch (e) { logger.error(e, "scraper: bot poll error"); }
       }, minutes * 60_000);
     })();
   }
@@ -2663,7 +2726,8 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     const newCity = v2.city;
     const newSalary = extractSalary(row.description || text);
     const newGender = extractGender(row.description || text);
-    const newPhone = extractPhone(row.description || text);
+    const newPhones = extractPhones(row.description || text);
+    const newPhone = newPhones[0] ?? null;
 
     // Mevcut "Kaynak:" satırını koru
     const reqLines = (row.requirements ?? "").split("\n");
@@ -2682,7 +2746,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (newCity && newCity !== "Türkiye") next.city = newCity;
     if (newTitle && newTitle.length >= 8) next.title = newTitle;
     if (newSalary) next.salary = newSalary;
-    if (newPhone) next.applyUrl = `tel:${newPhone}`;
+    if (newPhones.length) next.applyUrl = formatTelApplyUrl(newPhones);
     else if (row.applyUrl && /t\.me\/|telegram\.me\//i.test(row.applyUrl)) next.applyUrl = null;
 
     const changed = (next.title !== undefined && next.title !== row.title)

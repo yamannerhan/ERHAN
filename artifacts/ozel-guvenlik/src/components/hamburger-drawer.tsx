@@ -129,7 +129,7 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
     { icon: <Briefcase className="og-hd-ico" />, label: "İlanlar", href: "/ilanlar" },
     { icon: <PlusCircle className="og-hd-ico" />, label: "İlan Oluştur", href: "/ilan-ekle" },
     { icon: <FileText className="og-hd-ico" />, label: "CV Oluştur", href: "/cv-olustur" },
-    { icon: <Clock className="og-hd-ico" />, label: "Part Time", href: "/part-time" },
+    { icon: <Clock className="og-hd-ico" />, label: "İş Arayanlar", href: "/part-time" },
     { icon: <MessageSquare className="og-hd-ico" />, label: "Sohbet", href: "/sohbet", only: "auth" as const },
     ...(!isLite ? [{ icon: <Bell className="og-hd-ico" />, label: "Bildirimler", href: "/bildirimler", only: "auth" as const, badge: unreadCount }] : []),
     { icon: <Bookmark className="og-hd-ico" />, label: "Favoriler", href: "/favoriler", only: "auth" as const },

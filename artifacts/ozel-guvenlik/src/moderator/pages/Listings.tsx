@@ -111,7 +111,9 @@ export default function Listings() {
             <button type="button" className="mod-btn mod-btn-success mod-btn-sm" disabled={actionLoading} onClick={() => runBulk("approve")}>Onayla</button>
             <button type="button" className="mod-btn mod-btn-danger mod-btn-sm" disabled={actionLoading} onClick={() => setBulkReason("reject")}>Reddet</button>
             <button type="button" className="mod-btn mod-btn-ghost mod-btn-sm" disabled={actionLoading} onClick={() => setBulkReason("archive")}>Arşivle</button>
-            <button type="button" className="mod-btn mod-btn-danger mod-btn-sm" disabled={actionLoading} onClick={() => setBulkReason("delete")}>Sil</button>
+            {hasPermission("listings.soft_delete") && (
+              <button type="button" className="mod-btn mod-btn-danger mod-btn-sm" disabled={actionLoading} onClick={() => setBulkReason("delete")}>Sil</button>
+            )}
           </BulkActionBar>
         )}
 

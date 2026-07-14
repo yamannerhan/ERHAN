@@ -151,6 +151,48 @@ export default function Profile() {
     }
   };
 
+  const handleRenew = async (listingId: number) => {
+    setRepublishingId(listingId);
+    try {
+      const res = await fetch(`/api/listings/${listingId}/renew`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Yenileme başarısız");
+      setMyListings(prev => prev.map((l: any) => l.id === listingId ? { ...l, ...data } : l));
+      toast({
+        title: "İlan yenilendi",
+        description: data.renewMeta?.priorityHours
+          ? `${data.renewMeta.priorityHours} saat öncelik boost uygulandı.`
+          : "Tazelik onaylandı.",
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Yenilenemedi",
+        description: e instanceof Error ? e.message : "Hata",
+        variant: "destructive",
+      });
+    } finally {
+      setRepublishingId(null);
+    }
+  };
+
+  const handleDeactivate = async (listingId: number) => {
+    if (!confirm("İlanı pasife almak istiyor musunuz?")) return;
+    try {
+      const res = await fetch(`/api/listings/${listingId}/deactivate`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error();
+      setMyListings(prev => prev.map((l: any) => l.id === listingId ? { ...l, status: "inactive" } : l));
+      toast({ title: "İlan pasife alındı" });
+    } catch {
+      toast({ title: "İşlem başarısız", variant: "destructive" });
+    }
+  };
+
   const requestFeature = async (listing: { id: number; title: string; isFeatured?: boolean }) => {
     if (listing.isFeatured) {
       toast({ title: "Zaten öne çıkarılmış" });
@@ -1094,6 +1136,33 @@ export default function Profile() {
                             <option key={option.value} value={option.value} className="bg-[#111827] text-white">{option.label}</option>
                           ))}
                         </select>
+                      </div>
+                    )}
+
+                    {isMe && !isExpired && (
+                      <div className="mt-2 px-1 flex flex-col gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full border-emerald-400/40 text-emerald-400 hover:bg-emerald-400/10 text-xs"
+                          disabled={republishingId === listing.id}
+                          onClick={() => handleRenew(listing.id)}
+                        >
+                          {republishingId === listing.id ? (
+                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                          )}
+                          İlanı Yenile
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full border-white/20 text-muted-foreground text-xs"
+                          onClick={() => handleDeactivate(listing.id)}
+                        >
+                          Pasife Al
+                        </Button>
                       </div>
                     )}
 

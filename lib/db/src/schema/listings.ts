@@ -20,33 +20,40 @@ export const listingsTable = pgTable(
     viewCount: integer("view_count").notNull().default(0),
     likeCount: integer("like_count").notNull().default(0),
     isFeatured: boolean("is_featured").notNull().default(false),
-    /** Öne çıkarma bitiş zamanı (ücretsiz 3 gün / ücretli) */
     featuredUntil: timestamp("featured_until", { withTimezone: true }),
-    /** Bu öne çıkarma ücretsiz kontenjandan mı kullanıldı */
     featuredIsFree: boolean("featured_is_free").notNull().default(false),
     cardTheme: text("card_theme"),
     applyUrl: text("apply_url"),
-    // Otomatik içe aktarılan ilanların kaynağı ('telegram'/'facebook'); elle eklenenlerde null
+    // Platform etiketi: telegram | whatsapp | eleman | demo | null
     sourceTag: text("source_tag"),
     sourceId: integer("source_id"),
     messageId: text("message_id"),
     sourceUrl: text("source_url"),
+    /** direct_user | direct_company | bot_imported | admin_created */
+    sourceType: text("source_type"),
+    /** Bot / platform adı: Telegram, WhatsApp, Eleman.net, ... */
+    sourceName: text("source_name"),
+    sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    directPriorityUntil: timestamp("direct_priority_until", { withTimezone: true }),
+    freshnessConfirmedAt: timestamp("freshness_confirmed_at", { withTimezone: true }),
+    verifiedPublisher: boolean("verified_publisher").notNull().default(false),
+    /** Yayın anındaki doğrulama bilgisi JSON */
+    verificationSnapshot: text("verification_snapshot"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     rawText: text("raw_text"),
     companyLogoUrl: text("company_logo_url"),
-    /** Şirket profili — ad/logo dinamik buradan okunur */
     companyProfileId: integer("company_profile_id"),
     authorId: integer("author_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     autoDeleteOnExpiry: boolean("auto_delete_on_expiry").notNull().default(true),
-    /** Yakın ilan araması — WGS84 */
+    lastRenewedAt: timestamp("last_renewed_at", { withTimezone: true }),
+    mergedIntoListingId: integer("merged_into_listing_id"),
     latitude: numeric("latitude", { precision: 9, scale: 6 }),
     longitude: numeric("longitude", { precision: 9, scale: 6 }),
-    /** exact | district | city | estimated */
     locationAccuracy: text("location_accuracy"),
-    /** employer | geocoded | district_center | manual | ai_extracted */
     locationSource: text("location_source"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
@@ -54,6 +61,9 @@ export const listingsTable = pgTable(
   (t) => [
     index("listings_company_profile_id_idx").on(t.companyProfileId),
     index("listings_lat_lng_idx").on(t.latitude, t.longitude),
+    index("listings_source_type_idx").on(t.sourceType),
+    index("listings_direct_priority_until_idx").on(t.directPriorityUntil),
+    index("listings_verified_publisher_idx").on(t.verifiedPublisher),
   ],
 );
 

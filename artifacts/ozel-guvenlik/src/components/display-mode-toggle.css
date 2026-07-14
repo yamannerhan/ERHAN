@@ -29,11 +29,37 @@
 
 .og-home-mode-row {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   padding: 2px 12px 0;
   margin: 0;
   min-height: 0;
+}
+
+.og-home-total-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  padding: 3px 9px;
+  border: 1px solid rgba(245, 197, 24, 0.24);
+  border-radius: 999px;
+  background: rgba(10, 14, 20, 0.72);
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.og-home-total-count strong {
+  color: #f5c518;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+html:not(.dark) .og-home-total-count {
+  background: #fff;
+  color: #64748b;
 }
 
 /* Anasayfa: banner ↔ Pro/Lite ↔ ilan sayısı boşluklarını sıkı tut */

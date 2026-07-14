@@ -12,4 +12,6 @@ limit?: number;
 city?: string;
 search?: string;
 featured?: boolean;
+/** recommended | newest | oldest */
+sort?: string;
 };

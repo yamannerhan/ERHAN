@@ -1,5 +1,5 @@
 import { logger } from "../lib/logger";
-import { extractPhoneNumber } from "../lib/job-parsing";
+import { extractPhoneNumbers } from "../lib/job-parsing";
 
 const BASE = "https://www.eleman.net";
 const USER_AGENT =
@@ -157,14 +157,22 @@ function cleanElemanDescription(text: string): string {
     .trim();
 }
 
-/** Açıklamaya telefon ekle (yoksa); Eleman.net markasını temizle. */
+/** Açıklamaya telefon(lar) ekle (yoksa); Eleman.net markasını temizle. */
 export function finalizeElemanListingText(description: string, phone: string): string {
   let text = cleanElemanDescription(description || "");
-  const phoneDigits = phone.replace(/\D/g, "");
+  const phones = extractPhoneNumbers(`${phone}\n${text}`);
+  if (phones.length === 0 && phone.trim()) {
+    const digits = phone.replace(/\D/g, "");
+    // ham metin ekle (normalize edilememişse)
+    if (digits.length >= 10) {
+      text = `${text}\n\nTelefon: ${phone.trim()}`.trim();
+    }
+    return text;
+  }
   const textDigits = text.replace(/\D/g, "");
-  const alreadyHasPhone = phoneDigits.length >= 10 && textDigits.includes(phoneDigits.slice(-10));
-  if (phone.trim() && !alreadyHasPhone) {
-    text = `${text}\n\nTelefon: ${phone.trim()}`.trim();
+  const missing = phones.filter((p) => !textDigits.includes(p.slice(-10)));
+  if (missing.length) {
+    text = `${text}\n\nTelefon: ${missing.join(" / ")}`.trim();
   }
   return text;
 }
@@ -222,8 +230,8 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
 
   // Telefon: önce temiz açıklama, sonra sınırlı HTML (script'siz)
   const phoneZone = stripPageChrome(html).slice(0, 80_000);
-  const phone = extractPhoneNumber(`${description}\n${title}`)
-    || extractPhoneNumber(phoneZone);
+  const phones = extractPhoneNumbers(`${description}\n${title}\n${phoneZone}`);
+  const phone = phones[0] ?? null;
   if (!phone) {
     logger.info({ id: item.id, title }, "eleman: telefon yok — ilan çekilmedi");
     return null;
@@ -236,10 +244,19 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     if (!Number.isNaN(d.getTime())) postedAt = d;
   }
 
-  const rawText = [title, companyName, finalizeElemanListingText(description, phone)]
+  const phoneJoined = phones.join(",");
+  const rawText = [title, companyName, finalizeElemanListingText(description, phoneJoined)]
     .filter(Boolean)
     .join("\n\n");
-  return { ...item, title, companyName, description: finalizeElemanListingText(description, phone), phone, rawText, postedAt };
+  return {
+    ...item,
+    title,
+    companyName,
+    description: finalizeElemanListingText(description, phoneJoined),
+    phone: phoneJoined,
+    rawText,
+    postedAt,
+  };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {

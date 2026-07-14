@@ -308,6 +308,7 @@ limit?: number;
 city?: string;
 search?: string;
 featured?: boolean;
+sort?: string;
 };
 
 export type GetChatMessagesParams = {

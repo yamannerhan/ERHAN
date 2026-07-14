@@ -9,6 +9,8 @@ export function isRealCompanyLogo(url?: string | null): boolean {
   if (/unsplash\.com|randomuser\.me|picsum/i.test(u)) return false;
   return (
     u.startsWith("/api/company-logos/") ||
+    u.startsWith("/api/known-company-logos/") ||
+    u.startsWith("/known-logos/") ||
     u.startsWith("/api/listing-images/") ||
     u.startsWith("blob:") ||
     u.startsWith("data:image/") ||

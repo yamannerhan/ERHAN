@@ -3,16 +3,18 @@ import { db } from "@workspace/db";
 import {
   permissionsTable,
   rolePermissionsTable,
+  userPermissionsTable,
   filteredWordsTable,
   bannedWordsTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   isPanelRole,
   roleHasPermission,
   getPermissionsForRole,
   PERMISSIONS,
   ROLE_PERMISSION_MATRIX,
+  DEFAULT_REMOVED_DELETE_PERMS,
   assertCanActOnUser,
   assertCannotTargetAdmin,
   type PermissionKey,
@@ -21,9 +23,31 @@ import {
 
 let seeded = false;
 
+async function ensureUserPermissionsTable(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS user_permissions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      permission_key TEXT NOT NULL,
+      granted BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS user_permissions_unique
+    ON user_permissions (user_id, permission_key)
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS user_permissions_user_idx
+    ON user_permissions (user_id)
+  `);
+}
+
 export async function ensureModerationPermissionsSeeded(): Promise<void> {
   if (seeded) return;
   try {
+    await ensureUserPermissionsTable();
     for (const key of PERMISSIONS) {
       await db.insert(permissionsTable).values({ key, description: key }).onConflictDoNothing();
     }
@@ -35,6 +59,15 @@ export async function ensureModerationPermissionsSeeded(): Promise<void> {
           .onConflictDoNothing();
       }
     }
+    // Varsayılanlardan silme yetkilerini kaldır (mevcut modlar da silmesin)
+    await db
+      .delete(rolePermissionsTable)
+      .where(
+        and(
+          inArray(rolePermissionsTable.role, ["moderator", "senior_moderator"]),
+          inArray(rolePermissionsTable.permissionKey, DEFAULT_REMOVED_DELETE_PERMS),
+        ),
+      );
     // One-shot: copy legacy banned_words into filtered_words
     const legacy = await db.select().from(bannedWordsTable).limit(500);
     for (const row of legacy) {
@@ -73,30 +106,85 @@ export function requireModeratorPanel(req: Request, res: Response, next: NextFun
   next();
 }
 
+export async function loadUserPermissions(role: string, userId?: number): Promise<PermissionKey[]> {
+  if (role === "admin") return getPermissionsForRole("admin");
+  await ensureModerationPermissionsSeeded();
+
+  // Rol varsayılanları her zaman kod matrisinden (silme yok)
+  const base: PermissionKey[] = getPermissionsForRole(role);
+
+  if (!userId) return base;
+
+  try {
+    const overrides = await db
+      .select({
+        key: userPermissionsTable.permissionKey,
+        granted: userPermissionsTable.granted,
+      })
+      .from(userPermissionsTable)
+      .where(eq(userPermissionsTable.userId, userId));
+
+    if (overrides.length === 0) return base;
+
+    const set = new Set<PermissionKey>(base);
+    for (const row of overrides) {
+      const key = row.key as PermissionKey;
+      if (!PERMISSIONS.includes(key)) continue;
+      if (row.granted) set.add(key);
+      else set.delete(key);
+    }
+    return [...set];
+  } catch {
+    return base;
+  }
+}
+
+export async function userHasPermission(
+  role: string,
+  userId: number | undefined,
+  permission: PermissionKey,
+): Promise<boolean> {
+  if (role === "admin") return true;
+  const perms = await loadUserPermissions(role, userId);
+  return perms.includes(permission);
+}
+
 export function requirePermission(permission: PermissionKey) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
       res.status(401).json({ error: "Giriş yapmanız gerekiyor" });
       return;
     }
-    if (!roleHasPermission(req.user.role, permission)) {
-      res.status(403).json({ error: "Bu işlem için yetkiniz yok", code: "FORBIDDEN_PERMISSION", permission });
-      return;
-    }
-    next();
+    void (async () => {
+      try {
+        const ok = await userHasPermission(req.user!.role, req.user!.id, permission);
+        if (!ok) {
+          res.status(403).json({ error: "Bu işlem için yetkiniz yok", code: "FORBIDDEN_PERMISSION", permission });
+          return;
+        }
+        next();
+      } catch {
+        res.status(500).json({ error: "Yetki kontrolü başarısız" });
+      }
+    })();
   };
 }
 
-export async function loadUserPermissions(role: string): Promise<PermissionKey[]> {
-  if (role === "admin") return getPermissionsForRole("admin");
-  try {
-    const rows = await db
-      .select({ key: rolePermissionsTable.permissionKey })
-      .from(rolePermissionsTable)
-      .where(eq(rolePermissionsTable.role, role));
-    if (rows.length > 0) return rows.map((r) => r.key as PermissionKey);
-  } catch { /* fallback */ }
-  return getPermissionsForRole(role);
+/** Compute override rows from desired effective permission list vs role defaults */
+export function computePermissionOverrides(
+  role: string,
+  desired: PermissionKey[],
+): Array<{ permissionKey: PermissionKey; granted: boolean }> {
+  const defaults = new Set(getPermissionsForRole(role));
+  const want = new Set(desired.filter((k) => PERMISSIONS.includes(k)));
+  const rows: Array<{ permissionKey: PermissionKey; granted: boolean }> = [];
+  for (const key of PERMISSIONS) {
+    const inDefault = defaults.has(key);
+    const inWant = want.has(key);
+    if (inWant && !inDefault) rows.push({ permissionKey: key, granted: true });
+    else if (!inWant && inDefault) rows.push({ permissionKey: key, granted: false });
+  }
+  return rows;
 }
 
 export {
@@ -105,4 +193,6 @@ export {
   isPanelRole,
   assertCanActOnUser,
   assertCannotTargetAdmin,
+  PERMISSIONS,
 };
+export type { PermissionKey, PanelRole };

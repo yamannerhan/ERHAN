@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
+import { io, type Socket } from "socket.io-client";
 import {
   Headphones, MessageCircle, Ticket, HelpCircle, Shield, Send,
   Paperclip, LogOut, Megaphone, FileText, User, ChevronDown,
@@ -129,9 +130,38 @@ export function LiveSupportPageContent() {
 
   useEffect(() => {
     if (!user || isStaff || !activeTicket) return;
-    const id = setInterval(() => { void loadActive(); }, 12000);
+    const id = setInterval(() => { void loadActive(); }, 4000);
     return () => clearInterval(id);
   }, [user, isStaff, activeTicket?.id, loadActive]);
+
+  useEffect(() => {
+    if (!user || isStaff) return;
+    const s: Socket = io(window.location.origin, {
+      path: "/ws",
+      transports: ["polling", "websocket"],
+      secure: window.location.protocol === "https:",
+      withCredentials: true,
+    });
+    const auth = () => {
+      if (s.connected) s.emit("authenticate", { userId: user.id });
+      if (activeTicket?.id) s.emit("support:join", { ticketId: activeTicket.id });
+    };
+    s.on("connect", auth);
+    s.on("support:message", (msg: Message & { ticketId?: number; status?: string }) => {
+      if (!msg.ticketId) return;
+      setActiveTicket((prev) => {
+        if (!prev || prev.id !== msg.ticketId) return prev;
+        if (prev.messages.some((m) => m.id === msg.id)) return prev;
+        return {
+          ...prev,
+          status: msg.status ?? prev.status,
+          messages: [...prev.messages, msg],
+        };
+      });
+    });
+    if (s.connected) auth();
+    return () => { s.disconnect(); };
+  }, [user?.id, isStaff, activeTicket?.id]);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });

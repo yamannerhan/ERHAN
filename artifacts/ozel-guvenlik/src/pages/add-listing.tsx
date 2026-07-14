@@ -9,9 +9,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Sparkles, RefreshCw, Trash2, Wand2, Check, MapPin, Briefcase, Building2,
-  CircleDollarSign, Phone, FileText, Send, Shield, Loader2,
+  CircleDollarSign, Phone, FileText, Send, Shield, Loader2, UserRound,
 } from "lucide-react";
 import "@/components/add-listing-page.css";
+import { formatSalaryInput } from "@/lib/salary-format";
+import { formatTelApplyUrl, normalizeContactNames, normalizePhoneList } from "@/lib/apply-url";
 
 const POSITIONS = [
   "Özel Güvenlik Görevlisi",
@@ -40,6 +42,7 @@ const listingSchema = z.object({
   description: z.string().min(20, "Açıklama en az 20 karakter olmalıdır."),
   requirements: z.string().optional(),
   applyUrl: z.string().optional(),
+  contactName: z.string().optional(),
   companyLogoUrl: z.string().optional(),
   cardTheme: z.string().optional(),
 });
@@ -109,6 +112,7 @@ export default function AddListing() {
   const createMutation = useCreateListing();
   const { user, isLoading } = useAuth();
   const [dupWarning, setDupWarning] = useState<string | null>(null);
+  const [publishSuccess, setPublishSuccess] = useState<{ message: string; listingId?: number } | null>(null);
   const [smartText, setSmartText] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
   const [extractStatus, setExtractStatus] = useState<ExtractStatus | null>(null);
@@ -121,8 +125,10 @@ export default function AddListing() {
   const [companyProfile, setCompanyProfile] = useState<{
     companyName: string;
     logoPath: string | null;
+    phone?: string | null;
     isVerified?: boolean;
   } | null | undefined>(undefined);
+  const [knownCompanies, setKnownCompanies] = useState<{ id: number; name: string; logoUrl: string | null }[]>([]);
 
   const form = useForm<ListingFormValues>({
     resolver: zodResolver(listingSchema),
@@ -135,28 +141,61 @@ export default function AddListing() {
       description: "",
       requirements: "",
       applyUrl: "",
+      contactName: "",
       companyLogoUrl: "",
       cardTheme: "auto",
     },
   });
 
   const watched = form.watch();
+  const authUser = user as (typeof user & {
+    fullName?: string | null;
+    phone?: string | null;
+    displayName?: string | null;
+  }) | null;
 
   useEffect(() => {
     if (!isLoading && !user) setLocation("/giris");
   }, [user, isLoading, setLocation]);
 
+  // Kayıtlı temel bilgiler → otomatik doldur (açıklama ASLA doldurulmaz)
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       try {
         const token = localStorage.getItem("auth_token");
+        void fetch("/api/known-companies")
+          .then((r) => r.json())
+          .then((d) => {
+            if (!cancelled && Array.isArray(d?.items)) {
+              setKnownCompanies(
+                d.items.map((x: { id: number; name: string; logoUrl: string | null }) => ({
+                  id: x.id,
+                  name: x.name,
+                  logoUrl: x.logoUrl,
+                })),
+              );
+            }
+          })
+          .catch(() => undefined);
+
         const res = await fetch("/api/company-profiles/me", {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
-        if (!res.ok || cancelled) {
-          if (!cancelled) setCompanyProfile(null);
+        if (cancelled) return;
+
+        const meName = (authUser?.fullName || authUser?.displayName || "").trim();
+        const mePhone = (authUser?.phone || "").trim();
+        if (meName && !form.getValues("contactName")) {
+          form.setValue("contactName", meName);
+        }
+        if (mePhone && !form.getValues("applyUrl")) {
+          form.setValue("applyUrl", mePhone);
+        }
+
+        if (!res.ok) {
+          setCompanyProfile(null);
           return;
         }
         const data = await res.json();
@@ -165,12 +204,17 @@ export default function AddListing() {
           setCompanyProfile({
             companyName: data.companyName,
             logoPath: data.logoPath || null,
+            phone: data.phone || null,
             isVerified: !!data.isVerified,
           });
           form.setValue("company", data.companyName);
           if (data.logoPath) {
             form.setValue("companyLogoUrl", data.logoPath);
             setImagePreview(data.logoPath);
+          }
+          const profilePhone = String(data.phone || "").replace(/^tel:/i, "").trim();
+          if (profilePhone) {
+            form.setValue("applyUrl", profilePhone);
           }
         } else {
           setCompanyProfile(null);
@@ -180,7 +224,9 @@ export default function AddListing() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user, form]);
+    // form/authUser sabit ref — yalnızca user değişince
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const handlePhotoUpload = async (file: File) => {
     const localPreview = URL.createObjectURL(file);
@@ -230,9 +276,13 @@ export default function AddListing() {
       if (!companyProfile) form.setValue("company", data.company || "Belirtilmedi");
       form.setValue("city", city || "Türkiye");
       form.setValue("workType", workType);
-      form.setValue("salary", data.salary || "");
+      form.setValue("salary", formatSalaryInput(data.salary || ""));
       form.setValue("description", data.description || smartText);
-      form.setValue("applyUrl", data.applyUrl || data.contactPhone ? `tel:${String(data.contactPhone).replace(/\D/g, "")}` : "");
+      const parsedPhones = normalizePhoneList(
+        [data.applyUrl, data.contactPhone, Array.isArray(data.contactPhones) ? data.contactPhones.join(",") : ""].filter(Boolean).join(","),
+      );
+      form.setValue("applyUrl", parsedPhones.length ? parsedPhones.join(", ") : "");
+      if (data.contactName) form.setValue("contactName", normalizeContactNames(data.contactName));
       if (data.companyLogoUrl) {
         form.setValue("companyLogoUrl", data.companyLogoUrl);
         setImagePreview(data.companyLogoUrl);
@@ -282,15 +332,29 @@ export default function AddListing() {
       const payload: Record<string, unknown> = {
         ...values,
         company: values.company?.trim() || companyProfile?.companyName || "Belirtilmedi",
-        salary: values.salary || null,
+        salary: values.salary ? formatSalaryInput(values.salary) || null : null,
         requirements: requirements || null,
-        applyUrl: values.applyUrl || null,
+        applyUrl: formatTelApplyUrl(normalizePhoneList(values.applyUrl || "")) || values.applyUrl || null,
+        contactName: normalizeContactNames(values.contactName) || null,
         companyLogoUrl: values.companyLogoUrl || companyProfile?.logoPath || null,
         cardTheme: null,
       };
-      await createMutation.mutateAsync({ data: payload as never });
-      toast({ title: "İlan başarıyla yayınlandı", description: "İlan 1 ay boyunca yayında kalacaktır." });
-      setLocation("/ilanlar");
+      const created = await createMutation.mutateAsync({ data: payload as never }) as {
+        id?: number;
+        publishMeta?: { message?: string; priorityHours?: number; verifiedPublisher?: boolean };
+      };
+      const meta = created?.publishMeta;
+      setPublishSuccess({
+        message: meta?.message
+          || (meta?.verifiedPublisher
+            ? "İlanınız doğrulanmış hesap olarak 72 saat öncelikli gösterilecek. İlk sıra garantisi yoktur."
+            : "İlanınız 48 saat öncelikli gösterilecek. İlk sıra garantisi yoktur."),
+        listingId: created?.id,
+      });
+      toast({
+        title: "İlan başarıyla yayınlandı",
+        description: meta?.message || "Firma, logo, telefon ve isim sonraki ilanlarda otomatik gelecek.",
+      });
     } catch (error: unknown) {
       const err = error as { data?: { error?: string }; message?: string; status?: number };
       const serverMsg = err?.data?.error || err?.message || "İlan eklenirken bir hata oluştu.";
@@ -338,8 +402,15 @@ export default function AddListing() {
         {companyProfile === null && (
           <div className="og-cl-notice">
             İlan vermeden önce{" "}
-            <Link href={`/profil/${user.username}`}>Şirket Bilgileri</Link>{" "}
-            bölümünden firma adınızı kaydedebilirsiniz.
+            <Link href="/firma-basvurusu">Firma Başvurusu</Link>
+            {" "}yaparak logonuzu doğrulatın veya{" "}
+            <Link href={`/profil/${user.username}`}>Şirket Bilgileri</Link>
+            {" "}kaydedin. İlk ilanda girdiğiniz logo, firma, telefon ve isim sonraki ilanlarda otomatik gelir.
+          </div>
+        )}
+        {companyProfile && (
+          <div className="og-cl-notice">
+            Kayıtlı temel bilgileriniz (firma, logo, telefon, isim) otomatik dolduruldu. Değiştirirseniz sonraki ilanlarda yeni hali gelir. Açıklama her seferinde sizden istenir.
           </div>
         )}
 
@@ -431,9 +502,34 @@ export default function AddListing() {
                   value={watched.company || ""}
                   onChange={e => form.setValue("company", e.target.value)}
                   placeholder="Genser Güvenlik Sistemleri A.Ş."
-                  readOnly={!!companyProfile}
+                  list="og-known-companies"
                 />
+                <datalist id="og-known-companies">
+                  {knownCompanies.map((k) => (
+                    <option key={k.id} value={k.name} />
+                  ))}
+                </datalist>
               </div>
+              {knownCompanies.length > 0 && (
+                <div className="og-cl-pills" style={{ marginTop: 8 }}>
+                  {knownCompanies.slice(0, 8).map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      className="og-cl-pill"
+                      onClick={() => {
+                        form.setValue("company", k.name);
+                        if (k.logoUrl) {
+                          form.setValue("companyLogoUrl", k.logoUrl);
+                          setImagePreview(k.logoUrl);
+                        }
+                      }}
+                    >
+                      {k.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="og-cl-field">
@@ -491,7 +587,12 @@ export default function AddListing() {
                   className="og-cl-input"
                   value={watched.salary || ""}
                   onChange={e => form.setValue("salary", e.target.value)}
-                  placeholder="41.178 TL"
+                  onBlur={e => {
+                    const formatted = formatSalaryInput(e.target.value);
+                    if (formatted) form.setValue("salary", formatted);
+                  }}
+                  inputMode="numeric"
+                  placeholder="45300 → 45.300 TL"
                 />
               </div>
             </div>
@@ -553,40 +654,66 @@ export default function AddListing() {
             </div>
           </div>
 
-          <div className="og-cl-field og-cl-field--full">
-            <label className="og-cl-label" htmlFor="cl-contact">İletişim</label>
-            <div className="og-cl-input-wrap og-cl-input-wrap--right">
-              <Phone className="og-cl-field-ico" aria-hidden />
-              <input
-                id="cl-contact"
-                className="og-cl-input"
-                value={watched.applyUrl || ""}
-                onChange={e => form.setValue("applyUrl", e.target.value)}
-                placeholder="0 (212) 555 12 34"
-              />
-              <Phone className="og-cl-field-ico-right" aria-hidden />
+            <div className="og-cl-form-grid">
+            <div className="og-cl-field">
+              <label className="og-cl-label" htmlFor="cl-contact-name">Yetkili / İsim</label>
+              <div className="og-cl-input-wrap">
+                <UserRound className="og-cl-field-ico" aria-hidden />
+                <input
+                  id="cl-contact-name"
+                  className="og-cl-input"
+                  value={watched.contactName || ""}
+                  onChange={e => form.setValue("contactName", e.target.value)}
+                  onBlur={e => {
+                    const n = normalizeContactNames(e.target.value);
+                    if (n) form.setValue("contactName", n);
+                  }}
+                  placeholder="Ahmet Yılmaz, Ayşe Demir"
+                  autoComplete="name"
+                />
+              </div>
+              <p className="og-cl-hint">Birden fazla isim için virgül kullanın.</p>
+            </div>
+
+            <div className="og-cl-field">
+              <label className="og-cl-label" htmlFor="cl-contact">Telefon</label>
+              <div className="og-cl-input-wrap og-cl-input-wrap--right">
+                <Phone className="og-cl-field-ico" aria-hidden />
+                <input
+                  id="cl-contact"
+                  className="og-cl-input"
+                  value={watched.applyUrl || ""}
+                  onChange={e => form.setValue("applyUrl", e.target.value)}
+                  onBlur={e => {
+                    const phones = normalizePhoneList(e.target.value);
+                    if (phones.length) form.setValue("applyUrl", phones.join(", "));
+                  }}
+                  placeholder="0532…, 0533…"
+                  autoComplete="tel"
+                />
+                <Phone className="og-cl-field-ico-right" aria-hidden />
+              </div>
+              <p className="og-cl-hint">Birden fazla numara için virgül kullanın.</p>
             </div>
           </div>
 
-          {!companyProfile && (
-            <div className="og-cl-field og-cl-field--full">
-              <label className="og-cl-label">Firma Logosu (opsiyonel)</label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) void handlePhotoUpload(f); }}
-              />
-              <button
-                type="button"
-                className="og-cl-smart__btn og-cl-smart__btn--ghost w-full"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Logo Yükle
-              </button>
-            </div>
-          )}
+          <div className="og-cl-field og-cl-field--full">
+            <label className="og-cl-label">Firma Logosu (opsiyonel)</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) void handlePhotoUpload(f); }}
+            />
+            <button
+              type="button"
+              className="og-cl-smart__btn og-cl-smart__btn--ghost w-full"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {previewLogo ? "Logoyu Değiştir" : "Logo Yükle"}
+            </button>
+          </div>
 
           <div>
             <h2 className="og-cl-preview-head">İlan Özeti</h2>
@@ -636,6 +763,36 @@ export default function AddListing() {
             ) : "İlanı Yayınla"}
           </button>
         </form>
+
+        {publishSuccess && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal>
+            <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-white/10 p-5 space-y-3 shadow-xl">
+              <div className="flex items-center gap-2 text-emerald-300 font-bold text-base">
+                <Check className="w-5 h-5" /> İlan yayınlandı
+              </div>
+              <p className="text-sm text-slate-200 leading-relaxed">{publishSuccess.message}</p>
+              <p className="text-xs text-slate-400">İlanınız öncelikli gösterilecek; ilk sıra garantisi yoktur.</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {publishSuccess.listingId && (
+                  <button
+                    type="button"
+                    className="flex-1 min-w-[120px] rounded-xl bg-emerald-500 text-black font-semibold text-sm py-2.5"
+                    onClick={() => setLocation(`/ilan/${publishSuccess.listingId}`)}
+                  >
+                    İlana git
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="flex-1 min-w-[120px] rounded-xl border border-white/20 text-sm py-2.5"
+                  onClick={() => setLocation("/ilanlar")}
+                >
+                  İlanlara dön
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );

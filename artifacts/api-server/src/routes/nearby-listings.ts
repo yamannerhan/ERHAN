@@ -12,7 +12,7 @@ import {
 import { listDistrictsForProvince, listProvinces, resolveDistrictCenter } from "../lib/geo-centers";
 import { db, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
-import { extractPhoneNumber } from "../lib/job-parsing";
+import { extractPhoneNumbers, formatTelApplyUrl } from "../lib/job-parsing";
 
 const router = Router();
 
@@ -36,13 +36,34 @@ function formatNearbyListing(
   const rawDesc = listing.description;
   let rawApplyUrl = listing.applyUrl;
   if (rawApplyUrl && /t\.me\/|telegram\.me\/|wa\.me\//i.test(rawApplyUrl)) {
-    const phone = extractPhoneNumber(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`);
-    rawApplyUrl = phone ? `tel:${phone}` : null;
+    rawApplyUrl = formatTelApplyUrl(extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`));
+  } else if (rawApplyUrl?.startsWith("tel:") || !rawApplyUrl) {
+    const merged = formatTelApplyUrl([
+      ...extractPhoneNumbers(rawApplyUrl ?? ""),
+      ...extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`),
+    ]);
+    if (merged) rawApplyUrl = merged;
   }
   const description = rawDesc ? (isAuth ? rawDesc : maskContactInfo(rawDesc)) : null;
   const applyUrl = rawApplyUrl
     ? (isAuth ? rawApplyUrl : (rawApplyUrl.startsWith("tel:") || rawApplyUrl.startsWith("http") ? "auth_required" : rawApplyUrl))
     : null;
+
+  let companyLogoUrl = listing.companyLogoUrl;
+  let companyVerified = false;
+  try {
+    const { matchKnownCompanySync, isPlaceholderListingLogo } = await import("../lib/known-companies");
+    if (isPlaceholderListingLogo(companyLogoUrl)) {
+      const brand = matchKnownCompanySync(listing.company);
+      if (brand) {
+        companyLogoUrl = brand.logoUrl;
+        companyVerified = true;
+      }
+    } else {
+      const brand = matchKnownCompanySync(listing.company);
+      if (brand) companyVerified = true;
+    }
+  } catch { /* ignore */ }
 
   return {
     id: listing.id,
@@ -56,7 +77,8 @@ function formatNearbyListing(
     description,
     requirements: listing.requirements,
     applyUrl,
-    companyLogoUrl: listing.companyLogoUrl,
+    companyLogoUrl,
+    companyVerified,
     isFeatured: listing.isFeatured,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     viewCount: listing.viewCount,

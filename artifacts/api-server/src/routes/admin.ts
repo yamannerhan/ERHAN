@@ -1,9 +1,18 @@
 import { Router } from "express";
-import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable, badgesTable, userBadgesTable } from "@workspace/db";
-import { eq, desc, ilike, and, sql, asc, or, isNull, gt, inArray } from "drizzle-orm";
+import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable, badgesTable, userBadgesTable, companyProfilesTable, userPermissionsTable } from "@workspace/db";
+import { eq, desc, ilike, and, sql, asc, or, isNull, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
+import {
+  computePermissionOverrides,
+  ensureModerationPermissionsSeeded,
+  getPermissionsForRole,
+  loadUserPermissions,
+  PERMISSIONS,
+  userHasPermission,
+  type PermissionKey,
+} from "../middlewares/moderation";
 import { onlineSockets } from "./chat";
-import { extractGender, extractLocation, extractPhoneNumber } from "../lib/job-parsing";
+import { extractGender, extractLocation, extractPhoneNumbers, formatTelApplyUrl } from "../lib/job-parsing";
 import { getBuiltinRegionalFilterTerms } from "../lib/location-terms";
 import bcrypt from "bcryptjs";
 import multer from "multer";
@@ -172,6 +181,13 @@ function adminUserJson(u: typeof usersTable.$inferSelect) {
     mutedUntil: u.mutedUntil?.toISOString() ?? null,
     lastKnownIp: u.lastKnownIp ?? null,
     lastDeviceId: u.lastDeviceId ?? null,
+    accountType: u.accountType ?? "user",
+    isSystemAccount: !!u.isSystemAccount,
+    isVerifiedPublisher: !!u.isVerifiedPublisher,
+    verifiedAt: u.verifiedAt?.toISOString() ?? null,
+    verificationType: u.verificationType ?? null,
+    verificationNote: u.verificationNote ?? null,
+    verificationStatus: u.verificationStatus ?? "unverified",
     createdAt: u.createdAt.toISOString(),
   };
 }
@@ -479,6 +495,7 @@ router.post("/admin/create-staff", authMiddleware, requireAdmin, async (req, res
 
   const hash = await bcrypt.hash(password, 10);
   const [created] = await db.insert(usersTable).values({ username, email, passwordHash: hash, role: targetRole }).returning({ id: usersTable.id, username: usersTable.username, role: usersTable.role });
+  // Yeni moderatör varsayılan yetkilerle başlar (override yok)
   res.status(201).json({ success: true, user: created });
 });
 
@@ -488,7 +505,101 @@ router.patch("/admin/users/:id/role", authMiddleware, requireAdmin, async (req, 
   const { role } = req.body as { role?: string };
   if (!role || !["user", "moderator", "senior_moderator", "admin"].includes(role)) { res.status(400).json({ error: "Geçersiz rol" }); return; }
   await db.update(usersTable).set({ role }).where(eq(usersTable.id, id));
+  // Rol değişince kişiye özel yetki override'larını sıfırla → varsayılan yetkiler
+  await db.delete(userPermissionsTable).where(eq(userPermissionsTable.userId, id));
   res.json({ success: true, message: "Rol güncellendi" });
+});
+
+router.get("/admin/permissions/catalog", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  await ensureModerationPermissionsSeeded();
+  res.json({
+    permissions: [...PERMISSIONS],
+    roleDefaults: {
+      moderator: getPermissionsForRole("moderator"),
+      senior_moderator: getPermissionsForRole("senior_moderator"),
+    },
+  });
+});
+
+router.get("/admin/users/:id/permissions", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  await ensureModerationPermissionsSeeded();
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const [target] = await db
+    .select({ id: usersTable.id, role: usersTable.role, username: usersTable.username })
+    .from(usersTable)
+    .where(eq(usersTable.id, id))
+    .limit(1);
+  if (!target) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
+  if (target.role === "admin") {
+    res.json({
+      userId: target.id,
+      role: target.role,
+      defaults: [...PERMISSIONS],
+      overrides: [],
+      effective: [...PERMISSIONS],
+      all: [...PERMISSIONS],
+    });
+    return;
+  }
+  if (!["moderator", "senior_moderator"].includes(target.role)) {
+    res.status(400).json({ error: "Yetki yalnızca moderatörlere atanabilir" });
+    return;
+  }
+  const defaults = getPermissionsForRole(target.role);
+  const overrides = await db
+    .select({
+      permissionKey: userPermissionsTable.permissionKey,
+      granted: userPermissionsTable.granted,
+    })
+    .from(userPermissionsTable)
+    .where(eq(userPermissionsTable.userId, id));
+  const effective = await loadUserPermissions(target.role, id);
+  res.json({
+    userId: target.id,
+    role: target.role,
+    defaults,
+    overrides,
+    effective,
+    all: [...PERMISSIONS],
+  });
+});
+
+router.put("/admin/users/:id/permissions", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+  await ensureModerationPermissionsSeeded();
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const [target] = await db
+    .select({ id: usersTable.id, role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.id, id))
+    .limit(1);
+  if (!target) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
+  if (!["moderator", "senior_moderator"].includes(target.role)) {
+    res.status(400).json({ error: "Yetki yalnızca moderatörlere atanabilir" });
+    return;
+  }
+  const body = req.body as { permissions?: unknown };
+  if (!Array.isArray(body.permissions)) {
+    res.status(400).json({ error: "permissions dizisi gerekli" });
+    return;
+  }
+  const desired = body.permissions
+    .map((p) => String(p))
+    .filter((p): p is PermissionKey => (PERMISSIONS as readonly string[]).includes(p));
+  const overrides = computePermissionOverrides(target.role, desired);
+  await db.delete(userPermissionsTable).where(eq(userPermissionsTable.userId, id));
+  if (overrides.length > 0) {
+    await db.insert(userPermissionsTable).values(
+      overrides.map((o) => ({
+        userId: id,
+        permissionKey: o.permissionKey,
+        granted: o.granted,
+      })),
+    );
+  }
+  const effective = await loadUserPermissions(target.role, id);
+  res.json({ success: true, effective, overrides });
 });
 
 router.patch("/admin/users/:id/name-color", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
@@ -1286,9 +1397,9 @@ function parseListingText(raw: string): Record<string, string> {
   const lines = text.split(/\n/);
 
   // ── Phone numbers ──────────────────────────────────────────────────────────
-  const rawPhone = extractPhoneNumber(text) ?? "";
-  const contactPhone = rawPhone ? rawPhone.replace(/^0/, "+90") : "";
-  const applyUrl = contactPhone ? `tel:${contactPhone}` : "";
+  const phones = extractPhoneNumbers(text);
+  const contactPhone = phones.join(", ");
+  const applyUrl = formatTelApplyUrl(phones) ?? "";
 
   // ── Contact name ───────────────────────────────────────────────────────────
   let contactName = "";
@@ -1602,6 +1713,9 @@ router.delete("/admin/banned-words/:id", authMiddleware, requireAdmin, async (re
 });
 
 // ─── Admin Listings ────────────────────────────────────────────────
+const BOT_SOURCE_TAGS = ["telegram", "whatsapp", "eleman", "demo"] as const;
+const STAFF_FEATURE_DAYS = 3;
+
 router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const page = Math.max(1, parseInt(String(req.query["page"] ?? "1"), 10));
   const requestedLimit = req.query["limit"] === "all" ? 500 : parseInt(String(req.query["limit"] ?? "50"), 10);
@@ -1610,8 +1724,17 @@ router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (re
   const status = req.query["status"] as string | undefined;
   const search = String(req.query["search"] ?? "").trim();
   const city = String(req.query["city"] ?? "").trim();
+  const featuredOnly = String(req.query["featured"] ?? "") === "true" || String(req.query["featured"] ?? "") === "1";
+  const source = String(req.query["source"] ?? "").trim().toLowerCase(); // user | bot | all
   const conditions = status ? [eq(listingsTable.status, status)] : [];
   if (city) conditions.push(ilike(listingsTable.city, `%${city}%`));
+  if (featuredOnly) conditions.push(eq(listingsTable.isFeatured, true));
+  if (source === "user") {
+    conditions.push(isNotNull(listingsTable.authorId));
+    conditions.push(or(isNull(listingsTable.sourceTag), notInArray(listingsTable.sourceTag, [...BOT_SOURCE_TAGS]))!);
+  } else if (source === "bot") {
+    conditions.push(inArray(listingsTable.sourceTag, [...BOT_SOURCE_TAGS]));
+  }
   if (search) {
     const numericId = Number(search.replace(/^#/, ""));
     conditions.push(or(
@@ -1626,15 +1749,73 @@ router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (re
     db.select().from(listingsTable).where(whereClause).orderBy(desc(listingsTable.createdAt)).limit(limit).offset(offset),
     db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(whereClause),
   ]);
+
+  const authorIds = [...new Set(listings.map((l) => l.authorId).filter(Boolean) as number[])];
+  const profileIds = [...new Set(listings.map((l) => l.companyProfileId).filter(Boolean) as number[])];
+  const authorMap = new Map<number, { username: string; displayName: string | null; fullName: string | null }>();
+  const profileById = new Map<number, { companyName: string; phone: string | null }>();
+  const profileByUser = new Map<number, { companyName: string; phone: string | null }>();
+
+  if (authorIds.length > 0) {
+    const authors = await db
+      .select({ id: usersTable.id, username: usersTable.username, displayName: usersTable.displayName, fullName: usersTable.fullName })
+      .from(usersTable)
+      .where(inArray(usersTable.id, authorIds));
+    for (const a of authors) authorMap.set(a.id, { username: a.username, displayName: a.displayName, fullName: a.fullName });
+  }
+  if (profileIds.length > 0 || authorIds.length > 0) {
+    try {
+      const rows = await db
+        .select({
+          id: companyProfilesTable.id,
+          userId: companyProfilesTable.userId,
+          companyName: companyProfilesTable.companyName,
+          phone: companyProfilesTable.phone,
+        })
+        .from(companyProfilesTable)
+        .where(and(
+          isNull(companyProfilesTable.deletedAt),
+          eq(companyProfilesTable.isActive, true),
+          or(
+            profileIds.length > 0 ? inArray(companyProfilesTable.id, profileIds) : sql`false`,
+            authorIds.length > 0 ? inArray(companyProfilesTable.userId, authorIds) : sql`false`,
+          )!,
+        ));
+      for (const p of rows) {
+        const info = { companyName: p.companyName, phone: p.phone };
+        profileById.set(p.id, info);
+        profileByUser.set(p.userId, info);
+      }
+    } catch { /* company schema yoksa devam */ }
+  }
+
   res.json({
-    listings: listings.map(l => ({
-      id: l.id, title: l.title, company: l.company, city: l.city, salary: l.salary,
-      workType: l.workType, description: l.description, requirements: l.requirements,
-      status: l.status, isFeatured: l.isFeatured, cardTheme: l.cardTheme, likeCount: l.likeCount,
-      applyUrl: l.applyUrl, sourceTag: l.sourceTag,
-      expiresAt: l.expiresAt?.toISOString() ?? null, createdAt: l.createdAt.toISOString(),
-      autoDeleteOnExpiry: l.autoDeleteOnExpiry ?? true,
-    })),
+    listings: listings.map((l) => {
+      const author = l.authorId ? authorMap.get(l.authorId) : undefined;
+      const profile = (l.companyProfileId ? profileById.get(l.companyProfileId) : undefined)
+        ?? (l.authorId ? profileByUser.get(l.authorId) : undefined);
+      const companyFromProfile = profile?.companyName?.trim() || "";
+      const company = companyFromProfile || l.company || "Belirtilmedi";
+      const isUserListing = !!l.authorId && (!l.sourceTag || !(BOT_SOURCE_TAGS as readonly string[]).includes(l.sourceTag));
+      return {
+        id: l.id, title: l.title, company, city: l.city, salary: l.salary,
+        workType: l.workType, description: l.description, requirements: l.requirements,
+        status: l.status, isFeatured: l.isFeatured, cardTheme: l.cardTheme, likeCount: l.likeCount,
+        applyUrl: l.applyUrl, sourceTag: l.sourceTag,
+        sourceUrl: l.sourceUrl ?? null,
+        messageId: l.messageId ?? null,
+        featuredUntil: l.featuredUntil?.toISOString() ?? null,
+        authorId: l.authorId ?? null,
+        authorUsername: author?.username ?? null,
+        authorDisplayName: author?.displayName ?? null,
+        companyProfileName: companyFromProfile || null,
+        companyPhone: profile?.phone ?? null,
+        contactName: author?.fullName || author?.displayName || null,
+        isUserListing,
+        expiresAt: l.expiresAt?.toISOString() ?? null, createdAt: l.createdAt.toISOString(),
+        autoDeleteOnExpiry: l.autoDeleteOnExpiry ?? true,
+      };
+    }),
     total: countResult[0]?.count ?? 0,
   });
 });
@@ -1733,6 +1914,11 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
   if (!title || !company || !city || !workType) { res.status(400).json({ error: "Başlık, şirket, şehir ve çalışma şekli zorunludur" }); return; }
   const { assignCoordsFromCity } = await import("../lib/nearby-listings");
   const coords = assignCoordsFromCity(String(city));
+  const { resolveListingSourceOnCreate } = await import("../lib/listing-source");
+  const { listingSourceInsertFields, logListingSourceHistory, logListingPriority } = await import("../lib/listing-rank");
+  const { ensureListingSourceSchema } = await import("../lib/listing-source-schema");
+  try { await ensureListingSourceSchema(); } catch { /* ignore */ }
+  const sourceResolved = resolveListingSourceOnCreate({ isAdminCreate: true });
   const [listing] = await db.insert(listingsTable).values({
     title: String(title), company: String(company), city: String(city), workType: String(workType),
     salary: salary ? String(salary) : null, description: description ? String(description) : null,
@@ -1742,14 +1928,22 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
     expiresAt: expiresAt ? new Date(String(expiresAt)) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
     authorId: req.user.id,
+    publishedAt: new Date(),
+    ...listingSourceInsertFields(sourceResolved),
     ...(coords ?? {}),
   }).returning();
+  if (listing) {
+    void logListingSourceHistory(listing.id, sourceResolved);
+    if (sourceResolved.directPriorityUntil) {
+      void logListingPriority(listing.id, "admin_created", new Date(), sourceResolved.directPriorityUntil, "create", req.user.id);
+    }
+  }
   if (perm.shouldDecrement && perm.grantId) {
     await db.update(listingPublishGrantsTable)
       .set({ usesRemaining: sql`${listingPublishGrantsTable.usesRemaining} - 1` })
       .where(eq(listingPublishGrantsTable.id, perm.grantId));
   }
-  res.status(201).json({ id: listing!.id, title: listing!.title, status: listing!.status });
+  res.status(201).json({ id: listing!.id, title: listing!.title, status: listing!.status, sourceType: listing!.sourceType });
 });
 
 router.patch("/admin/listings/:id/status", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
@@ -1761,10 +1955,56 @@ router.patch("/admin/listings/:id/status", authMiddleware, requireAdminOrModerat
     updates.status = status;
     updates.isActive = status === "active";
   }
-  if (isFeatured !== undefined) updates.isFeatured = Boolean(isFeatured);
+  if (isFeatured !== undefined) {
+    const next = Boolean(isFeatured);
+    updates.isFeatured = next;
+    if (next) {
+      updates.featuredUntil = new Date(Date.now() + STAFF_FEATURE_DAYS * 24 * 60 * 60 * 1000);
+      updates.featuredIsFree = false;
+    } else {
+      updates.featuredUntil = null;
+      updates.featuredIsFree = false;
+    }
+  }
   if (cardTheme !== undefined) updates.cardTheme = normalizeListingCardTheme(cardTheme);
-  await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id));
-  res.json({ success: true });
+  const [row] = await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id)).returning();
+  res.json({
+    success: true,
+    isFeatured: row?.isFeatured ?? false,
+    featuredUntil: row?.featuredUntil?.toISOString() ?? null,
+    featureDays: STAFF_FEATURE_DAYS,
+  });
+});
+
+/** Admin/mod: 3 gün öne çıkar (toggle değil, açıkça feature) */
+router.post("/admin/listings/:id/feature", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const until = new Date(Date.now() + STAFF_FEATURE_DAYS * 24 * 60 * 60 * 1000);
+  const [row] = await db.update(listingsTable).set({
+    isFeatured: true,
+    featuredUntil: until,
+    featuredIsFree: false,
+  }).where(eq(listingsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+  res.json({
+    success: true,
+    message: `İlan ${STAFF_FEATURE_DAYS} gün öne çıkarıldı`,
+    featuredUntil: until.toISOString(),
+    featureDays: STAFF_FEATURE_DAYS,
+  });
+});
+
+router.post("/admin/listings/:id/unfeature", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const [row] = await db.update(listingsTable).set({
+    isFeatured: false,
+    featuredUntil: null,
+    featuredIsFree: false,
+  }).where(eq(listingsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+  res.json({ success: true, message: "Öne çıkarma kaldırıldı" });
 });
 
 router.patch("/admin/listings/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
@@ -1793,16 +2033,31 @@ router.patch("/admin/listings/:id", authMiddleware, requireAdminOrModerator, asy
   if (requirements !== undefined) updates.requirements = requirements == null || String(requirements).trim() === "" ? null : String(requirements);
   if (applyUrl !== undefined) updates.applyUrl = applyUrl == null || String(applyUrl).trim() === "" ? null : String(applyUrl).trim();
   if (status !== undefined && ["active", "pending", "rejected"].includes(String(status))) updates.status = String(status);
-  if (isFeatured !== undefined) updates.isFeatured = Boolean(isFeatured);
+  if (isFeatured !== undefined) {
+    const next = Boolean(isFeatured);
+    updates.isFeatured = next;
+    if (next) {
+      updates.featuredUntil = new Date(Date.now() + STAFF_FEATURE_DAYS * 24 * 60 * 60 * 1000);
+      updates.featuredIsFree = false;
+    } else {
+      updates.featuredUntil = null;
+      updates.featuredIsFree = false;
+    }
+  }
   if (cardTheme !== undefined) updates.cardTheme = normalizeListingCardTheme(cardTheme);
   if (expiresAt !== undefined) updates.expiresAt = expiresAt ? new Date(String(expiresAt)) : null;
   await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id));
   res.json({ success: true });
 });
 
-router.delete("/admin/listings/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
+router.delete("/admin/listings/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const canDelete = await userHasPermission(req.user!.role, req.user!.id, "listings.soft_delete");
+  if (!canDelete) {
+    res.status(403).json({ error: "Silme yetkiniz yok", code: "FORBIDDEN_PERMISSION", permission: "listings.soft_delete" });
+    return;
+  }
   await db.delete(listingLikesTable).where(eq(listingLikesTable.listingId, id));
   await db.delete(listingFavoritesTable).where(eq(listingFavoritesTable.listingId, id));
   await db.delete(listingsTable).where(eq(listingsTable.id, id));

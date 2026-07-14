@@ -2,12 +2,23 @@ import { Router } from "express";
 import { db, listingsTable, listingLikesTable, listingFavoritesTable, usersTable, adminSettingsTable, chatMessagesTable, notificationsTable, locationFilterTermsTable, companyProfilesTable } from "@workspace/db";
 import { eq, desc, and, sql, ilike, inArray, or, isNull, ne } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin } from "../middlewares/auth";
-import { ensureCompanySchema } from "../lib/company-profiles";
+import { ensureCompanySchema, rememberEmployerBasics } from "../lib/company-profiles";
+import { matchKnownCompanySync, isPlaceholderListingLogo, matchKnownCompanyInBlob } from "../lib/known-companies";
+import { resolveListingSourceOnCreate, listingBadgeMeta, computeRenewPriorityUntil } from "../lib/listing-source";
+import {
+  listingSourceInsertFields,
+  logListingSourceHistory,
+  logListingPriority,
+  rankListingsRecommended,
+  publishOrderDate,
+} from "../lib/listing-rank";
+import { ensureListingSourceSchema, ensurePublisherVerifySchema } from "../lib/listing-source-schema";
+import { findAndQueueSimilarBots } from "../lib/listing-merge";
 import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
-import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumber, extractSalary, extractTitle, extractWorkType } from "../lib/job-parsing";
+import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumbers, extractSalary, extractTitle, extractWorkType, formatTelApplyUrl, normalizeSalaryString } from "../lib/job-parsing";
 import { getRegionalDistrictProvinces } from "../lib/location-terms";
 import {
   districtsAndLandmarksForSide,
@@ -355,18 +366,27 @@ function formatListing(
   favIds?: Set<number>,
   authorUsername?: string | null,
   company?: CompanyOverlay | null,
+  opts?: { includeSourceMeta?: boolean },
 ) {
   const isAuth = userId != null;
   const rawDesc = listing.description;
   let rawApplyUrl = listing.applyUrl;
 
-  // Telegram/WA linkine düşme — açıklamadan telefon varsa tel: kullan
+  // Telegram/WA linkine düşme — açıklamadan telefon varsa tel: kullan (tüm numaralar)
   if (rawApplyUrl && /t\.me\/|telegram\.me\/|wa\.me\//i.test(rawApplyUrl)) {
-    const phone = extractPhoneNumber(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`);
-    rawApplyUrl = phone ? `tel:${phone}` : null;
+    const phones = extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`);
+    rawApplyUrl = formatTelApplyUrl(phones);
   } else if (!rawApplyUrl && rawDesc) {
-    const phone = extractPhoneNumber(rawDesc);
-    if (phone) rawApplyUrl = `tel:${phone}`;
+    const phones = extractPhoneNumbers(`${rawDesc}\n${listing.requirements ?? ""}\n${listing.title}`);
+    if (phones.length) rawApplyUrl = formatTelApplyUrl(phones);
+  } else if (rawApplyUrl?.startsWith("tel:")) {
+    // applyUrl + açıklamadaki ekstra numaraları birleştir
+    const phones = [
+      ...extractPhoneNumbers(rawApplyUrl),
+      ...extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}`),
+    ];
+    const merged = formatTelApplyUrl(phones);
+    if (merged) rawApplyUrl = merged;
   }
 
   // Mask sensitive info for unauthenticated users
@@ -379,9 +399,28 @@ function formatListing(
   PHONE_MASK_RE.lastIndex = 0;
   NAME_AFTER_LABEL_RE.lastIndex = 0;
 
-  // Şirket adı/logo: profil varsa dinamik; sahte/auto görsel enjekte etme
-  const companyName = company?.companyName || listing.company || "Belirtilmedi";
-  const companyLogoUrl = company?.logoPath || listing.companyLogoUrl || null;
+  // Şirket adı/logo: profil varsa dinamik; bilinen marka kataloğu; sahte SVG enjekte etme
+  let companyName = company?.companyName || listing.company || "Belirtilmedi";
+  let companyLogoUrl = company?.logoPath || listing.companyLogoUrl || null;
+  let companyVerified = company?.isVerified ?? false;
+
+  try {
+    if (isPlaceholderListingLogo(companyLogoUrl)) {
+      const brand =
+        matchKnownCompanySync(companyName) ||
+        matchKnownCompanyInBlob(`${companyName} ${listing.title} ${listing.description ?? ""}`);
+      if (brand) {
+        companyLogoUrl = brand.logoUrl;
+        companyVerified = true;
+        const cn = (companyName || "").toLocaleLowerCase("tr-TR");
+        if (!cn || cn.includes("belirtilmedi") || cn.includes("belirtilmemiş") || cn.includes("belirtilmemis")) {
+          companyName = brand.name;
+        }
+      }
+    } else if (matchKnownCompanySync(companyName) || matchKnownCompanyInBlob(companyName)) {
+      companyVerified = true;
+    }
+  } catch { /* ignore */ }
 
   return {
     id: listing.id,
@@ -403,9 +442,32 @@ function formatListing(
     contactInfoMasked: !isAuth && hasSensitiveInfo(rawDesc, rawApplyUrl),
     companyLogoUrl,
     companyProfileId: company?.id ?? listing.companyProfileId ?? null,
-    companyVerified: company?.isVerified ?? false,
+    companyVerified,
     authorId: listing.authorId,
     authorUsername: authorUsername ?? null,
+    sourceTag: listing.sourceTag ?? null,
+    sourceType: listing.sourceType ?? null,
+    sourceName: listing.sourceName ?? null,
+    verifiedPublisher: !!listing.verifiedPublisher,
+    directPriorityUntil: listing.directPriorityUntil ? listing.directPriorityUntil.toISOString() : null,
+    freshnessConfirmedAt: listing.freshnessConfirmedAt ? listing.freshnessConfirmedAt.toISOString() : null,
+    lastCheckedAt: listing.lastCheckedAt
+      ? listing.lastCheckedAt.toISOString()
+      : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
+    sourcePublishedAt: listing.sourcePublishedAt
+      ? listing.sourcePublishedAt.toISOString()
+      : null,
+    badges: listingBadgeMeta(listing),
+    // Bot kaynak linki: herkese (nofollow önerilir FE'de); admin meta ayrı
+    ...(listing.sourceType === "bot_imported" && listing.sourceUrl
+      ? { sourceUrl: listing.sourceUrl }
+      : {}),
+    ...(opts?.includeSourceMeta
+      ? {
+          sourceUrl: listing.sourceUrl ?? null,
+          messageId: listing.messageId ?? null,
+        }
+      : {}),
     isLikedByMe: userId != null && likedIds != null ? likedIds.has(listing.id) : false,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     expiresAt: listing.expiresAt ? listing.expiresAt.toISOString() : null,
@@ -481,6 +543,14 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   const city = req.query["city"] as string | undefined;
   const search = req.query["search"] as string | undefined;
   const featured = req.query["featured"] === "true";
+  const sortRaw = String(req.query["sort"] ?? "recommended").toLowerCase();
+  const sort = sortRaw === "newest" || sortRaw === "oldest" || sortRaw === "recommended"
+    ? sortRaw
+    : "recommended";
+
+  try {
+    await ensureListingSourceSchema();
+  } catch { /* ignore */ }
 
   const conditions = [];
   if (featured) conditions.push(eq(listingsTable.isFeatured, true));
@@ -492,7 +562,9 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   conditions.push(eq(listingsTable.status, "active"));
   conditions.push(eq(listingsTable.isActive, true));
   conditions.push(realListingFilter());
-  // Sitede görünme: siteye eklenme tarihine göre 30 gün (kaynak mesaj tarihi değil)
+  // Birleştirilmiş bot kopyalarını gizle
+  conditions.push(isNull(listingsTable.mergedIntoListingId));
+  // Sitede görünme: siteye eklenme tarihine göre 15 gün (kaynak mesaj tarihi değil)
   const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
   conditions.push(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
 
@@ -507,12 +579,33 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const [listings, countResult] = await Promise.all([
-    db.select().from(listingsTable).where(whereClause).orderBy(desc(listingsTable.isFeatured), desc(listingsTable.createdAt)).limit(limit).offset(offset),
-    db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(whereClause),
-  ]);
-
+  const countResult = await db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(whereClause);
   const total = countResult[0]?.count ?? 0;
+
+  let listings: (typeof listingsTable.$inferSelect)[];
+
+  if (sort === "recommended") {
+    // Skor + soft interleave için sayfa penceresinden daha geniş çek
+    const fetchLimit = Math.min(500, Math.max(limit * 5, offset + limit + 80));
+    const pool = await db
+      .select()
+      .from(listingsTable)
+      .where(whereClause)
+      .orderBy(desc(listingsTable.isFeatured), desc(listingsTable.createdAt))
+      .limit(fetchLimit);
+    const ranked = rankListingsRecommended(pool, { featured });
+    listings = ranked.slice(offset, offset + limit);
+  } else if (sort === "oldest") {
+    const pool = await db.select().from(listingsTable).where(whereClause).limit(Math.min(800, offset + limit + 50));
+    pool.sort((a, b) => publishOrderDate(a).getTime() - publishOrderDate(b).getTime());
+    listings = pool.slice(offset, offset + limit);
+  } else {
+    // newest — gerçek yayın tarihi, bonus yok
+    const pool = await db.select().from(listingsTable).where(whereClause).limit(Math.min(800, offset + limit + 50));
+    pool.sort((a, b) => publishOrderDate(b).getTime() - publishOrderDate(a).getTime());
+    listings = pool.slice(offset, offset + limit);
+  }
+
   const userId = req.user?.id;
 
   let likedIds = new Set<number>();
@@ -548,6 +641,7 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
     total,
     page,
     limit,
+    sort,
   });
 });
 
@@ -599,21 +693,24 @@ router.post("/listings/parse", authMiddleware, async (req, res): Promise<void> =
   const gender = extractGender(text);
   const benefits = extractBenefits(text);
   const title = extractTitle(text);
-  const salary = extractSalary(text);
-  const phone = extractPhoneNumber(text) ?? "";
+  const salaryRaw = extractSalary(text);
+  const salary = salaryRaw ? (normalizeSalaryString(salaryRaw) ?? salaryRaw) : "";
+  const phones = extractPhoneNumbers(text);
+  const phone = phones[0] ?? "";
   res.json({
     title,
     company: extractCompany(text, "Belirtilmedi"),
     city: location.display ?? location.city ?? "Türkiye",
     district: location.district ?? location.neighborhood ?? "",
     workType: extractWorkType(text),
-    salary: salary ?? "",
+    salary,
     benefits: benefits.join(", "),
     gender: gender ?? "",
     description: text.trim(),
-    contactPhone: phone,
+    contactPhone: phones.join(", "),
+    contactPhones: phones,
     contactName: "",
-    applyUrl: phone ? `tel:${phone}` : "",
+    applyUrl: formatTelApplyUrl(phones) ?? "",
     requirements: buildListingRequirements({ gender, location, benefits, source: "Kullanıcı ilanı" }),
     companyLogoUrl: createSmartListingImage(text, title),
   });
@@ -628,7 +725,7 @@ router.get("/listing-images/:filename", (req, res): void => {
 });
 
 router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
-  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme, autoDeleteOnExpiry } = req.body as Record<string, string | boolean | undefined>;
+  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme, autoDeleteOnExpiry, contactName } = req.body as Record<string, string | boolean | undefined>;
 
   if (!title || !city) {
     res.status(400).json({ error: "Başlık ve şehir zorunludur" });
@@ -655,18 +752,54 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
 
   if (!resolvedCompany) resolvedCompany = "Belirtilmedi";
 
+  const phones = extractPhoneNumbers([
+    typeof applyUrl === "string" ? applyUrl : "",
+    typeof description === "string" ? description : "",
+    typeof requirements === "string" ? requirements : "",
+  ].join("\n"));
+  const resolvedApplyUrl = formatTelApplyUrl(phones)
+    ?? (typeof applyUrl === "string" && applyUrl.trim() && !/^tel:/i.test(applyUrl) ? applyUrl.trim() : null);
+  const resolvedContactName = typeof contactName === "string"
+    ? contactName.split(/[,;\n|]+/).map((s) => s.trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 8).join(", ")
+    : "";
+
+  let resolvedRequirements = typeof requirements === "string" ? requirements : null;
+  if (resolvedContactName) {
+    const lines = (resolvedRequirements ?? "").split("\n").filter((l) => !/^Yetkili\s*:/i.test(l.trim()));
+    lines.push(`Yetkili: ${resolvedContactName}`);
+    resolvedRequirements = lines.filter(Boolean).join("\n");
+  }
+
   const { assignCoordsFromCity } = await import("../lib/nearby-listings");
   const coords = assignCoordsFromCity(String(city));
+
+  const normalizedSalary = typeof salary === "string" && salary.trim()
+    ? (normalizeSalaryString(salary) ?? salary.trim())
+    : null;
+
+  try {
+    await ensureListingSourceSchema();
+    await ensurePublisherVerifySchema();
+  } catch { /* ignore */ }
+
+  const [authorRow] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);
+  const sourceResolved = resolveListingSourceOnCreate({
+    author: authorRow ?? {
+      id: req.user!.id,
+      username: req.user!.username,
+      role: req.user!.role,
+    },
+  });
 
   const [listing] = await db.insert(listingsTable).values({
     title,
     company: resolvedCompany,
     city: String(city),
-    salary: salary ?? null,
+    salary: normalizedSalary,
     workType: workType ?? "Tam Zamanlı",
     description: description ?? null,
-    requirements: requirements ?? null,
-    applyUrl: applyUrl ?? null,
+    requirements: resolvedRequirements,
+    applyUrl: resolvedApplyUrl,
     companyLogoUrl: resolvedLogo,
     companyProfileId,
     cardTheme: canUseCardTheme(req.user) ? normalizeCardTheme(cardTheme) : null,
@@ -675,8 +808,41 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     isActive: true,
     expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
+    publishedAt: new Date(),
+    ...listingSourceInsertFields(sourceResolved),
     ...(coords ?? {}),
   }).returning();
+
+  if (listing) {
+    void logListingSourceHistory(listing.id, sourceResolved);
+    if (sourceResolved.directPriorityUntil) {
+      void logListingPriority(
+        listing.id,
+        sourceResolved.verifiedPublisher ? "direct_verified" : "direct_user",
+        new Date(),
+        sourceResolved.directPriorityUntil,
+        "create",
+        req.user!.id,
+      );
+    }
+    void findAndQueueSimilarBots(listing.id).catch(() => {});
+  }
+
+  // Temel bilgiler sonraki ilanda otomatik gelsin (açıklama hariç)
+  try {
+    const rememberedId = await rememberEmployerBasics(req.user!.id, {
+      companyName: resolvedCompany,
+      phone: resolvedApplyUrl,
+      logoPath: resolvedLogo,
+      contactName: resolvedContactName || null,
+    });
+    if (rememberedId && listing && !listing.companyProfileId) {
+      await db.update(listingsTable).set({ companyProfileId: rememberedId }).where(eq(listingsTable.id, listing.id));
+      listing.companyProfileId = rememberedId;
+    }
+  } catch (e) {
+    console.warn("[listings] rememberEmployerBasics failed", e);
+  }
 
   // İlk 3 ilan → 3 gün ücretsiz öne çıkarma
   try {
@@ -745,7 +911,8 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
           .where(or(eq(usersTable.role, "admin"), eq(usersTable.role, "moderator"))),
       ]);
       if (allUsers.length > 0) {
-        const msg = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city})`;
+        const priorityHours = sourceResolved.verifiedPublisher ? 72 : 48;
+        const msg = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city}) · ${priorityHours}s öncelikli görünürlük`;
         const link = `/ilan/${listing!.id}`;
         await db.insert(notificationsTable).values(
           allUsers.map(u => ({
@@ -773,16 +940,27 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     } catch { /* don't fail */ }
   });
 
-  res.status(201).json(formatListing(
-    listing!,
-    req.user!.id,
-    new Set(),
-    new Set(),
-    req.user!.username,
-    companyProfileId
-      ? { id: companyProfileId, companyName: resolvedCompany, logoPath: resolvedLogo, isVerified: false }
-      : null,
-  ));
+  res.status(201).json({
+    ...formatListing(
+      listing!,
+      req.user!.id,
+      new Set(),
+      new Set(),
+      req.user!.username,
+      companyProfileId
+        ? { id: companyProfileId, companyName: resolvedCompany, logoPath: resolvedLogo, isVerified: !!sourceResolved.verifiedPublisher }
+        : null,
+    ),
+    publishMeta: {
+      sourceType: sourceResolved.sourceType,
+      verifiedPublisher: sourceResolved.verifiedPublisher,
+      priorityHours: sourceResolved.verifiedPublisher ? 72 : 48,
+      directPriorityUntil: sourceResolved.directPriorityUntil?.toISOString() ?? null,
+      message: sourceResolved.verifiedPublisher
+        ? "İlanınız doğrulanmış hesap olarak 72 saat öncelikli gösterilecek. İlk sıra garantisi yoktur."
+        : "İlanınız 48 saat öncelikli gösterilecek. İlk sıra garantisi yoktur.",
+    },
+  });
 });
 
 router.get("/listings/stats/summary", async (_req, res): Promise<void> => {
@@ -848,6 +1026,7 @@ router.get("/listings/:id", optionalAuthMiddleware, async (req, res): Promise<vo
   }
 
   const companyMap = await loadCompanyOverlays([listing]);
+  const isAdmin = req.user?.role === "admin";
   res.json({
     ...formatListing(
       listing,
@@ -856,6 +1035,7 @@ router.get("/listings/:id", optionalAuthMiddleware, async (req, res): Promise<vo
       isFavoritedByMe ? new Set([id]) : new Set(),
       authorUsername,
       companyMap.get(listing.id) ?? null,
+      { includeSourceMeta: isAdmin },
     ),
   });
 });
@@ -958,7 +1138,72 @@ router.post("/listings/:id/republish", authMiddleware, async (req, res): Promise
   const newExpiry = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
   const now = new Date();
   const [updated] = await db.update(listingsTable)
-    .set({ status: "active", isActive: true, expiresAt: newExpiry, publishedAt: now, updatedAt: now })
+    .set({ status: "active", isActive: true, expiresAt: newExpiry, publishedAt: now, updatedAt: now, freshnessConfirmedAt: now })
+    .where(eq(listingsTable.id, id))
+    .returning();
+  const companyMap = await loadCompanyOverlays([updated!]);
+  res.json(formatListing(updated!, req.user!.id, new Set(), new Set(), req.user!.username, companyMap.get(updated!.id) ?? null));
+});
+
+/** Owner: yenile (24h cooldown) */
+router.post("/listings/:id/renew", authMiddleware, async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+  const id = parseInt(rawId ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const [listing] = await db.select().from(listingsTable).where(eq(listingsTable.id, id));
+  if (!listing) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+  if (listing.authorId !== req.user!.id && req.user!.role !== "admin") {
+    res.status(403).json({ error: "Bu ilanı yenileme yetkiniz yok" }); return;
+  }
+  if (listing.sourceType === "bot_imported") {
+    res.status(400).json({ error: "Bot ilanları yenilenemez" }); return;
+  }
+  const now = new Date();
+  if (listing.lastRenewedAt) {
+    const elapsed = now.getTime() - new Date(listing.lastRenewedAt).getTime();
+    if (elapsed < 24 * 60 * 60 * 1000) {
+      const waitH = Math.ceil((24 * 60 * 60 * 1000 - elapsed) / 3_600_000);
+      res.status(429).json({ error: `Yenileme için ${waitH} saat bekleyin`, retryAfterHours: waitH }); return;
+    }
+  }
+  const verified = !!listing.verifiedPublisher;
+  const priorityUntil = computeRenewPriorityUntil(verified, now);
+  const newExpiry = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const [updated] = await db.update(listingsTable)
+    .set({
+      status: "active",
+      isActive: true,
+      lastRenewedAt: now,
+      freshnessConfirmedAt: now,
+      directPriorityUntil: priorityUntil,
+      expiresAt: newExpiry,
+      updatedAt: now,
+    })
+    .where(eq(listingsTable.id, id))
+    .returning();
+  void logListingPriority(id, verified ? "renew_verified" : "renew", now, priorityUntil, "renew", req.user!.id);
+  const companyMap = await loadCompanyOverlays([updated!]);
+  res.json({
+    ...formatListing(updated!, req.user!.id, new Set(), new Set(), req.user!.username, companyMap.get(updated!.id) ?? null),
+    renewMeta: {
+      priorityHours: verified ? 24 : 12,
+      directPriorityUntil: priorityUntil.toISOString(),
+    },
+  });
+});
+
+/** Owner: pasife al */
+router.patch("/listings/:id/deactivate", authMiddleware, async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+  const id = parseInt(rawId ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  const [listing] = await db.select().from(listingsTable).where(eq(listingsTable.id, id));
+  if (!listing) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+  if (listing.authorId !== req.user!.id && req.user!.role !== "admin") {
+    res.status(403).json({ error: "Bu ilanı pasife alma yetkiniz yok" }); return;
+  }
+  const [updated] = await db.update(listingsTable)
+    .set({ isActive: false, status: "inactive", updatedAt: new Date() })
     .where(eq(listingsTable.id, id))
     .returning();
   const companyMap = await loadCompanyOverlays([updated!]);

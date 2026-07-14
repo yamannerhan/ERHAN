@@ -13,7 +13,7 @@ export function BottomNav() {
     { icon: Home, label: "Ana Sayfa", path: "/" },
     { icon: Search, label: "İlanlar", path: "/ilanlar" },
     { icon: PlusCircle, label: "İlan Oluştur", path: "/ilan-ekle" },
-    { icon: Clock, label: "Part Time", path: "/part-time" },
+    { icon: Clock, label: "İş Arayanlar", path: "/part-time" },
     { icon: FileText, label: "CV Oluştur", path: "/cv-olustur" },
     { icon: Headphones, label: "Destek", path: "/destek" },
   ];

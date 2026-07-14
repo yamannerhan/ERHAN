@@ -24,6 +24,7 @@ const Destek = lazy(() => import("@/pages/destek"));
 const CvOlustur = lazy(() => import("@/pages/cv-olustur"));
 const PartTime = lazy(() => import("@/pages/part-time"));
 const NearbyListings = lazy(() => import("@/pages/nearby-listings"));
+const FirmaBasvurusu = lazy(() => import("@/pages/firma-basvurusu"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function lazyNamed<T extends ComponentType>(
@@ -61,6 +62,7 @@ function Router() {
           <Route path="/kayit" component={Register} />
           <Route path="/profil/:username" component={Profile} />
           <Route path="/ilan-ekle">{() => <RequireAuth component={AddListing} />}</Route>
+          <Route path="/firma-basvurusu">{() => <RequireAuth component={FirmaBasvurusu} />}</Route>
           <Route path="/bildirimler" component={Notifications} />
           <Route path="/favoriler" component={Favorites} />
           <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>

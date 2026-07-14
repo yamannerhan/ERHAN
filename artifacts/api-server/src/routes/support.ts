@@ -11,7 +11,7 @@ import {
 } from "@workspace/db";
 import { eq, desc, and, sql, inArray, isNull } from "drizzle-orm";
 import { authMiddleware, requireAdminOrModerator } from "../middlewares/auth";
-import { emitRealtime } from "../lib/realtime";
+import { emitRealtime, emitRealtimeToRoom, emitRealtimeToUser } from "../lib/realtime";
 
 const router = Router();
 
@@ -419,6 +419,11 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
     if (!isInternalNote) {
       if (staff) {
         patch.status = "answered";
+        if (["resolved", "closed", "cancelled"].includes(ticket.status)) {
+          patch.reopenedAt = new Date();
+          patch.closedAt = null;
+          patch.resolvedAt = null;
+        }
         if (!ticket.firstResponseAt) patch.firstResponseAt = new Date();
         await db.insert(notificationsTable).values({
           userId: ticket.userId,
@@ -456,8 +461,9 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
     const [user] = await db.select({ username: usersTable.username, avatarUrl: usersTable.avatarUrl, role: usersTable.role })
       .from(usersTable).where(eq(usersTable.id, userId));
 
-    res.status(201).json({
+    const payload = {
       id: msg!.id,
+      ticketId: id,
       message: msg!.message,
       isStaff: staff,
       isInternalNote,
@@ -466,7 +472,27 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
       avatarUrl: user?.avatarUrl ?? null,
       role: user?.role ?? null,
       createdAt: msg!.createdAt.toISOString(),
+      status: patch.status ?? ticket.status,
+    };
+
+    // Canlı destek: açık thread'lere anında düşsün
+    emitRealtimeToRoom(`support:ticket:${id}`, "support:message", payload);
+    emitRealtime("support:message", payload);
+    emitRealtime("support:ticket-update", {
+      ticketId: id,
+      status: payload.status,
+      lastMessageAt: payload.createdAt,
+      preview: payload.message.slice(0, 120),
+      fromUserId: userId,
+      isStaff: staff,
     });
+    if (!staff) {
+      // staff bildirimleri notifyStaff içinde
+    } else if (!isInternalNote) {
+      emitRealtimeToUser(ticket.userId, "support:message", payload);
+    }
+
+    res.status(201).json(payload);
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
