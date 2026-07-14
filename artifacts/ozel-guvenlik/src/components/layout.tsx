@@ -10,6 +10,7 @@ import {
   FileText, User as UserIcon, Bookmark,
 } from "lucide-react";
 import "./mobile-bottom-nav.css";
+import "@/styles/desktop-home.css";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -364,11 +365,11 @@ export function Layout({
             </>
           ) : (
           <>
-          {/* Hamburger */}
+          {/* Hamburger — mobil/tablet only */}
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="og-icon-btn p-2 -ml-1 shrink-0"
+            className="og-icon-btn og-ham-btn p-2 -ml-1 shrink-0"
             aria-label="Menüyü Aç"
           >
             <Menu className="w-5 h-5" />
@@ -385,8 +386,9 @@ export function Layout({
                 <span className="og-gold-gradient">Güvenlik</span>
                 <span className="og-logo-tld">.online</span>
               </span>
+              <span className="og-header-slogan">Türkiye'nin Özel Güvenlik İş İlanları Platformu</span>
               {!isLite && (
-              <span className="flex items-center gap-1 text-[10px] mt-0.5">
+              <span className="flex items-center gap-1 text-[10px] mt-0.5 lg:hidden">
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-400" />
@@ -399,9 +401,9 @@ export function Layout({
             </>
           )}
 
-          {/* Desktop nav */}
+          {/* Desktop nav — ≥1024 via CSS (.og-desktop-nav) */}
           {!customHeader && (
-          <nav className="hidden xl:flex items-center gap-1 ml-6 mr-auto">
+          <nav className="og-desktop-nav hidden lg:flex items-center gap-1 ml-6 mr-auto">
             {[
               { label: "Ana Sayfa", path: "/" },
               { label: "İlanlar", path: "/ilanlar" },
@@ -415,8 +417,8 @@ export function Layout({
                 <Link
                   key={item.path}
                   href={item.path}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    active ? "og-gold-gradient bg-amber-400/10" : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                  className={`og-desktop-nav__link px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    active ? "is-active og-gold-gradient" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {item.label}
@@ -569,8 +571,8 @@ export function Layout({
               </AnimatePresence>
             </div>
 
-            {/* Avatar */}
-            <Link href={user ? `/profil/${user.username}` : "/giris"} className="shrink-0 ml-1">
+            {/* Avatar + greeting */}
+            <Link href={user ? `/profil/${user.username}` : "/giris"} className="og-header-user shrink-0 ml-1 flex items-center gap-2">
               {user?.avatarUrl ? (
                 <img src={user.avatarUrl} alt={user.username} className="w-8 h-8 rounded-full object-cover ring-2 ring-amber-400/40 hover:ring-amber-400 transition-all" />
               ) : user ? (
@@ -581,6 +583,11 @@ export function Layout({
                 <div className="w-8 h-8 rounded-full bg-white/10 border border-white/20 flex items-center justify-center hover:bg-white/15 transition-all">
                   <UserIcon className="w-4 h-4 text-muted-foreground" />
                 </div>
+              )}
+              {user && (
+                <span className="og-header-greet hidden lg:inline text-sm font-semibold text-[var(--text-secondary,#AEB7C5)]">
+                  Merhaba, <span className="text-[var(--text-primary,#F7F8FA)]">{user.username}</span>
+                </span>
               )}
             </Link>
           </div>

@@ -1,8 +1,18 @@
-/** Görüntü modu: varsayılan Lite — yalnızca kullanıcı Pro seçerse full */
+/** Görüntü modu: varsayılan Lite — yalnızca kullanıcı Pro seçerse full.
+ *  Masaüstü (≥1024px): her zaman Pro; mobil tercih localStorage'da korunur. */
 
 export type DisplayModePreference = "lite" | "full";
 
 const LS_MODE = "og_display_mode";
+
+export function isDesktopViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.matchMedia("(min-width: 1024px)").matches;
+  } catch {
+    return false;
+  }
+}
 
 export function getDisplayModePreference(): DisplayModePreference {
   try {
@@ -45,7 +55,7 @@ export function markSlowBoot(): void {
   } catch { /* ignore */ }
 }
 
-/** @deprecated Herkes lite; geriye uyumluluk */
+/** @deprecated */
 export function detectAutoLite(): boolean {
   return getDisplayModePreference() !== "full";
 }
@@ -55,7 +65,9 @@ export function persistLiteIfLowEnd(): boolean {
   return getDisplayModePreference() !== "full";
 }
 
+/** Etkin lite: masaüstünde her zaman false */
 export function isLiteMode(): boolean {
+  if (isDesktopViewport()) return false;
   return getDisplayModePreference() !== "full";
 }
 

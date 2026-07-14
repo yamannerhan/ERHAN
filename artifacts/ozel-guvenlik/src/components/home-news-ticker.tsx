@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Link } from "wouter";
+import { Megaphone } from "lucide-react";
 import { useLiteMarquee } from "@/hooks/use-lite-marquee";
 import "@/styles/lite-marquee.css";
 import "./home-news-ticker.css";
@@ -52,20 +54,28 @@ export function HomeNewsTicker({ lines, variant = "marquee" }: HomeNewsTickerPro
 
   return (
     <div className="og-home-ticker lite-marquee-viewport" role="marquee" aria-live="off">
-      <div className="og-home-ticker__fade og-home-ticker__fade--left" aria-hidden />
-      <div
-        ref={trackRef}
-        className="og-home-ticker__track lite-marquee-track"
-        style={{ "--lite-marquee-duration": "48s" } as CSSProperties}
-      >
-        {marqueeItems.map((text, i) => (
-          <span key={`${i}-${text.slice(0, 24)}`} className="og-home-ticker__item">
-            <span className="og-home-ticker__dot" aria-hidden>●</span>
-            {text}
-          </span>
-        ))}
+      <div className="og-home-ticker__megaphone desktop-home desktop-home--flex" aria-hidden>
+        <Megaphone size={16} />
       </div>
-      <div className="og-home-ticker__fade og-home-ticker__fade--right" aria-hidden />
+      <div className="og-home-ticker__inner">
+        <div className="og-home-ticker__fade og-home-ticker__fade--left" aria-hidden />
+        <div
+          ref={trackRef}
+          className="og-home-ticker__track lite-marquee-track"
+          style={{ "--lite-marquee-duration": "48s" } as CSSProperties}
+        >
+          {marqueeItems.map((text, i) => (
+            <span key={`${i}-${text.slice(0, 24)}`} className="og-home-ticker__item">
+              <span className="og-home-ticker__dot" aria-hidden>●</span>
+              {text}
+            </span>
+          ))}
+        </div>
+        <div className="og-home-ticker__fade og-home-ticker__fade--right" aria-hidden />
+      </div>
+      <Link href="/bildirimler" className="og-home-ticker__all-btn desktop-home desktop-home--inline-flex">
+        Tüm Duyurular
+      </Link>
     </div>
   );
 }

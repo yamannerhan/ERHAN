@@ -25,6 +25,8 @@ import { HomeNewsTicker } from "@/components/home-news-ticker";
 import { getHomeTickerLines } from "@/lib/home-ticker";
 import { DisplayModeToggle } from "@/components/display-mode-toggle";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
+import { DesktopListingsTable } from "@/components/desktop-listings-table";
+import "@/styles/desktop-home.css";
 
 const BASE_URL = "https://ozelguvenlik.online";
 
@@ -494,25 +496,27 @@ export default function Home() {
         variant={isLite ? "static" : "marquee"}
       />
       <div className="og-home-top">
-        <div className="og-home-mode-row">
+        <div className="og-home-mode-row mobile-home">
           <DisplayModeToggle />
         </div>
 
-        {!isLite && banners.length > 0 && (
-          <div className="og-home-banner">
+        {/* Pro: her ekranda; Lite mobilde gizli, masaüstünde Pro zorlandığı için görünür */}
+        {banners.length > 0 && !isLite && (
+          <div className="og-home-banner desktop-hero">
             <BannerCarousel banners={banners} />
           </div>
         )}
 
         <div className="og-home-body">
-        {/* ── Hızlı kartlar (referans) ───────────────────────── */}
+        {/* ── Hızlı kartlar — kart HTML/CSS'ine dokunulmaz; yalnızca dış wrap ── */}
+        <div className="desktop-coming-soon-wrap">
         <HomeQuickCards
           totalCount={totalCount}
           showNewsBadge={announcements.length > 0 || newToday > 0}
           onTotalClick={scrollToListings}
           onNearClick={handleNearClick}
         />
-
+        </div>
         {/* ── Filter Pills ─────────────────────────────────── */}
         <section className="og-pills hide-scrollbar">
           {QUICK_CITY_PILLS.map(p => {
@@ -623,10 +627,14 @@ export default function Home() {
           </section>
         )}
 
-        <LiveSupportBar />
+        <div className="mobile-home">
+          <LiveSupportBar />
+        </div>
 
         {/* ── Tüm İlanlar ──────────────────────────────────── */}
-        <section ref={listingsTopRef}>
+        <section ref={listingsTopRef} className="desktop-section">
+          {/* Mobil kart listesi */}
+          <div className="mobile-home">
           <div className="flex items-center justify-between mb-1">
             <h2 className="og-section-title">
               Tüm İlanlar <span className="og-text-muted text-sm font-semibold">({totalCount})</span>
@@ -712,6 +720,31 @@ export default function Home() {
               })
             )}
           </div>
+          </div>
+
+          {/* Masaüstü tablo — aynı sorted verisi */}
+          {!isLoading && sorted.length > 0 && (
+            <DesktopListingsTable
+              listings={sorted}
+              totalCount={totalCount}
+              sortNewest={sortNewest}
+              onToggleSort={() => setSortNewest((s) => (s === "new" ? "old" : "new"))}
+              onNavigate={saveHomeScroll}
+              savedIds={favIds}
+              onToggleSave={handleToggleFav}
+            />
+          )}
+          {isLoading && (
+            <div className="desktop-home desktop-listings-table" aria-hidden>
+              <div className="og-list-skeleton" style={{ minHeight: 200 }} />
+            </div>
+          )}
+          {!isLoading && sorted.length === 0 && (
+            <div className="desktop-home og-empty">
+              <Briefcase className="w-8 h-8 mb-2 opacity-40" />
+              <p className="text-sm font-semibold">Bu filtreye uygun ilan bulunamadı</p>
+            </div>
+          )}
 
           {/* Pagination */}
           {!isLoading && totalPages > 1 && (

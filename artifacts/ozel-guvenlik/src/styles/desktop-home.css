@@ -1,0 +1,985 @@
+/* ═══════════════════════════════════════════════════════════════
+   Desktop home layout — active at min-width: 1024px only.
+   Mobile/tablet styles remain untouched below 1024px.
+   Do NOT style .og-ref-quick-card internals here.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 1. Visibility toggles (global, both breakpoints) ─────────── */
+
+.desktop-home {
+  display: none;
+}
+
+.mobile-home {
+  display: block;
+}
+
+@media (min-width: 1024px) {
+  .desktop-home {
+    display: block;
+  }
+
+  .mobile-home {
+    display: none !important;
+  }
+
+  .desktop-home.desktop-home--flex {
+    display: flex;
+  }
+
+  .desktop-home.desktop-home--grid {
+    display: grid;
+  }
+
+  .desktop-home.desktop-home--table {
+    display: table;
+  }
+
+  .desktop-home.desktop-home--inline-flex {
+    display: inline-flex;
+  }
+}
+
+/* ── 2. Desktop design tokens ─────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-app {
+    --page-bg: #0d172b;
+    --header-bg: #080e1b;
+    --card-bg: #111a2b;
+    --card-bg-dark: #0b1220;
+    --card-border: rgba(226, 169, 17, 0.48);
+    --gold: #ffbe0b;
+    --gold-light: #ffd85a;
+    --text-primary: #f7f8fa;
+    --text-secondary: #aeb7c5;
+    --text-muted: #788395;
+    --divider: rgba(255, 255, 255, 0.08);
+
+    background-color: var(--page-bg) !important;
+    color: var(--text-primary);
+    padding-bottom: 0 !important;
+  }
+}
+
+/* ── 3. Overflow guard (desktop only) ─────────────────────────── */
+
+@media (min-width: 1024px) {
+  html,
+  body {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* ── 4. Shell / container widths ──────────────────────────────── */
+
+@media (min-width: 1024px) {
+  :root {
+    --og-shell-max: 1100px;
+    --desktop-shell-pad: 24px;
+  }
+
+  .og-shell,
+  .og-header-inner.og-shell,
+  .og-main.og-shell,
+  .desktop-container {
+    width: 100%;
+    max-width: var(--og-shell-max);
+    margin-inline: auto;
+    padding-left: var(--desktop-shell-pad);
+    padding-right: var(--desktop-shell-pad);
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  .desktop-container {
+    width: min(var(--og-shell-max), calc(100% - 48px));
+  }
+}
+
+@media (min-width: 1200px) {
+  :root {
+    --og-shell-max: 1240px;
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --og-shell-max: 1320px;
+  }
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --og-shell-max: 1400px;
+  }
+}
+
+/* ── 5. Header ────────────────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: 72px;
+    min-height: 72px;
+    background: var(--header-bg, #080e1b) !important;
+    border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.35);
+  }
+
+  .og-header-inner.og-shell {
+    height: 72px;
+    min-height: 72px !important;
+    padding-top: 0;
+    padding-bottom: 0;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .og-header .og-ham-btn {
+    display: none !important;
+  }
+
+  .og-header-slogan {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-muted, #788395);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .og-header-greet {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #f7f8fa);
+    white-space: nowrap;
+  }
+
+  .og-header-greet__chevron {
+    color: var(--text-muted, #788395);
+    flex-shrink: 0;
+  }
+
+  .og-desktop-nav {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    margin-left: 24px;
+    margin-right: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .og-desktop-nav__link {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-secondary, #aeb7c5);
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .og-desktop-nav__link:hover {
+    color: var(--text-primary, #f7f8fa);
+    background: rgba(255, 190, 11, 0.08);
+  }
+
+  .og-desktop-nav__link.is-active {
+    color: var(--gold, #ffbe0b);
+    background: rgba(255, 190, 11, 0.1);
+  }
+
+  .og-desktop-nav__link.is-active::after {
+    content: "";
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 4px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--gold, #ffbe0b);
+  }
+
+  .og-header-actions {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .og-main {
+    padding-bottom: 0;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .og-desktop-nav {
+    gap: 2px;
+    margin-left: 12px;
+  }
+
+  .og-desktop-nav__link {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .og-header-greet__text {
+    display: none;
+  }
+
+  .og-header-slogan {
+    max-width: 180px;
+  }
+}
+
+/* ── 6. Pro/Lite row hidden on desktop (mobile-home wrap) ─────── */
+
+@media (min-width: 1024px) {
+  .og-home-mode-row {
+    display: none !important;
+  }
+}
+
+/* ── 7. News ticker ───────────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-home-ticker {
+    height: 40px;
+    min-height: 40px;
+    max-width: var(--og-shell-max);
+    width: calc(100% - 48px);
+    margin-inline: auto;
+    padding-inline: var(--desktop-shell-pad, 24px);
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    background: var(--card-bg-dark, #0b1220);
+    border-top: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+  }
+
+  .og-home-ticker__inner {
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    height: 100%;
+  }
+
+  .og-home-ticker__icon,
+  .og-home-ticker__megaphone {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    color: var(--gold, #ffbe0b);
+  }
+
+  .og-home-ticker__icon svg,
+  .og-home-ticker__megaphone svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .og-home-ticker__track,
+  .og-home-ticker--static {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .og-home-ticker__item,
+  .og-home-ticker__static-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gold-light, #ffd85a);
+    max-height: 40px;
+  }
+
+  .og-home-ticker__fade--left {
+    background: linear-gradient(to right, var(--card-bg-dark, #0b1220), transparent);
+  }
+
+  .og-home-ticker__fade--right {
+    background: linear-gradient(to left, var(--card-bg-dark, #0b1220), transparent);
+  }
+
+  .og-home-ticker__all-btn {
+    grid-column: 3;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--gold-light, #ffd85a) 0%, var(--gold, #ffbe0b) 100%);
+    color: #0a0e14;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(255, 190, 11, 0.25);
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+
+  .og-home-ticker__all-btn:hover {
+    filter: brightness(1.06);
+  }
+
+  .og-home-ticker__all-btn:active {
+    transform: scale(0.98);
+  }
+}
+
+/* ── 8. Banner / hero ─────────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-home-top {
+    gap: 10px;
+  }
+
+  .og-home-banner,
+  .desktop-hero {
+    width: 100%;
+    max-width: 100%;
+    padding: 10px var(--desktop-shell-pad, 24px) 0;
+    margin: 0;
+    box-sizing: border-box;
+  }
+
+  .og-home-banner .og-banner-carousel,
+  .desktop-hero .og-banner-carousel,
+  .og-home-banner .og-banner-carousel__slide,
+  .desktop-hero .og-banner-carousel__slide {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
+  }
+
+  .og-home-banner .og-banner-carousel,
+  .desktop-hero {
+    aspect-ratio: 3 / 1;
+    min-height: 290px;
+    max-height: 400px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--card-border, rgba(226, 169, 17, 0.48));
+    background: var(--card-bg-dark, #0b1220);
+  }
+
+  .og-home-banner .og-banner-carousel img,
+  .desktop-hero img,
+  .og-banner-carousel__media img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  .og-home-banner .og-banner-carousel button,
+  .desktop-hero .og-banner-carousel button {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: rgba(8, 14, 27, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-size: 18px;
+  }
+
+  .og-home-body {
+    padding: 12px var(--desktop-shell-pad, 24px) 28px;
+    gap: 0;
+  }
+}
+
+/* ── 9. Coming-soon card row wrapper (grid only, not card internals) */
+
+@media (min-width: 1024px) {
+  .desktop-coming-soon-wrap .og-ref-quick-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 14px;
+  }
+
+  .desktop-coming-soon-wrap .og-ref-quick-row > * {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .desktop-coming-soon-wrap .og-ref-quick-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── 10. Filter pills ─────────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .desktop-home .og-pills,
+  .og-home-body .og-pills {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 8px;
+    overflow-x: visible;
+    margin: 14px 0 0;
+    padding: 0;
+    scroll-snap-type: none;
+  }
+
+  .desktop-home .og-pill,
+  .og-home-body .og-pill {
+    height: 34px;
+    padding-inline: 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--card-bg, #111a2b);
+    border: 1px solid rgba(174, 183, 197, 0.22);
+    color: var(--text-secondary, #aeb7c5);
+    box-shadow: none;
+  }
+
+  .desktop-home .og-pill:hover,
+  .og-home-body .og-pill:hover {
+    border-color: rgba(255, 190, 11, 0.45);
+    color: var(--text-primary, #f7f8fa);
+  }
+
+  .desktop-home .og-pill-active,
+  .og-home-body .og-pill-active {
+    height: 34px;
+    background: linear-gradient(180deg, var(--gold-light, #ffd85a) 0%, var(--gold, #ffbe0b) 100%);
+    border-color: transparent;
+    color: #0a0e14;
+    font-weight: 800;
+    box-shadow: 0 4px 12px rgba(255, 190, 11, 0.32);
+  }
+}
+
+/* ── 11. Section spacing & typography ─────────────────────────── */
+
+@media (min-width: 1024px) {
+  .desktop-section {
+    margin-top: 18px;
+  }
+
+  .desktop-section:first-child {
+    margin-top: 14px;
+  }
+
+  .og-section-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary, #f7f8fa);
+  }
+
+  .featured-section-head {
+    margin-bottom: 10px;
+  }
+
+  .featured-section-head__link {
+    font-size: 13px;
+    color: var(--gold, #ffbe0b);
+  }
+
+  .og-sort-btn {
+    font-size: 13px;
+  }
+}
+
+/* ── 12. Featured listings grid ──────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .featured-listings-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .featured-listings-grid > * {
+    min-width: 0;
+  }
+
+  /* Rail → grid conversion when carousel wrapper is reused */
+  .featured-listings-grid .featured-rail-wrap,
+  .featured-listings-grid .featured-rail {
+    overflow: visible;
+    max-width: none;
+  }
+
+  .featured-listings-grid .featured-rail__track {
+    display: contents;
+  }
+
+  .featured-listings-grid .featured-rail__dots,
+  .featured-listings-grid .featured-rail__dot {
+    display: none;
+  }
+
+  .featured-listings-grid .featured-rail__track > .og-job,
+  .featured-listings-grid > .og-job {
+    width: 100%;
+    max-width: none;
+    flex: none;
+    min-height: 150px;
+    max-height: 170px;
+    border-radius: 12px;
+    border-color: var(--card-border, rgba(226, 169, 17, 0.48));
+    background: var(--card-bg, #111a2b);
+  }
+
+  .featured-listings-grid .og-job__title,
+  .featured-listings-grid .og-job--compact .og-job__title {
+    font-size: 15px;
+    font-weight: 700;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .featured-listings-grid .og-job__company,
+  .featured-listings-grid .og-job--compact .og-job__company {
+    font-size: 12px;
+    color: var(--text-muted, #788395);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .featured-listings-grid .og-job__salary,
+  .featured-listings-grid .og-job--compact .og-job__salary {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--gold, #ffbe0b);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .featured-listings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── 13. Hide mobile live-support bar on desktop home ─────────── */
+
+@media (min-width: 1024px) {
+  .og-home-body .og-support-box,
+  .og-home-body > .flex > .og-support-box,
+  .mobile-home .og-support-box {
+    display: none !important;
+  }
+}
+
+/* ── 14. Desktop listings table ───────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .desktop-listings-table {
+    width: 100%;
+    min-width: 0;
+    margin-top: 8px;
+    border-radius: 12px;
+    border: 1px solid var(--card-border, rgba(226, 169, 17, 0.48));
+    background: var(--card-bg, #111a2b);
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.22);
+  }
+
+  .desktop-listings-table__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    background: var(--card-bg-dark, #0b1220);
+  }
+
+  .desktop-listings-table__heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .desktop-listings-table__heading-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary, #f7f8fa);
+    white-space: nowrap;
+  }
+
+  .desktop-listings-table__count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 190, 11, 0.12);
+    border: 1px solid rgba(255, 190, 11, 0.28);
+    color: var(--gold, #ffbe0b);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .desktop-listings-table__controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .desktop-listings-table__sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(174, 183, 197, 0.22);
+    background: var(--card-bg, #111a2b);
+    color: var(--text-secondary, #aeb7c5);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .desktop-listings-table__sort:hover {
+    border-color: rgba(255, 190, 11, 0.4);
+    color: var(--text-primary, #f7f8fa);
+  }
+
+  .desktop-listings-table__view-toggle {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 8px;
+    border: 1px solid rgba(174, 183, 197, 0.22);
+    overflow: hidden;
+  }
+
+  .desktop-listings-table__view-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: none;
+    background: var(--card-bg, #111a2b);
+    color: var(--text-muted, #788395);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .desktop-listings-table__view-btn + .desktop-listings-table__view-btn {
+    border-left: 1px solid rgba(174, 183, 197, 0.18);
+  }
+
+  .desktop-listings-table__view-btn.is-active {
+    background: rgba(255, 190, 11, 0.14);
+    color: var(--gold, #ffbe0b);
+  }
+
+  .desktop-listings-table__view-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .desktop-listings-table__scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .desktop-listings-table table {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .desktop-listings-table thead th {
+    height: 44px;
+    padding: 0 14px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary, #aeb7c5);
+    background: var(--card-bg-dark, #0b1220);
+    border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    white-space: nowrap;
+  }
+
+  .desktop-listings-table thead th:last-child,
+  .desktop-listings-table tbody td:last-child {
+    text-align: right;
+  }
+
+  .desktop-listings-table tbody tr {
+    height: 60px;
+    transition: background-color 0.15s ease;
+  }
+
+  .desktop-listings-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .desktop-listings-table tbody td {
+    padding: 0 14px;
+    vertical-align: middle;
+    font-size: 13px;
+    color: var(--text-secondary, #aeb7c5);
+    border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .desktop-listings-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .desktop-listings-table__title-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .desktop-listings-table__logo {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--card-bg-dark, #0b1220);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .desktop-listings-table__logo-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: rgba(255, 190, 11, 0.1);
+    border: 1px solid rgba(255, 190, 11, 0.22);
+    color: var(--gold, #ffbe0b);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .desktop-listings-table__title-text {
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary, #f7f8fa);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .desktop-listings-table__company {
+    color: var(--text-muted, #788395);
+    font-size: 13px;
+  }
+
+  .desktop-listings-table__location,
+  .desktop-listings-table__type,
+  .desktop-listings-table__date {
+    font-size: 13px;
+    color: var(--text-secondary, #aeb7c5);
+  }
+
+  .desktop-listings-table__salary {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--gold, #ffbe0b);
+    white-space: nowrap;
+  }
+
+  .desktop-listings-table__actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .desktop-listings-table__apply-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--gold-light, #ffd85a) 0%, var(--gold, #ffbe0b) 100%);
+    color: #0a0e14;
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(255, 190, 11, 0.28);
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+
+  .desktop-listings-table__apply-btn:hover {
+    filter: brightness(1.05);
+  }
+
+  .desktop-listings-table__apply-btn:active {
+    transform: scale(0.98);
+  }
+
+  .desktop-listings-table__save-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(174, 183, 197, 0.22);
+    background: var(--card-bg-dark, #0b1220);
+    color: var(--text-secondary, #aeb7c5);
+    cursor: pointer;
+    transition:
+      border-color 0.15s ease,
+      color 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .desktop-listings-table__save-btn:hover {
+    border-color: rgba(255, 190, 11, 0.45);
+    color: var(--gold, #ffbe0b);
+  }
+
+  .desktop-listings-table__save-btn.is-saved {
+    border-color: rgba(255, 190, 11, 0.55);
+    background: rgba(255, 190, 11, 0.12);
+    color: var(--gold, #ffbe0b);
+  }
+
+  .desktop-listings-table__save-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .desktop-listings-table__empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-muted, #788395);
+    font-size: 14px;
+  }
+
+  .desktop-listings-table__pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 16px;
+    border-top: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+    background: var(--card-bg-dark, #0b1220);
+  }
+
+  /* Column width hints */
+  .desktop-listings-table col.col-title { width: 26%; }
+  .desktop-listings-table col.col-company { width: 14%; }
+  .desktop-listings-table col.col-location { width: 14%; }
+  .desktop-listings-table col.col-type { width: 12%; }
+  .desktop-listings-table col.col-salary { width: 10%; }
+  .desktop-listings-table col.col-date { width: 10%; }
+  .desktop-listings-table col.col-actions { width: 14%; }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .desktop-listings-table .desktop-listings-table__col--date,
+  .desktop-listings-table col.col-date,
+  .desktop-listings-table thead th:nth-child(6),
+  .desktop-listings-table tbody td:nth-child(6) {
+    display: none;
+  }
+
+  .desktop-listings-table table {
+    min-width: 720px;
+  }
+}
+
+/* ── 15. Bottom nav removal ───────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-bottom-nav,
+  .mobile-bottom-nav {
+    display: none !important;
+  }
+}
+
+/* ── 16. Chat FAB position ────────────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-chat-fab,
+  .chat-bubble,
+  .og-lite-chat-fab {
+    right: 28px !important;
+    bottom: 28px !important;
+    z-index: 9999;
+  }
+}
+
+/* ── 17. Trust strip on desktop ───────────────────────────────── */
+
+@media (min-width: 1024px) {
+  .og-trust-strip {
+    margin-top: 24px;
+    gap: 12px;
+  }
+
+  .og-trust-strip .og-text {
+    font-size: 13px;
+  }
+
+  .og-trust-strip .og-text-muted {
+    font-size: 11px;
+    color: var(--text-muted, #788395);
+  }
+}

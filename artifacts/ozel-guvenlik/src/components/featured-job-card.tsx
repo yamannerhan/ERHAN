@@ -15,7 +15,7 @@ type CarouselProps = {
   isLite?: boolean;
 };
 
-/** Pro: otomatik kayan şerit | Lite: elle kaydırma, 2'li sıra */
+/** Pro: otomatik kayan şerit | Lite: elle kaydırma | Desktop ≥1024: 3 kolon sabit grid */
 export function FeaturedJobCarousel({
   listings,
   onNavigate,
@@ -25,9 +25,20 @@ export function FeaturedJobCarousel({
 }: CarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
-  const animated = !isLite && listings.length > 1;
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const animated = !isLite && !isDesktop && listings.length > 1;
   const loopItems = animated ? [...listings, ...listings] : listings;
   const durationSec = Math.max(32, listings.length * 10);
+  const desktopItems = listings.slice(0, 3);
 
   useLiteMarquee(trackRef, animated, [listings.map((l) => l.id).join(",")], {
     speedPxPerSec: 30,
@@ -43,8 +54,25 @@ export function FeaturedJobCarousel({
     return () => window.clearInterval(id);
   }, [animated, listings.length, durationSec]);
 
+  if (isDesktop) {
+    return (
+      <div className="featured-listings-grid desktop-home desktop-home--grid">
+        {desktopItems.map((item) => (
+          <JobListingCard
+            key={item.id}
+            listing={item}
+            onNavigate={onNavigate}
+            compact
+            saved={savedIds?.has(item.id) || !!item.isFavoritedByMe}
+            onToggleSave={onToggleSave}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className={`featured-rail-wrap${isLite ? " featured-rail-wrap--lite" : ""}`}>
+    <div className={`featured-rail-wrap mobile-home${isLite ? " featured-rail-wrap--lite" : ""}`}>
       <div className={`featured-rail lite-marquee-viewport${animated ? " featured-rail--auto" : ""}${isLite ? " featured-rail--lite" : ""}`}>
         <div
           ref={trackRef}
