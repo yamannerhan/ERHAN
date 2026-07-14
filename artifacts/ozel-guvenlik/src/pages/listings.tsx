@@ -21,6 +21,12 @@ import { JobListingCard } from "@/components/job-listing-card";
 import { FeaturedJobCarousel } from "@/components/featured-job-card";
 import { DesktopListingsTable } from "@/components/desktop-listings-table";
 import { LiveSupportBar } from "@/components/live-support-bar";
+import {
+  isIstanbulSideLabel,
+  matchesIstanbulSide,
+  resolveIstanbulSideFromLabel,
+  type IstanbulSide,
+} from "@/lib/istanbul-side";
 import "@/components/listings-page.css";
 
 const LISTINGS_STATE_KEY = "listings_page_state";
@@ -112,7 +118,9 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const [page, setPage] = useState(initialCity || initialSearch ? 1 : savedState.page);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const [otherSheetOpen, setOtherSheetOpen] = useState(false);
-  const [activeSubFilter, setActiveSubFilter] = useState<null | "anadolu" | "avrupa">(null);
+  const [activeSubFilter, setActiveSubFilter] = useState<IstanbulSide | null>(() =>
+    resolveIstanbulSideFromLabel(initialCity ?? savedState.city),
+  );
   const [categoryFilter, setCategoryFilter] = useState<CategoryId>("all");
   const [sortNewest, setSortNewest] = useState<"new" | "old">("new");
   const listingsTopRef = useRef<HTMLElement | null>(null);
@@ -123,11 +131,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     if (!initialCity) return;
     setCity(initialCity);
     setPage(1);
-    setActiveSubFilter(
-      initialCity === "Anadolu Yakası" ? "anadolu"
-        : initialCity === "Avrupa Yakası" ? "avrupa"
-          : null,
-    );
+    setActiveSubFilter(resolveIstanbulSideFromLabel(initialCity));
   }, [initialCity]);
 
   useEffect(() => {
@@ -136,11 +140,22 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     setPage(1);
   }, [initialSearch]);
 
+  const sideFilter = activeSubFilter ?? resolveIstanbulSideFromLabel(city);
+
   const effectiveCity = useMemo(() => {
-    if (!city) return undefined;
-    if (city === "Anadolu Yakası" || city === "Avrupa Yakası") return "İstanbul";
-    return city;
-  }, [city]);
+    if (!city && !sideFilter) return undefined;
+    if (sideFilter) {
+      /* API yaka filtresini (ilçe bazlı) destekler — tam SEO etiketini gönder */
+      if (sideFilter === "anadolu") return "İstanbul Anadolu Yakası";
+      return "İstanbul Avrupa Yakası";
+    }
+    if (isIstanbulSideLabel(city)) {
+      return resolveIstanbulSideFromLabel(city) === "anadolu"
+        ? "İstanbul Anadolu Yakası"
+        : "İstanbul Avrupa Yakası";
+    }
+    return city || undefined;
+  }, [city, sideFilter]);
 
   const { data, isLoading, isFetching, refetch } = useGetListings({
     page,
@@ -261,10 +276,12 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
   const displayListings = useMemo(() => {
     let list = [...listings];
-    if (activeSubFilter === "anadolu") list = list.filter(l => /anadolu/i.test(l.city));
-    if (activeSubFilter === "avrupa") list = list.filter(l => /avrupa/i.test(l.city));
-    if (city && !["Anadolu Yakası", "Avrupa Yakası"].includes(city)) {
-      list = list.filter(l => l.city.toLocaleLowerCase("tr-TR").includes(city.toLocaleLowerCase("tr-TR")));
+    if (sideFilter) {
+      list = list.filter((l) => matchesIstanbulSide(l.city, sideFilter));
+    } else if (city && !isIstanbulSideLabel(city)) {
+      list = list.filter((l) =>
+        l.city.toLocaleLowerCase("tr-TR").includes(city.toLocaleLowerCase("tr-TR")),
+      );
     }
     if (categoryFilter !== "all") list = list.filter(l => matchesCategory(l, categoryFilter));
     if (search.trim()) {
@@ -279,7 +296,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
       return sortNewest === "new" ? tb - ta : ta - tb;
     });
     return list;
-  }, [listings, activeSubFilter, city, categoryFilter, search, sortNewest]);
+  }, [listings, sideFilter, city, categoryFilter, search, sortNewest]);
 
   const dayAgo = Date.now() - 86_400_000;
   const newToday = displayListings.filter(l => new Date(l.createdAt).getTime() > dayAgo).length;

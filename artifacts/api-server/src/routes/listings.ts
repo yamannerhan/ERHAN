@@ -9,6 +9,11 @@ import path from "path";
 import fs from "fs";
 import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumber, extractSalary, extractTitle, extractWorkType } from "../lib/job-parsing";
 import { getRegionalDistrictProvinces } from "../lib/location-terms";
+import {
+  districtsAndLandmarksForSide,
+  resolveIstanbulSideFromQuery,
+  sideLiteralPatterns,
+} from "../lib/istanbul-side";
 
 // ── Listing image upload setup ──────────────────────────────────────────────
 const LISTING_IMAGES_DIR = path.join(process.cwd(), "uploads", "listing-images");
@@ -177,6 +182,45 @@ async function getLocationTermsForProvince(province: string): Promise<string[]> 
 }
 
 async function cityFilterCondition(city: string) {
+  const istanbulSide = resolveIstanbulSideFromQuery(city);
+  if (istanbulSide) {
+    const terms = [
+      ...sideLiteralPatterns(istanbulSide),
+      ...districtsAndLandmarksForSide(istanbulSide),
+    ];
+    const positive = or(
+      ...terms.flatMap((pattern) => {
+        const variants = locationSearchVariants(pattern);
+        return variants.flatMap((variant) => {
+          const norm = normalizeCityText(variant);
+          const compact = norm.replace(/\s+/g, "");
+          if (compact.length < 3) return [];
+          return [
+            ilike(listingsTable.city, `%${variant}%`),
+            sql`${normalizedColumn(listingsTable.city)} like ${`%${norm}%`}`,
+            sql`replace(${normalizedColumn(listingsTable.city)}, ' ', '') like ${`%${compact}%`}`,
+          ];
+        });
+      }),
+    );
+
+    // Başka il ile başlayanları ele
+    const otherProvinceClauses = PROVINCES
+      .filter((p) => normalizeCityText(p) !== "istanbul")
+      .flatMap((p) => {
+        const np = normalizeCityText(p);
+        return [
+          sql`${normalizedColumn(listingsTable.city)} like ${`${np} /%`}`,
+          sql`${normalizedColumn(listingsTable.city)} like ${`${np}/%`}`,
+          sql`${normalizedColumn(listingsTable.city)} like ${`${np},%`}`,
+          sql`${normalizedColumn(listingsTable.city)} = ${np}`,
+        ];
+      });
+
+    if (otherProvinceClauses.length === 0) return positive;
+    return and(positive, sql`NOT (${or(...otherProvinceClauses)})`);
+  }
+
   const province = extractProvinceName(city) ?? city;
   const normProv = normalizeCityText(province);
 

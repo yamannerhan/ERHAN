@@ -94,7 +94,15 @@ export async function reclassifyJobLocations(opts: ReclassifyOptions = {}): Prom
 
   const conditions = [eq(listingsTable.isActive, true)];
   if (opts.onlyUnresolved) {
-    conditions.push(or(eq(listingsTable.city, "Konum doğrulanıyor"), isNull(listingsTable.city), eq(listingsTable.city, ""))!);
+    conditions.push(
+      or(
+        eq(listingsTable.city, "Konum doğrulanıyor"),
+        eq(listingsTable.city, "Türkiye"),
+        eq(listingsTable.city, "Türkiye Geneli"),
+        isNull(listingsTable.city),
+        eq(listingsTable.city, ""),
+      )!,
+    );
   }
 
   const listings = await db

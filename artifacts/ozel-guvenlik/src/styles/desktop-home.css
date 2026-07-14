@@ -694,6 +694,10 @@
     transition: background-color 0.15s ease;
   }
 
+  .desktop-listings-table tbody tr.desktop-listings-table__row-clickable {
+    cursor: pointer;
+  }
+
   .desktop-listings-table tbody tr:hover {
     background: rgba(255, 255, 255, 0.03);
   }

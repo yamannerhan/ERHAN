@@ -109,6 +109,17 @@ function hasConflictingProvinceDistrict(work: ScoredCandidate[]): boolean {
 }
 
 function detectNationwide(ascii: string): boolean {
+  if (!/turkiye geneli|turkiye genelindeki|turkiye capinda|ulke geneli|\bturkiye\b/.test(ascii)) {
+    return false;
+  }
+  // Semt / OSB / gişe / ilçe sinyali varsa "Türkiye" diye erken çıkma
+  if (
+    /samandira|alemdag|tasdelen|pasakoy|dudullu|ikitelli|hadimkoy|kirac|kurtkoy|viaport|gosb|taysad|tosb|gebkim|gebze|pendik|kadikoy|atasehir|sancaktepe|cekmekoy|umraniye|uskudar|tuzla|maltepe|kartal|esenyurt|basaksehir|sisli|besiktas|gise|havaliman|\bosb\b|organize sanayi/.test(
+      ascii,
+    )
+  ) {
+    return false;
+  }
   return /turkiye geneli|turkiye genelindeki|turkiye capinda|ulke geneli/.test(ascii);
 }
 

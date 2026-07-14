@@ -26,6 +26,10 @@ import { getHomeTickerLines } from "@/lib/home-ticker";
 import { DisplayModeToggle } from "@/components/display-mode-toggle";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { DesktopListingsTable } from "@/components/desktop-listings-table";
+import {
+  matchesIstanbulSide,
+  type IstanbulSide,
+} from "@/lib/istanbul-side";
 import "@/styles/desktop-home.css";
 
 const BASE_URL = "https://ozelguvenlik.online";
@@ -184,9 +188,9 @@ function formatDate(iso: string) {
 
 const QUICK_CITY_PILLS = [
   { id: "all",        label: "Tümü",            match: null as null | ((c: string) => boolean) },
-  { id: "istanbul",   label: "İstanbul",        match: (c: string) => /istanbul/i.test(c) },
-  { id: "anadolu",    label: "Anadolu Yakası",  match: (c: string) => /anadolu/i.test(c) },
-  { id: "avrupa",     label: "Avrupa Yakası",   match: (c: string) => /avrupa/i.test(c) },
+  { id: "istanbul",   label: "İstanbul",        match: (c: string) => /istanbul|anadolu|avrupa/i.test(c) || matchesIstanbulSide(c, "anadolu") || matchesIstanbulSide(c, "avrupa") },
+  { id: "anadolu",    label: "Anadolu Yakası",  match: (c: string) => matchesIstanbulSide(c, "anadolu") },
+  { id: "avrupa",     label: "Avrupa Yakası",   match: (c: string) => matchesIstanbulSide(c, "avrupa") },
 ];
 
 const OTHER_CITIES = [
@@ -284,6 +288,8 @@ export default function Home() {
   const cityFilter = useMemo(() => {
     if (activePill === "other" && otherCity) return otherCity;
     if (activePill === "istanbul") return "İstanbul";
+    if (activePill === "anadolu") return "İstanbul Anadolu Yakası";
+    if (activePill === "avrupa") return "İstanbul Avrupa Yakası";
     return undefined;
   }, [activePill, otherCity]);
 
@@ -402,8 +408,14 @@ export default function Home() {
         if (/^(kocaeli|ankara|izmir|bursa|sakarya|tekirdag|yalova|konya|antalya|adana|mersin)\b/.test(head)) {
           return false;
         }
-        return /istanbul|anadolu|avrupa/.test(c);
+        return /istanbul|anadolu|avrupa/.test(c)
+          || matchesIstanbulSide(l.city, "anadolu")
+          || matchesIstanbulSide(l.city, "avrupa");
       });
+    }
+
+    if (activePill === "anadolu" || activePill === "avrupa") {
+      return allListings.filter((l) => matchesIstanbulSide(l.city, activePill as IstanbulSide));
     }
 
     if (activePill === "all") return allListings;

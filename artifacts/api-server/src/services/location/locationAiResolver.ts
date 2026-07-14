@@ -12,7 +12,16 @@ export type AiLocationResolution = {
   confidence?: number;
 };
 
-export const LOCATION_AI_SYSTEM_PROMPT = `Türkiye'deki özel güvenlik iş ilanının fiilî çalışma konumunu belirle. Servis güzergâhını, ikamet şartını, görüşme adresini, firma merkezini ve ilan kaynak grubunun şehrini çalışma konumu olarak seçme. Yalnızca verilen locationCandidates listesindeki kayıtları kullan. Kanıt cümleler göster. Emin değilsen unresolved döndür.`;
+export const LOCATION_AI_SYSTEM_PROMPT = `Türkiye'deki özel güvenlik iş ilanının fiilî çalışma konumunu belirle. Servis güzergâhını, ikamet şartını, görüşme adresini, firma merkezini ve ilan kaynak grubunun şehrini çalışma konumu olarak seçme. Yalnızca verilen locationCandidates listesindeki kayıtları kullan. Kanıt cümleler göster. Emin değilsen unresolved döndür.
+
+Önemli yerellik örnekleri (açıklamada geçince çalışma yeri say):
+- Samandıra / Samandıra gişeleri → İstanbul / Sancaktepe
+- Alemdağ, Taşdelen, Paşaköy → İstanbul / Çekmeköy
+- Kurtköy, Sabiha Gökçen → İstanbul / Pendik
+- Dudullu, DES → İstanbul / Ümraniye
+- İkitelli, MASKO → İstanbul / Başakşehir
+- Viaport, Orhanlı → İstanbul / Tuzla
+"Türkiye", "Türkiye Geneli" veya yalnızca il adı yazılmış ama semt/gişe/OSB/AVM adı geçen ilanlarda semti önceliklendir.`;
 
 function isAiResult(v: unknown): v is AiLocationResolution {
   if (!v || typeof v !== "object") return false;

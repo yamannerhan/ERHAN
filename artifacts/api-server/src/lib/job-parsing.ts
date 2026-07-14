@@ -73,6 +73,14 @@ const NEIGHBORHOODS: Record<string, { city: string; district?: string; neighborh
   ataköy: { city: "İstanbul", district: "Bakırköy", neighborhood: "Ataköy" },
   ayazağa: { city: "İstanbul", district: "Sarıyer", neighborhood: "Ayazağa" },
   içmeler: { city: "İstanbul", district: "Tuzla", neighborhood: "İçmeler" },
+  samandıra: { city: "İstanbul", district: "Sancaktepe", neighborhood: "Samandıra" },
+  alemdağ: { city: "İstanbul", district: "Çekmeköy", neighborhood: "Alemdağ" },
+  taşdelen: { city: "İstanbul", district: "Çekmeköy", neighborhood: "Taşdelen" },
+  paşaköy: { city: "İstanbul", district: "Çekmeköy", neighborhood: "Paşaköy" },
+  ferhatpaşa: { city: "İstanbul", district: "Ataşehir", neighborhood: "Ferhatpaşa" },
+  çamlıca: { city: "İstanbul", district: "Üsküdar", neighborhood: "Çamlıca" },
+  viaport: { city: "İstanbul", district: "Tuzla", neighborhood: "Viaport" },
+  habibler: { city: "İstanbul", district: "Sultangazi", neighborhood: "Habibler" },
   ostim: { city: "Ankara", district: "Yenimahalle", neighborhood: "OSTİM" },
   aosb: { city: "İzmir", district: "Çiğli", neighborhood: "Atatürk OSB" },
   nosab: { city: "Bursa", district: "Nilüfer", neighborhood: "NOSAB" },
@@ -267,12 +275,14 @@ const WORKPLACE_BOOST = new Set([
   "imes osb", "plastikciler osb", "kimya ihtisas osb", "dilovasi makine osb", "demirciler osb",
   "tuzla", "tuzlaosb", "idosb", "ikitelli", "dudullu", "hadimkoy", "ostim", "aosb", "nosab",
   "gebze", "darica", "cayirova", "dilovasi", "sekerpinar",
+  "samandira", "alemdag", "tasdelen", "pasakoy", "ferhatpasa", "camlica", "viaport", "habibler",
+  "kurtkoy", "sabiha gokcen",
 ]);
 
 function workplaceBoost(termKey: string): number {
   const n = normalize(termKey).replace(/\s+/g, " ");
   if (WORKPLACE_BOOST.has(n) || WORKPLACE_BOOST.has(n.replace(/\s+/g, ""))) return 420;
-  if (/\bosb\b|organize sanayi|taysad|gosb|tosb|gebkim/.test(n)) return 380;
+  if (/\bosb\b|organize sanayi|taysad|gosb|tosb|gebkim|gise|otoyol|kopru/.test(n)) return 380;
   return 0;
 }
 
@@ -290,7 +300,7 @@ export function extractLocation(text: string): ParsedLocation {
   const mentioned = detectMentionedCities(ascii);
 
   // Görev yeri bağlamı: merkez şehir cezası daha hafif
-  const hasWorkplaceCue = /gorev yeri|calis(ilacak|ma) yer|proje lokasyon|proje yeri|lokasyon|tesis|fabrika|osb|organize sanayi|taysad|gosb/.test(ascii);
+  const hasWorkplaceCue = /gorev yeri|calis(ilacak|ma) yer|proje lokasyon|proje yeri|lokasyon|tesis|fabrika|osb|organize sanayi|taysad|gosb|gise|otoyol|kopru|havaliman|viaport|samandira/.test(ascii);
 
   type Candidate = ParsedLocation & { score: number };
   const candidates: Candidate[] = [];

@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Bookmark, LayoutGrid, List } from "lucide-react";
 import { displayCompany } from "@/lib/utils";
 import { markListingRead } from "@/lib/read-listings";
@@ -39,6 +39,14 @@ export function DesktopListingsTable({
   savedIds,
   onToggleSave,
 }: Props) {
+  const [, navigate] = useLocation();
+
+  const openListing = (id: number) => {
+    markListingRead(id);
+    onNavigate?.();
+    navigate(`/ilan/${id}`);
+  };
+
   return (
     <div className="desktop-listings-table desktop-home">
       <div className="desktop-listings-table__toolbar">
@@ -92,7 +100,24 @@ export function DesktopListingsTable({
               const isSaved = savedIds.has(listing.id) || !!listing.isFavoritedByMe;
 
               return (
-                <tr key={listing.id}>
+                <tr
+                  key={listing.id}
+                  className="desktop-listings-table__row-clickable"
+                  role="link"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    const t = e.target as HTMLElement;
+                    if (t.closest("a, button")) return;
+                    openListing(listing.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    const t = e.target as HTMLElement;
+                    if (t.closest("a, button")) return;
+                    e.preventDefault();
+                    openListing(listing.id);
+                  }}
+                >
                   <td>
                     <Link
                       href={detailHref}
@@ -144,7 +169,10 @@ export function DesktopListingsTable({
                       type="button"
                       className={`desktop-listings-table__save-btn${isSaved ? " is-saved" : ""}`}
                       aria-label={isSaved ? "Kayıttan çıkar" : "Kaydet"}
-                      onClick={(e) => onToggleSave(e, listing.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleSave(e, listing.id);
+                      }}
                     >
                       <Bookmark size={16} fill={isSaved ? "currentColor" : "none"} />
                     </button>
