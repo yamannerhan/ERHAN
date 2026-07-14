@@ -196,17 +196,24 @@ router.post(
 
     const filename = `co_${existing.id}_${crypto.randomBytes(8).toString("hex")}.webp`;
     const filepath = path.join(COMPANY_LOGO_DIR, filename);
-    await sharp(req.file.buffer)
+    const processedLogo = await sharp(req.file.buffer)
       .resize(512, 512, { fit: "cover", position: "centre" })
       .webp({ quality: 82 })
-      .toFile(filepath);
+      .toBuffer();
+    try {
+      fs.writeFileSync(filepath, processedLogo);
+    } catch { /* DB kopyası kalıcı kaynak olarak kullanılacak */ }
 
     const logoPath = `/api/company-logos/${filename}`;
     deleteLogoFile(existing.logoPath);
 
     const [updated] = await db
       .update(companyProfilesTable)
-      .set({ logoPath, updatedAt: new Date() })
+      .set({
+        logoPath,
+        logoData: processedLogo.toString("base64"),
+        updatedAt: new Date(),
+      })
       .where(eq(companyProfilesTable.id, existing.id))
       .returning();
 
@@ -229,7 +236,7 @@ router.delete("/company-profiles/me/logo", authMiddleware, async (req, res): Pro
   deleteLogoFile(existing.logoPath);
   const [updated] = await db
     .update(companyProfilesTable)
-    .set({ logoPath: null, updatedAt: new Date() })
+    .set({ logoPath: null, logoData: null, updatedAt: new Date() })
     .where(eq(companyProfilesTable.id, existing.id))
     .returning();
   res.json(profileJson(updated!));
@@ -279,15 +286,40 @@ router.patch("/admin/company-profiles/:id/verify", authMiddleware, async (req, r
   res.json(profileJson(updated));
 });
 
-router.get("/company-logos/:filename", (req, res): void => {
+router.get("/company-logos/:filename", async (req, res): Promise<void> => {
   const filename = String(req.params["filename"]).replace(/[^a-zA-Z0-9_\-\.]/g, "");
   const filepath = path.join(COMPANY_LOGO_DIR, filename);
-  if (!fs.existsSync(filepath)) {
+  const logoPath = `/api/company-logos/${filename}`;
+
+  if (fs.existsSync(filepath)) {
+    const data = fs.readFileSync(filepath);
+    void db.update(companyProfilesTable)
+      .set({ logoData: data.toString("base64") })
+      .where(and(
+        eq(companyProfilesTable.logoPath, logoPath),
+        isNull(companyProfilesTable.logoData),
+      ))
+      .catch(() => undefined);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.type("image/webp").send(data);
+    return;
+  }
+
+  const [profile] = await db.select({ logoData: companyProfilesTable.logoData })
+    .from(companyProfilesTable)
+    .where(and(
+      eq(companyProfilesTable.logoPath, logoPath),
+      isNull(companyProfilesTable.deletedAt),
+    ))
+    .limit(1);
+  if (!profile?.logoData) {
     res.status(404).end();
     return;
   }
-  res.setHeader("Cache-Control", "public, max-age=86400");
-  res.sendFile(filepath);
+
+  const data = Buffer.from(profile.logoData, "base64");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.type("image/webp").send(data);
 });
 
 export default router;

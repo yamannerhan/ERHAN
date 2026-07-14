@@ -14,7 +14,7 @@ import {
   finalizeElemanListingText,
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
-import { extractSalary, extractGender, extractLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -503,7 +503,8 @@ async function processMessage(
     return "skipped";
   }
 
-  const location = extractLocation(text);
+  const explicitLocation = extractExplicitWorkLocation(text);
+  const location = explicitLocation ?? extractLocation(text);
   if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
     return "skipped";
   }
@@ -553,7 +554,7 @@ async function processMessage(
     sourceUrl,
     legacy: location,
   });
-  const city = v2City.city;
+  const city = explicitLocation ? resolveListingCity(explicitLocation) : v2City.city;
   const salary = extractSalary(text);
   // Bir bot mesajı tek ilanı temsil eder; sayfa/ileti geçmişinden taşan
   // numaraların aynı ilana eklenmesini önlemek için yalnızca ilk numarayı al.
@@ -1342,6 +1343,25 @@ async function publishElemanJob(
   const now = new Date();
   const messageId = job.id;
 
+  const existingBySource = await findListingBySourceMessage(source.id, messageId);
+  if (existingBySource) {
+    const structuredCity = job.locationDisplay ?? job.city;
+    if (structuredCity) {
+      const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+      await db.update(listingsTable)
+        .set({
+          city: structuredCity,
+          lastSeenAt: now,
+          lastCheckedAt: now,
+          ...(assignCoordsFromCity(structuredCity) ?? {}),
+        })
+        .where(eq(listingsTable.id, existingBySource));
+    } else {
+      await touchListingSeen(existingBySource);
+    }
+    return "duplicate";
+  }
+
   if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
 
   const duplicateListingId = await findDuplicateActiveListing(job.rawText, hash);
@@ -1349,8 +1369,6 @@ async function publishElemanJob(
     await touchListingSeen(duplicateListingId);
     return "duplicate";
   }
-
-  if (await findListingBySourceMessage(source.id, messageId)) return "duplicate";
 
   const [seenExt] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
@@ -1373,9 +1391,10 @@ async function publishElemanJob(
   }).returning();
   if (!imported) return "skipped";
 
-  const jobCity = (job as ElemanJobDetail & { city?: string | null }).city;
+  const jobCity = job.locationDisplay ?? job.city;
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
-  const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
+  // Eleman.net'in yapılandırılmış il/ilçe alanı açıklamadaki servis/merkez adından daha güvenilir.
+  const city = jobCity ?? parsedCity;
   const gender = extractGender(job.rawText);
   const contactPhones = extractPhoneNumbers(
     `${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`,
@@ -2718,7 +2737,8 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (!text.trim()) continue;
 
     const newTitle = extractTitle(row.description || text);
-    const legacy = extractLocation(text);
+    const explicitLocation = extractExplicitWorkLocation(text);
+    const legacy = explicitLocation ?? extractLocation(text);
     const v2 = await maybeClassifyWithV2({
       jobId: row.id,
       title: row.title || newTitle,
@@ -2727,7 +2747,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
       sourceUrl: row.sourceUrl,
       legacy,
     });
-    const newCity = v2.city;
+    const newCity = explicitLocation ? resolveListingCity(explicitLocation) : v2.city;
     const newSalary = extractSalary(row.description || text);
     const newGender = extractGender(row.description || text);
     const newPhones = extractPhones(row.description || text).slice(0, 1);

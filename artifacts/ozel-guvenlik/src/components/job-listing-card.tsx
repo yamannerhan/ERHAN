@@ -7,7 +7,7 @@ import {
 import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
-import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
+import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -179,7 +179,14 @@ export function JobListingCard({
       <div className="og-job__inner">
         <div className="og-job__head">
           <div className="og-job__logo">
-            <img src={logo} alt="" loading="lazy" decoding="async" className={hasOwnLogo ? "" : "og-job__logo-brand"} />
+            <img
+              src={logo}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className={hasOwnLogo ? "" : "og-job__logo-brand"}
+              onError={(event) => useBrandLogoFallback(event.currentTarget)}
+            />
           </div>
 
           <div className="og-job__main">

@@ -302,10 +302,8 @@ function hasTerm(haystackAscii: string, term: string): boolean {
 const WORKPLACE_BOOST = new Set([
   "gosb", "taysad", "gebze taysad", "tosb", "gebkim", "gebze osb", "gebze organize sanayi bolgesi",
   "imes osb", "plastikciler osb", "kimya ihtisas osb", "dilovasi makine osb", "demirciler osb",
-  "tuzla", "tuzlaosb", "idosb", "ikitelli", "dudullu", "hadimkoy", "ostim", "aosb", "nosab",
-  "gebze", "darica", "cayirova", "dilovasi", "sekerpinar",
-  "samandira", "alemdag", "tasdelen", "pasakoy", "ferhatpasa", "camlica", "viaport", "habibler",
-  "kurtkoy", "sabiha gokcen",
+  "tuzlaosb", "idosb", "ikitelli osb", "dudullu osb", "ostim", "aosb", "nosab",
+  "cerkezkoy osb", "velimese osb", "ergene osb", "muratli osb", "luleburgaz osb",
 ]);
 
 function workplaceBoost(termKey: string): number {
@@ -337,9 +335,9 @@ export function extractLocation(text: string): ParsedLocation {
   const preferCity = (city: string): number => {
     if (mentioned.size === 0) return 0;
     if (mentioned.has(city)) return 50;
-    // Açıklamada başka il adı var ama OSB/görev yeri bu ili işaretliyorsa cezayı hafiflet
-    if (hasWorkplaceCue) return -15;
-    return -40;
+    // Başka bir il açıkça yazıyorsa sırf servis/merkez satırındaki ilçe yüzünden şehir değiştirme.
+    // Gerçek OSB/görev yeri sinyali workplaceBoost ile ayrıca puan alır.
+    return hasWorkplaceCue ? -90 : -110;
   };
 
   for (const [key, loc] of Object.entries(NEIGHBORHOODS)) {
@@ -385,13 +383,36 @@ export function extractLocation(text: string): ParsedLocation {
   }
 
   candidates.sort((a, b) => b.score - a.score);
-  const best = candidates[0]!;
+  let best = candidates[0]!;
+  // Metinde tek bir il açıkça yazıyorsa, başka ile ait çıplak ilçe/servis adının
+  // daha yüksek taban puanla bu ili ezmesine izin verme.
+  if (mentioned.size === 1 && !mentioned.has(best.city)) {
+    const sameProvince = candidates.find((candidate) => mentioned.has(candidate.city));
+    if (sameProvince) best = sameProvince;
+  }
   return {
     city: best.city,
     district: best.district,
     neighborhood: best.neighborhood,
     display: best.display,
   };
+}
+
+/** Açıkça görev/çalışma yeri diye etiketlenmiş konumu servis ve merkez adreslerinden önce alır. */
+export function extractExplicitWorkLocation(text: string): ParsedLocation | null {
+  const patterns = [
+    /(?:görev|gorev|çalışma|calisma|proje|iş|is)\s*(?:yeri|lokasyonu|lokasyon|bölgesi|bolgesi)\s*[:\-–]\s*([^\n\r;|]{2,120})/gi,
+    /(?:lokasyon|konum)\s*[:\-–]\s*([^\n\r;|]{2,120})/gi,
+    /(?:personel|güvenlik|guvenlik)\s+(?:aranan|aranacak|alınacak|alinacak)\s+(?:yer|bölge|bolge)\s*[:\-–]?\s*([^\n\r;|]{2,120})/gi,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const parsed = extractLocation(match[1] ?? "");
+      if (parsed.city || parsed.district || parsed.neighborhood) return parsed;
+    }
+  }
+  return null;
 }
 
 /** Açıklama içindeki tüm TR cep numaralarını yakala (benzersiz, 05XXXXXXXXX). */

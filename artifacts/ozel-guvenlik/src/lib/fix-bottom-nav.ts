@@ -39,12 +39,10 @@ export function initBottomNavViewportFix(): void {
 
     nav.classList.remove("og-bottom-nav--behind-kb");
 
-    // Küçük chrome farkı (adres çubuğu); klavye değil
-    const next = gap > 0 && gap <= 100 ? `${gap}px` : "";
-    if (next !== lastBottom) {
-      if (next) nav.style.bottom = next;
-      else nav.style.removeProperty("bottom");
-      lastBottom = next;
+    // Mobil adres çubuğu açılıp kapanırken menüyü yukarı/aşağı oynatma.
+    if (lastBottom !== "0") {
+      nav.style.bottom = "0px";
+      lastBottom = "0";
     }
   };
 

@@ -11,6 +11,7 @@ export const companyProfilesTable = pgTable(
     companyName: text("company_name").notNull(),
     legalName: text("legal_name"),
     logoPath: text("logo_path"),
+    logoData: text("logo_data"),
     description: text("description"),
     website: text("website"),
     phone: text("phone"),

@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { getListingImage } from "@/lib/listing-image";
+import { useBrandLogoFallback } from "@/lib/brand-logo";
 import { displayCompany } from "@/lib/utils";
 import { markListingRead } from "@/lib/read-listings";
 import { resolveApplyHref, collectListingPhones } from "@/lib/apply-url";
@@ -460,7 +461,7 @@ export default function ListingDetail() {
                 </div>
                 <div className="og-ld-company-box">
                   <div className="og-ld-company-logo">
-                    <img src={logoUrl} alt={companyName} />
+                    <img src={logoUrl} alt={companyName} onError={(event) => useBrandLogoFallback(event.currentTarget)} />
                   </div>
                   <div className="og-ld-company-name">{companyName}</div>
                   {ext?.companyVerified && (
@@ -607,7 +608,7 @@ export default function ListingDetail() {
               <h2 className="og-ld-side-title">Firma Bilgileri</h2>
               <div className="og-ld-side-company">
                 <div className="og-ld-side-logo">
-                  <img src={logoUrl} alt="" />
+                  <img src={logoUrl} alt="" onError={(event) => useBrandLogoFallback(event.currentTarget)} />
                 </div>
                 <div>
                   <div className="og-ld-side-company-name">

@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { displayCompany } from "@/lib/utils";
-import { resolveCompanyLogo } from "@/lib/brand-logo";
+import { resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ProfileBadgesRow } from "@/components/chat-user-identity";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
@@ -792,8 +792,13 @@ export default function Profile() {
                     </p>
                     <div className="flex items-center gap-3">
                       {companyLogo ? (
-                        <div className="w-16 h-16 rounded-xl border border-white/10 bg-white/95 p-1.5 overflow-hidden flex-shrink-0">
-                          <img src={companyLogo} alt="" className="w-full h-full object-contain" />
+                        <div className="w-16 h-16 rounded-full border border-white/10 bg-white/95 overflow-hidden flex-shrink-0">
+                          <img
+                            src={companyLogo}
+                            alt=""
+                            className="w-full h-full object-cover rounded-full"
+                            onError={(event) => useBrandLogoFallback(event.currentTarget)}
+                          />
                         </div>
                       ) : null}
                       <div className="flex flex-col gap-1.5 flex-1 min-w-0">
@@ -1030,7 +1035,12 @@ export default function Profile() {
                   >
                     <Link href={`/ilan/${listing.id}`} className="og-list-row">
                       <div className="og-list-img">
-                        <img src={img} alt={company} className="w-full h-full object-contain p-1" />
+                        <img
+                          src={img}
+                          alt={company}
+                          className="w-full h-full object-cover rounded-full"
+                          onError={(event) => useBrandLogoFallback(event.currentTarget)}
+                        />
                       </div>
 
                       <div className="flex-1 min-w-0">

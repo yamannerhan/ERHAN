@@ -34,6 +34,7 @@ export interface ElemanListItem {
   id: string;
   title: string;
   url: string;
+  sourceCity?: string | null;
 }
 
 export interface ElemanJobDetail extends ElemanListItem {
@@ -41,6 +42,9 @@ export interface ElemanJobDetail extends ElemanListItem {
   description: string;
   phone: string;
   rawText: string;
+  city?: string | null;
+  district?: string | null;
+  locationDisplay?: string | null;
   postedAt?: Date | null;
 }
 
@@ -97,7 +101,11 @@ function getJsonLdJobPosting(html: string): Record<string, unknown> | null {
   for (const script of scripts) {
     try {
       const parsed: unknown = JSON.parse(script[1]!);
-      const entries = Array.isArray(parsed) ? parsed : [parsed];
+      const graph = typeof parsed === "object" && parsed !== null
+        && Array.isArray((parsed as Record<string, unknown>)["@graph"])
+        ? (parsed as Record<string, unknown>)["@graph"] as unknown[]
+        : null;
+      const entries = Array.isArray(parsed) ? parsed : (graph ?? [parsed]);
       const job = entries.find((entry): entry is Record<string, unknown> =>
         typeof entry === "object" && entry !== null &&
         ((entry as Record<string, unknown>)["@type"] === "JobPosting"
@@ -110,6 +118,34 @@ function getJsonLdJobPosting(html: string): Record<string, unknown> | null {
     }
   }
   return null;
+}
+
+function parseStructuredJobLocation(
+  job: Record<string, unknown> | null,
+  fallbackCity?: string | null,
+): { city: string | null; district: string | null; display: string | null } {
+  const rawLocation = Array.isArray(job?.jobLocation) ? job.jobLocation[0] : job?.jobLocation;
+  const location = rawLocation && typeof rawLocation === "object"
+    ? rawLocation as Record<string, unknown>
+    : null;
+  const address = location?.address && typeof location.address === "object"
+    ? location.address as Record<string, unknown>
+    : null;
+  const clean = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const text = decodeHtml(value).replace(/\s+/g, " ").trim();
+    return text && text.length <= 100 ? text : null;
+  };
+  const city = clean(address?.addressRegion) ?? fallbackCity ?? null;
+  const locality = clean(address?.addressLocality);
+  const district = locality && locality.toLocaleLowerCase("tr-TR") !== city?.toLocaleLowerCase("tr-TR")
+    ? locality
+    : null;
+  return {
+    city,
+    district,
+    display: [city, district].filter(Boolean).join(" / ") || null,
+  };
 }
 
 function isOzelGuvenlikJob(title: string, description: string): boolean {
@@ -205,6 +241,7 @@ function extractDescriptionFromHtml(html: string): string {
 export function parseElemanDetailHtml(html: string, item: ElemanListItem): ElemanJobDetail | null {
   const job = getJsonLdJobPosting(html);
   const title = typeof job?.title === "string" ? job.title : item.title;
+  const structuredLocation = parseStructuredJobLocation(job, item.sourceCity);
 
   let description = "";
   if (typeof job?.description === "string") {
@@ -244,7 +281,12 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     if (!Number.isNaN(d.getTime())) postedAt = d;
   }
 
-  const rawText = [title, companyName, finalizeElemanListingText(description, phone)]
+  const rawText = [
+    title,
+    companyName,
+    structuredLocation.display ? `Görev Yeri: ${structuredLocation.display}` : null,
+    finalizeElemanListingText(description, phone),
+  ]
     .filter(Boolean)
     .join("\n\n");
   return {
@@ -254,6 +296,9 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     description: finalizeElemanListingText(description, phone),
     phone,
     rawText,
+    city: structuredLocation.city,
+    district: structuredLocation.district,
+    locationDisplay: structuredLocation.display,
     postedAt,
   };
 }
@@ -274,7 +319,10 @@ async function fetchHtml(url: string): Promise<string | null> {
 
 export async function fetchElemanListPage(citySlug: string | null, page: number): Promise<ElemanListItem[]> {
   const html = await fetchHtml(buildElemanListUrl(citySlug, page));
-  return html ? parseElemanListHtml(html) : [];
+  if (!html) return [];
+  const sourceCity = ELEMAN_CITY_LIST.find((entry) => entry.slug === citySlug)?.name
+    ?.replace(/\s+(?:Avrupa|Anadolu)$/i, "") ?? null;
+  return parseElemanListHtml(html).map((item) => ({ ...item, sourceCity }));
 }
 
 export async function fetchElemanJobDetail(item: ElemanListItem): Promise<ElemanJobDetail | null> {

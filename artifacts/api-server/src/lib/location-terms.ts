@@ -329,6 +329,43 @@ export const REGIONAL_LOCATION_KEYWORDS: Record<string, ProvinceKeywords> = {
       kw("orta anadolu", "Manisa / Yunusemre / Orta Anadolu", "Yunusemre"),
     ],
   },
+  Tekirdağ: {
+    aliases: ["tekirdağ", "tekirdag"],
+    districts: [
+      "Süleymanpaşa", "Çorlu", "Çerkezköy", "Kapaklı", "Ergene", "Muratlı",
+      "Malkara", "Hayrabolu", "Marmaraereğlisi", "Saray", "Şarköy",
+    ],
+    terms: [
+      kw("çerkezköy osb", "Tekirdağ / Çerkezköy / Çerkezköy OSB", "Çerkezköy", "Çerkezköy OSB"),
+      kw("çerkezköy organize sanayi", "Tekirdağ / Çerkezköy / Çerkezköy OSB", "Çerkezköy", "Çerkezköy OSB"),
+      kw("çerkezköy organize sanayi bölgesi", "Tekirdağ / Çerkezköy / Çerkezköy OSB", "Çerkezköy", "Çerkezköy OSB"),
+      kw("çorlu deri osb", "Tekirdağ / Çorlu / Deri OSB", "Çorlu", "Çorlu Deri OSB"),
+      kw("velimeşe osb", "Tekirdağ / Ergene / Velimeşe OSB", "Ergene", "Velimeşe OSB"),
+      kw("ergene osb", "Tekirdağ / Ergene / Ergene OSB", "Ergene", "Ergene OSB"),
+      kw("muratlı osb", "Tekirdağ / Muratlı / Muratlı OSB", "Muratlı", "Muratlı OSB"),
+      kw("kapaklı osb", "Tekirdağ / Kapaklı / Kapaklı OSB", "Kapaklı", "Kapaklı OSB"),
+    ],
+  },
+  Kırklareli: {
+    aliases: ["kırklareli", "kirklareli"],
+    districts: [
+      "Lüleburgaz", "Babaeski", "Vize", "Pınarhisar", "Kofçaz", "Demirköy", "Pehlivanköy",
+    ],
+    terms: [
+      kw("lüleburgaz osb", "Kırklareli / Lüleburgaz / Lüleburgaz OSB", "Lüleburgaz", "Lüleburgaz OSB"),
+      kw("büyükkarıştıran", "Kırklareli / Lüleburgaz / Büyükkarıştıran", "Lüleburgaz", "Büyükkarıştıran"),
+      kw("büyükkarıştıran osb", "Kırklareli / Lüleburgaz / Büyükkarıştıran OSB", "Lüleburgaz", "Büyükkarıştıran OSB"),
+    ],
+  },
+  Yalova: {
+    aliases: ["yalova"],
+    districts: ["Altınova", "Armutlu", "Çınarcık", "Çiftlikköy", "Termal"],
+    terms: [
+      kw("yalova osb", "Yalova / Yalova OSB"),
+      kw("altınova tersaneler", "Yalova / Altınova / Tersaneler", "Altınova", "Tersaneler"),
+      kw("yalova tersaneler", "Yalova / Altınova / Tersaneler", "Altınova", "Tersaneler"),
+    ],
+  },
 };
 
 let districtProvincesCache: Record<string, string> | null = null;

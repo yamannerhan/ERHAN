@@ -21,3 +21,11 @@ export function isRealCompanyLogo(url?: string | null): boolean {
 export function resolveCompanyLogo(url?: string | null): string {
   return isRealCompanyLogo(url) ? url!.trim() : BRAND_LOGO_URL;
 }
+
+export function useBrandLogoFallback(image: HTMLImageElement): void {
+  if (image.dataset["fallbackApplied"] === "1") return;
+  image.dataset["fallbackApplied"] = "1";
+  image.src = BRAND_LOGO_URL;
+  image.style.objectFit = "contain";
+  image.style.padding = "6px";
+}

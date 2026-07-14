@@ -10,7 +10,9 @@
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+  overflow-x: hidden;
   overflow-x: clip;
+  contain: inline-size;
 }
 
 .og-ld-top {
@@ -69,6 +71,13 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+.og-ld-layout > *,
+.og-ld-card > *,
+.og-ld-aside,
+.og-ld-side-card {
   min-width: 0;
   max-width: 100%;
 }
@@ -183,7 +192,7 @@
 .og-ld-company-logo {
   width: 72px;
   height: 72px;
-  border-radius: 12px;
+  border-radius: 50%;
   background: #fff;
   border: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
@@ -198,8 +207,9 @@
 .og-ld-company-logo img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  padding: 6px;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
 .og-ld-company-name {
   font-size: 11px;
@@ -341,7 +351,7 @@
 .og-ld-side-logo {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 50%;
   background: #fff;
   display: flex;
   align-items: center;
@@ -355,8 +365,9 @@
 .og-ld-side-logo img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  padding: 4px;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
 .og-ld-side-company-name {
   font-size: 12px;

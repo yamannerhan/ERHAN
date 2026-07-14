@@ -686,13 +686,12 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
 // ── Listing image upload ────────────────────────────────────────────────────
 router.post("/listings/image-upload", authMiddleware, listingImageUpload.single("image"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" }); return; }
-  const filename = `listing_${req.user!.id}_${Date.now()}.jpg`;
-  const filepath = path.join(LISTING_IMAGES_DIR, filename);
-  await sharp(req.file.buffer)
-    .resize(800, 450, { fit: "cover", position: "center" })
-    .jpeg({ quality: 85 })
-    .toFile(filepath);
-  const url = `/api/listing-images/${filename}`;
+  const logo = await sharp(req.file.buffer)
+    .resize(512, 512, { fit: "cover", position: "centre" })
+    .webp({ quality: 82 })
+    .toBuffer();
+  // İlan kaydedilince şirket profiline DB tabanlı kalıcı logo olarak aktarılır.
+  const url = `data:image/webp;base64,${logo.toString("base64")}`;
   res.json({ url });
 });
 
@@ -840,15 +839,22 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
 
   // Temel bilgiler sonraki ilanda otomatik gelsin (açıklama hariç)
   try {
-    const rememberedId = await rememberEmployerBasics(req.user!.id, {
+    const remembered = await rememberEmployerBasics(req.user!.id, {
       companyName: resolvedCompany,
       phone: resolvedApplyUrl,
       logoPath: resolvedLogo,
       contactName: resolvedContactName || null,
     });
-    if (rememberedId && listing && !listing.companyProfileId) {
-      await db.update(listingsTable).set({ companyProfileId: rememberedId }).where(eq(listingsTable.id, listing.id));
-      listing.companyProfileId = rememberedId;
+    if (remembered && listing) {
+      const patch: Partial<typeof listingsTable.$inferInsert> = {
+        companyProfileId: remembered.id,
+      };
+      if (resolvedLogo?.startsWith("data:image/") && remembered.logoPath) {
+        patch.companyLogoUrl = remembered.logoPath;
+        listing.companyLogoUrl = remembered.logoPath;
+      }
+      await db.update(listingsTable).set(patch).where(eq(listingsTable.id, listing.id));
+      listing.companyProfileId = remembered.id;
     }
   } catch (e) {
     console.warn("[listings] rememberEmployerBasics failed", e);
