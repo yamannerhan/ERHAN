@@ -30,13 +30,14 @@ interface DrawerProps {
 function roleLabel(user: { role?: string } | null | undefined): string {
   if (!user) return "Misafir";
   if (user.role === "admin") return "Sistem Yöneticisi";
+  if (user.role === "senior_moderator") return "Kıdemli Moderatör";
   if (user.role === "moderator") return "Moderatör";
   if (user.role === "vip") return "VIP Üye";
   return "Üye";
 }
 
 export function HamburgerDrawer({ open, onClose }: DrawerProps) {
-  const { user, isAdmin, isModerator } = useAuth();
+  const { user, isAdmin, canAccessModeratorPanel } = useAuth();
   const { isLite } = useDisplayMode();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -199,8 +200,8 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
               <ChevronRight className="og-hd-chevron" />
             </Link>
           )}
-          {!isAdmin && isModerator && (
-            <Link href="/moderator" onClick={onClose} className="og-hd-item og-hd-item-admin">
+          {canAccessModeratorPanel && (
+            <Link href="/moderator/dashboard" onClick={onClose} className="og-hd-item og-hd-item-admin">
               <span className="og-hd-item-left">
                 <Shield className="og-hd-ico" />
                 <span>Moderatör Paneli</span>

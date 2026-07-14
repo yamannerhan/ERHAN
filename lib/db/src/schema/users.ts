@@ -7,7 +7,7 @@ export const usersTable = pgTable("users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  role: text("role").notNull().default("user"), // user | moderator | admin
+  role: text("role").notNull().default("user"), // user | moderator | senior_moderator | admin
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
   nameColor: text("name_color"),

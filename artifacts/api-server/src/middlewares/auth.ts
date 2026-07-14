@@ -1,10 +1,14 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { db, usersTable, ipBansTable, deviceBansTable } from "@workspace/db";
-import { eq, and, or, isNull, gt } from "drizzle-orm";
+import {
+  db, usersTable, ipBansTable, deviceBansTable,
+  deviceSessionsTable, ipActivityLogsTable,
+} from "@workspace/db";
+import { eq, and, or, isNull, gt, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 const JWT_SECRET = process.env.SESSION_SECRET ?? "ozelguvenlik-secret-key";
+const activityThrottle = new Map<string, number>();
 
 export interface JwtPayload {
   userId: number;
@@ -45,6 +49,74 @@ function extractIp(req: Request): string {
     || req.ip
     || "";
   return raw.replace(/^::ffff:/, "");
+}
+
+function trackDeviceAndIp(opts: {
+  userId: number;
+  ip: string;
+  deviceId?: string;
+  userAgent?: string;
+  path?: string;
+}): void {
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const { userId, ip, deviceId, userAgent, path } = opts;
+        if (ip || deviceId) {
+          const existing = await db
+            .select()
+            .from(deviceSessionsTable)
+            .where(
+              and(
+                eq(deviceSessionsTable.userId, userId),
+                deviceId
+                  ? eq(deviceSessionsTable.deviceId, deviceId)
+                  : eq(deviceSessionsTable.ip, ip || ""),
+              ),
+            )
+            .orderBy(desc(deviceSessionsTable.lastSeenAt))
+            .limit(1);
+          if (existing[0]) {
+            await db
+              .update(deviceSessionsTable)
+              .set({
+                lastSeenAt: new Date(),
+                ip: ip || existing[0].ip,
+                deviceId: deviceId || existing[0].deviceId,
+                userAgent: userAgent?.slice(0, 500) ?? existing[0].userAgent,
+              })
+              .where(eq(deviceSessionsTable.id, existing[0].id));
+          } else {
+            await db.insert(deviceSessionsTable).values({
+              userId,
+              deviceId: deviceId ?? null,
+              ip: ip || null,
+              userAgent: userAgent?.slice(0, 500) ?? null,
+              lastSeenAt: new Date(),
+            });
+          }
+        }
+
+        if (ip) {
+          const throttleKey = `${userId}:${path ?? "*"}`;
+          const last = activityThrottle.get(throttleKey) ?? 0;
+          const now = Date.now();
+          if (now - last > 60_000) {
+            activityThrottle.set(throttleKey, now);
+            await db.insert(ipActivityLogsTable).values({
+              userId,
+              ip,
+              deviceId: deviceId ?? null,
+              action: "request",
+              path: path?.slice(0, 200) ?? null,
+            });
+          }
+        }
+      } catch {
+        // non-critical tracking
+      }
+    })();
+  });
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -110,6 +182,14 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       if (Object.keys(updates).length > 0) {
         db.update(usersTable).set(updates).where(eq(usersTable.id, user.id)).catch(() => {});
       }
+    });
+
+    trackDeviceAndIp({
+      userId: user.id,
+      ip,
+      deviceId,
+      userAgent: req.headers["user-agent"],
+      path: req.path,
     });
 
     req.user = {
@@ -181,7 +261,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 }
 
 export function requireAdminOrModerator(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user || !["admin", "moderator"].includes(req.user.role)) {
+  if (!req.user || !["admin", "moderator", "senior_moderator"].includes(req.user.role)) {
     res.status(403).json({ error: "Admin veya moderatör yetkisi gerekiyor" });
     return;
   }

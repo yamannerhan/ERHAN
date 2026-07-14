@@ -17,6 +17,7 @@ import managementTeamRouter from "./management-team";
 import chatBannersRouter from "./chat-banners";
 import companyProfilesRouter from "./company-profiles";
 import locationAdminRouter from "./location-admin";
+import moderatorRouter from "./moderator";
 
 const router: IRouter = Router();
 
@@ -29,6 +30,7 @@ router.use(notificationsRouter);
 router.use(announcementsRouter);
 router.use(adminRouter);
 router.use(locationAdminRouter);
+router.use("/moderator", moderatorRouter);
 router.use(supportRouter);
 router.use(parttimeRouter);
 router.use(sourcesRouter);

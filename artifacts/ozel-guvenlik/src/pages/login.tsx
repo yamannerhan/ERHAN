@@ -38,7 +38,11 @@ export default function Login() {
       }
       await queryClient.invalidateQueries();
       toast({ title: "Giriş başarılı", description: "Yönlendiriliyorsunuz..." });
-      setLocation("/");
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      const safeNext =
+        next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      setLocation(safeNext);
     } catch (error: any) {
       toast({
         title: "Hata",

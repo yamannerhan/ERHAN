@@ -441,7 +441,7 @@ export function Layout({
               <Link href="/admin" className="hidden sm:inline-flex text-[10px] font-bold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/20">Admin</Link>
             )}
             {!customHeader && !isAdmin && isModerator && (
-              <Link href="/moderator" className="hidden sm:inline-flex text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">Moderatör</Link>
+              <Link href="/moderator/dashboard" className="hidden sm:inline-flex text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">Moderatör</Link>
             )}
 
             {!customHeader && <PwaInstall />}

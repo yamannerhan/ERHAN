@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "locations:sync": "pnpm exec tsx --tsconfig ./tsconfig.json ./src/commands/locationsSync.ts",
     "jobs:reclassify-locations": "pnpm exec tsx --tsconfig ./tsconfig.json ./src/commands/jobsReclassifyLocations.ts",
-    "test:location-classifier-v2": "pnpm exec tsx --tsconfig ./tsconfig.json ./scripts/test-location-classifier-v2.ts"
+    "test:location-classifier-v2": "pnpm exec tsx --tsconfig ./tsconfig.json ./scripts/test-location-classifier-v2.ts",
+    "test:moderation-rbac": "pnpm exec tsx --tsconfig ./tsconfig.json ./scripts/test-moderation-rbac.ts"
   },
   "dependencies": {
     "@types/multer": "^2.1.0",

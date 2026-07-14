@@ -16,7 +16,7 @@ const Login = lazy(() => import("@/pages/login"));
 const Register = lazy(() => import("@/pages/register"));
 const Profile = lazy(() => import("@/pages/profile"));
 const AdminDashboard = lazy(() => import("@/pages/admin"));
-const ModeratorDashboard = lazy(() => import("@/pages/moderator"));
+const ModeratorApp = lazy(() => import("@/moderator/ModeratorApp"));
 const AddListing = lazy(() => import("@/pages/add-listing"));
 const Notifications = lazy(() => import("@/pages/notifications"));
 const Favorites = lazy(() => import("@/pages/favorites"));
@@ -65,7 +65,8 @@ function Router() {
           <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
           <Route path="/part-time" component={PartTime} />
           <Route path="/admin" component={AdminDashboard} />
-          <Route path="/moderator" component={ModeratorDashboard} />
+          <Route path="/moderator/:page" component={ModeratorApp} />
+          <Route path="/moderator" component={ModeratorApp} />
           <Route path="/:seoSlug" component={SeoPathPage} />
           <Route component={NotFound} />
         </Switch>

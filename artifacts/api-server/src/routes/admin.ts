@@ -469,7 +469,7 @@ router.patch("/admin/users/:id/display-name", authMiddleware, requireAdmin, asyn
 router.post("/admin/create-staff", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const { username, email, password, role } = req.body as { username?: string; email?: string; password?: string; role?: string };
   if (!username || !email || !password) { res.status(400).json({ error: "Kullanıcı adı, e-posta ve şifre zorunludur" }); return; }
-  const allowedRoles = ["moderator", "admin"];
+  const allowedRoles = ["moderator", "senior_moderator", "admin"];
   const targetRole = allowedRoles.includes(role ?? "") ? role! : "moderator";
 
   const existing = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
@@ -486,7 +486,7 @@ router.patch("/admin/users/:id/role", authMiddleware, requireAdmin, async (req, 
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { role } = req.body as { role?: string };
-  if (!role || !["user", "moderator", "admin"].includes(role)) { res.status(400).json({ error: "Geçersiz rol" }); return; }
+  if (!role || !["user", "moderator", "senior_moderator", "admin"].includes(role)) { res.status(400).json({ error: "Geçersiz rol" }); return; }
   await db.update(usersTable).set({ role }).where(eq(usersTable.id, id));
   res.json({ success: true, message: "Rol güncellendi" });
 });
@@ -1797,7 +1797,7 @@ router.patch("/admin/listings/:id", authMiddleware, requireAdminOrModerator, asy
   res.json({ success: true });
 });
 
-router.delete("/admin/listings/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+router.delete("/admin/listings/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   await db.delete(listingLikesTable).where(eq(listingLikesTable.listingId, id));
@@ -1806,7 +1806,7 @@ router.delete("/admin/listings/:id", authMiddleware, requireAdminOrModerator, as
   res.sendStatus(204);
 });
 
-router.post("/admin/listings/bulk-delete", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+router.post("/admin/listings/bulk-delete", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const { ids } = req.body as { ids?: unknown };
   const cleanIds = Array.isArray(ids)
     ? [...new Set(ids.map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0))]
