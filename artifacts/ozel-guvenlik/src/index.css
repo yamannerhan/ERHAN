@@ -94,18 +94,32 @@
     @apply border-border outline-ring/50;
     box-sizing: border-box;
   }
-  /* overflow yalnÄ±zca body â€” html+body clip fixed alt menÃ¼yÃ¼ bazÄ± tablette yok eder */
+  /* Alt menü body portalında; kök taşmaları artık sabit menüyü etkilemeden kesilebilir. */
   html {
     width: 100%;
     max-width: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
   }
   body {
     width: 100%;
     max-width: 100%;
+    overflow-x: hidden;
     overflow-x: clip;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
     min-height: 100dvh;
     min-height: 100vh;
     @apply bg-background text-foreground font-sans antialiased;
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-x: clip;
   }
   img,
   video,
@@ -974,6 +988,11 @@ html:not(.dark) body {
 .og-app {
   min-height: 100vh;
   min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-x: clip;
   padding-bottom: var(--app-bottom-pad);
   isolation: auto;
   transform: none;
@@ -987,6 +1006,10 @@ html:not(.dark) body {
 .og-main {
   min-height: calc(100vh - 7rem);
   min-height: calc(100dvh - 7rem);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Ä°Ã§erik geniÅŸliÄŸi: telefon 28rem (Xiaomi aynÄ±), tablet orta, masaÃ¼stÃ¼ geniÅŸ */

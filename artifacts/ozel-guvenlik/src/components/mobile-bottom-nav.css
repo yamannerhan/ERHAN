@@ -2,10 +2,9 @@
 
 .og-bottom-nav {
   position: fixed;
-  left: 0;
-  right: 0;
-  width: 100%;
-  bottom: 0;
+  inset-inline: 0;
+  bottom: 0 !important;
+  width: auto;
   z-index: 40;
   pointer-events: none;
   padding-left: 0;
@@ -13,11 +12,14 @@
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
   box-sizing: border-box;
   background: #071221;
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
+  transform: none;
+  -webkit-transform: none;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  max-width: 100%;
+  max-width: none;
+  min-width: 0;
+  overflow: visible;
+  margin: 0;
 }
 
 /* Sohbet / klavye: alt menü klavyenin arkasında sabit, yukarı kalkmaz */

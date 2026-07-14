@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { PwaInstall } from "./pwa-install";
 import { HamburgerDrawer } from "./hamburger-drawer";
 import { BrandLogo } from "./brand-logo";
@@ -88,7 +89,7 @@ function MobileBottomNav() {
 
   const hasDividerAfter = (index: number) => index === 0 || index === 1 || index === 3;
 
-  return (
+  const nav = (
     <nav className="og-bottom-nav" aria-label="Alt menü">
       <div className="og-bottom-nav-wrap">
         <div className="og-bn-arch" aria-hidden>
@@ -152,6 +153,7 @@ function MobileBottomNav() {
       </div>
     </nav>
   );
+  return typeof document === "undefined" ? nav : createPortal(nav, document.body);
 }
 
 /* ── Layout ───────────────────────────────────────────────── */
