@@ -1,5 +1,5 @@
 import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
-import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc, ne } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
@@ -180,6 +180,8 @@ const LISTING_TTL_DAYS = 15;
 const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 90 * 1000;
+/** WhatsApp derin tarama uzun sürer — TG 90s kilidi WA'yı bozmasın */
+const WA_STALE_SCAN_LOCK_MS = 45 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
 const WA_MESSAGE_PROCESS_DELAY_MS = 200;
 const WA_GROUP_GAP_MS = 12_000;
@@ -501,8 +503,9 @@ async function processMessage(
   if (!text?.trim() || isChatMessage(text)) return "skipped";
   if (!isSecurityJobPosting(text)) return "skipped";
 
-  if (isInitialScan && postedAt && Date.now() - postedAt.getTime() > INITIAL_SCAN_MS) {
-    return "skipped";
+  if (isInitialScan && postedAt) {
+    const maxAgeMs = source.platform === "whatsapp" ? WA_INITIAL_SCAN_MS : INITIAL_SCAN_MS;
+    if (Date.now() - postedAt.getTime() > maxAgeMs) return "skipped";
   }
 
   const explicitLocation = extractExplicitWorkLocation(text);
@@ -823,16 +826,45 @@ async function releaseStaleScanLocks(forceAll = false): Promise<number> {
     }
     return released.length;
   }
+  // Rutin temizlik: WhatsApp'ı 90s ile açma (derin tarama bozulur)
   const staleBefore = new Date(Date.now() - STALE_SCAN_LOCK_MS);
   const released = await db.update(sourcesTable)
     .set({ isScanning: false })
     .where(and(
       eq(sourcesTable.isScanning, true),
+      ne(sourcesTable.platform, "whatsapp"),
       sql`(${sourcesTable.lastCheckedAt} IS NULL OR ${sourcesTable.lastCheckedAt} < ${staleBefore})`,
     ))
     .returning({ id: sourcesTable.id });
   if (released.length > 0) {
     logger.warn({ count: released.length }, "scraper: eski scan kilidi temizlendi");
+  }
+  return released.length;
+}
+
+/** Sadece WhatsApp — uzun TTL (derin tarama bozulmasın) */
+async function releaseStaleWhatsAppScanLocks(forceAll = false): Promise<number> {
+  if (forceAll) {
+    const released = await db.update(sourcesTable)
+      .set({ isScanning: false })
+      .where(and(eq(sourcesTable.isScanning, true), eq(sourcesTable.platform, "whatsapp")))
+      .returning({ id: sourcesTable.id });
+    if (released.length > 0) {
+      logger.warn({ count: released.length }, "scraper: wa takılı scan kilidi temizlendi");
+    }
+    return released.length;
+  }
+  const staleBefore = new Date(Date.now() - WA_STALE_SCAN_LOCK_MS);
+  const released = await db.update(sourcesTable)
+    .set({ isScanning: false })
+    .where(and(
+      eq(sourcesTable.isScanning, true),
+      eq(sourcesTable.platform, "whatsapp"),
+      sql`(${sourcesTable.lastCheckedAt} IS NULL OR ${sourcesTable.lastCheckedAt} < ${staleBefore})`,
+    ))
+    .returning({ id: sourcesTable.id });
+  if (released.length > 0) {
+    logger.warn({ count: released.length }, "scraper: wa eski scan kilidi temizlendi");
   }
   return released.length;
 }
@@ -1688,6 +1720,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
         : "WhatsApp geçmişi yükleniyor (Chromium’un verdiği kadar, en eski→yeni)…")
       : null,
     isScanning: true,
+    lastCheckedAt: new Date(),
     initialScanPhase: isInitialScan ? "backward" : null,
     initialScanProgress: isInitialScan ? Math.max(2, source.initialScanProgress ?? 1) : 100,
   });
@@ -1702,18 +1735,22 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let historyExhausted = false;
   let fetchRounds = 0;
   let oldestTs = Date.now();
+  const heartbeat = setInterval(() => {
+    void patchSourceProgress(source.id, { lastCheckedAt: new Date(), isScanning: true }).catch(() => undefined);
+  }, 30_000);
   try {
-    // İlk tarama: WA gidebildiği kadar (Chromium); TG ayrı 30g
+    // İlk tarama: derin geçmiş. Artımlı: son mesajdan itibaren (deep yok — kilit çakışmasın)
     const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
       ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true }
-      : { afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS), limit: 1000, deep: true });
+      : { afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS), limit: 1000 });
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
     historyExhausted = fetched.historyExhausted;
     fetchRounds = fetched.rounds;
     oldestTs = fetched.oldestTs || Date.now();
-      } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
+  } catch (e) {
+    clearInterval(heartbeat);
+    const errMsg = e instanceof Error ? e.message : String(e);
     await patchSourceProgress(source.id, {
       lastError: errMsg.slice(0, 500),
       isScanning: false,
@@ -1727,6 +1764,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 
   // İlk taramada 0 mesaj: done yapma — imleç korunur
   if (isInitialScan && messages.length === 0) {
+    clearInterval(heartbeat);
     await patchSourceProgress(source.id, {
       lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).",
       isScanning: false,
@@ -1789,6 +1827,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       const batchPct = Math.min(99, Math.round((processed / Math.max(messages.length, 1)) * 100));
       liveProgress = Math.max(liveProgress, depthPct, Math.min(95, Math.round(batchPct * 0.85 + depthPct * 0.15)));
       await patchSourceProgress(source.id, {
+        lastCheckedAt: new Date(),
         initialScanProgress: liveProgress,
         lastScanMessagesRead: processed,
         lastScanAdded: stats.added,
@@ -1800,6 +1839,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     await sleep(isInitialScan ? WA_MESSAGE_PROCESS_DELAY_MS : MESSAGE_PROCESS_DELAY_MS);
   }
 
+  clearInterval(heartbeat);
   stats.maxId = maxTs;
 
   // 30g hedef; WA/Chromium yetmezse gidebildiği kadar (historyExhausted) → ilk tarama bitsin
@@ -1942,10 +1982,10 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
           ))
           .limit(3);
         if (stuck.length > 0) {
-          await releaseStaleScanLocks();
+          await releaseStaleWhatsAppScanLocks();
           idleLoops++;
           if (idleLoops > 12) {
-            await releaseStaleScanLocks(true);
+            await releaseStaleWhatsAppScanLocks(true);
             idleLoops = 0;
           }
           await sleep(5_000);

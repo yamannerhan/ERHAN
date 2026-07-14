@@ -20,6 +20,20 @@ let manualStop = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+/** Puppeteer sayfasını aynı anda getChats + deep fetch paylaşmasın */
+let pageBusy: Promise<void> = Promise.resolve();
+
+async function withWhatsAppPageLock<T>(fn: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const previous = pageBusy;
+  pageBusy = new Promise<void>((resolve) => { release = resolve; });
+  await previous.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
@@ -520,49 +534,61 @@ export async function stopWhatsAppClient(): Promise<void> {
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
-  const byId = new Map<string, WhatsAppChannel>();
+  return withWhatsAppPageLock(async () => {
+    const byId = new Map<string, WhatsAppChannel>();
 
-  try {
-    const chats = await client.getChats();
-    for (const c of chats as any[]) {
-      const id = String(c?.id?._serialized ?? "");
-      if (!id) continue;
-      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
-      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
-      if (!isChannel && !isGroup) continue;
-      byId.set(id, {
-        id,
-        name: String(c.name || c.formattedTitle || id),
-        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
-        kind: isChannel ? "channel" : "group",
-      });
-    }
-  } catch (e) {
-    logger.warn({ err: e }, "wa: getChats failed");
-  }
-
-  // Abone olunan kanallar — getChats bazen eksik bırakır
-  try {
-    if (typeof client.getChannels === "function") {
-      const channels = await client.getChannels();
-      for (const c of channels as any[]) {
+    const pullChats = async () => {
+      const chats = await client.getChats();
+      for (const c of chats as any[]) {
         const id = String(c?.id?._serialized ?? "");
         if (!id) continue;
+        const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
+        const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
+        if (!isChannel && !isGroup) continue;
         byId.set(id, {
           id,
           name: String(c.name || c.formattedTitle || id),
-          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
-          kind: "channel",
+          participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
+          kind: isChannel ? "channel" : "group",
         });
       }
-    }
-  } catch (e) {
-    logger.warn({ err: e }, "wa: getChannels failed");
-  }
+    };
 
-  return [...byId.values()].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
-    return a.name.localeCompare(b.name, "tr");
+    try {
+      await pullChats();
+    } catch (e) {
+      logger.warn({ err: e }, "wa: getChats failed — retry");
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        await pullChats();
+      } catch (e2) {
+        logger.warn({ err: e2 }, "wa: getChats retry failed");
+      }
+    }
+
+    // Abone olunan kanallar — getChats bazen eksik bırakır
+    try {
+      if (typeof client.getChannels === "function") {
+        const channels = await client.getChannels();
+        for (const c of channels as any[]) {
+          const id = String(c?.id?._serialized ?? "");
+          if (!id) continue;
+          byId.set(id, {
+            id,
+            name: String(c.name || c.formattedTitle || id),
+            participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
+            kind: "channel",
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn({ err: e }, "wa: getChannels failed");
+    }
+
+    return [...byId.values()].sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
+      return a.name.localeCompare(b.name, "tr");
+    });
   });
 }
 
@@ -652,6 +678,18 @@ export async function fetchWhatsAppMessagesDetailed(
     return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
   }
 
+  return withWhatsAppPageLock(() => fetchWhatsAppMessagesDetailedUnlocked(groupJid, opts));
+}
+
+async function fetchWhatsAppMessagesDetailedUnlocked(
+  groupJid: string,
+  opts: {
+    afterTimestampMs?: number;
+    limit?: number;
+    maxAgeDays?: number;
+    deep?: boolean;
+  },
+): Promise<WhatsAppFetchResult> {
   const page = (client as any).pupPage;
   try {
     // Sohbeti aç — geçmiş senkronu için şart
