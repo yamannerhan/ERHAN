@@ -168,6 +168,9 @@ export function KnownCompaniesAdminSection({
           <p className="text-sm text-muted-foreground">
             Botların çektiği ilanlarda şirket adı (İ/I, ü/u, kısaltma) eşleşince logo otomatik gelir.
           </p>
+          <p className="text-xs font-medium text-amber-300 mt-1">
+            Logo ölçüsü: 512 × 512 piksel kare PNG veya WebP. Yüklenen logo ilanlarda yuvarlak görünür.
+          </p>
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -189,6 +192,9 @@ export function KnownCompaniesAdminSection({
             <p className="text-xs text-muted-foreground">
               Değiştirildiğinde firma adı olmayan mevcut ve yeni ilanlarda anında kullanılır.
             </p>
+            <p className="text-xs font-medium text-amber-300 mt-1">
+              Önerilen boyut: 512 × 512 piksel · PNG/WebP · yuvarlak gösterim
+            </p>
           </div>
           <input
             ref={defaultLogoRef}
@@ -202,6 +208,7 @@ export function KnownCompaniesAdminSection({
             variant="outline"
             onClick={() => defaultLogoRef.current?.click()}
             disabled={defaultLogoUploading}
+            title="512 × 512 piksel kare PNG veya WebP yükleyin"
           >
             {defaultLogoUploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
             Varsayılan logoyu değiştir
@@ -227,9 +234,13 @@ export function KnownCompaniesAdminSection({
           {items.map((c) => (
             <div key={c.id} className="rounded-lg border p-3 space-y-2">
               <div className="flex items-start gap-3">
-                <div className="h-14 w-14 rounded bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                <div className="h-14 w-14 rounded-full bg-white border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
                   {c.logoUrl ? (
-                    <img src={`${c.logoUrl}?t=${c.id}`} alt="" className="max-h-full max-w-full object-contain" />
+                    <img
+                      src={`${c.logoUrl}?t=${c.id}`}
+                      alt=""
+                      className="w-full h-full max-h-full max-w-full rounded-full object-contain box-border p-1"
+                    />
                   ) : (
                     <ImageIcon className="h-6 w-6 text-muted-foreground" />
                   )}
@@ -252,6 +263,7 @@ export function KnownCompaniesAdminSection({
                   size="sm"
                   variant="outline"
                   disabled={uploadingId === c.id}
+                  title="512 × 512 piksel kare PNG veya WebP yükleyin"
                   onClick={() => fileRefs.current[c.id]?.click()}
                 >
                   {uploadingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}

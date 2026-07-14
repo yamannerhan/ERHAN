@@ -38,7 +38,8 @@ function loadPrefs(): Prefs {
     const p = JSON.parse(raw) as Prefs;
     return {
       radius: RADII.includes(p.radius as (typeof RADII)[number]) ? p.radius : 50,
-      sort: SORTS.some((s) => s.id === p.sort) ? p.sort : "distance",
+      // Her yeni "Yakınımda Ara" akışı en yakından uzağa başlar.
+      sort: "distance",
       filters: Array.isArray(p.filters) ? p.filters : [],
     };
   } catch {

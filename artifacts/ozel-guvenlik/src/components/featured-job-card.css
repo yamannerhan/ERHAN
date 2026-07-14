@@ -97,7 +97,7 @@
   grid-area: logo;
   width: clamp(32px, 18cqw, 44px);
   height: clamp(32px, 18cqw, 44px);
-  border-radius: 10px;
+  border-radius: 50%;
   padding: 3px;
 }
 

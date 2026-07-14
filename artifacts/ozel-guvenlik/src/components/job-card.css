@@ -400,7 +400,7 @@
   .og-job__logo {
     width: 56px;
     height: 56px;
-    border-radius: 12px;
+    border-radius: 50%;
   }
   .og-job__title { font-size: 14.5px; }
   .og-job__company-name { font-size: 11px; }

@@ -85,6 +85,8 @@ export async function backfillListingCoordinates(limit = 200): Promise<number> {
 type NearbyRow = {
   listing: typeof listingsTable.$inferSelect;
   distanceKm: number | null;
+  /** Yuvarlanmamış mesafe; doğru yakınlık sıralaması için yalnızca sunucuda kullanılır. */
+  sortDistanceKm: number | null;
   sameDistrict: boolean;
   approximate: boolean;
 };
@@ -219,6 +221,7 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
         locationAccuracy: accuracy,
       },
       distanceKm: Math.round(dist * 10) / 10,
+      sortDistanceKm: dist,
       sameDistrict: false,
       approximate: approx,
     });
@@ -265,6 +268,7 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       scored.push({
         listing,
         distanceKm: null,
+        sortDistanceKm: null,
         sameDistrict: true,
         approximate: false,
       });
@@ -283,10 +287,13 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       const sb = Number(b.listing.salaryMin ?? b.listing.salaryMax ?? 0);
       return sb - sa;
     }
-    if (a.distanceKm == null && b.distanceKm == null) return 0;
-    if (a.distanceKm == null) return 1;
-    if (b.distanceKm == null) return -1;
-    return a.distanceKm - b.distanceKm;
+    if (a.sortDistanceKm == null && b.sortDistanceKm == null) {
+      return b.listing.id - a.listing.id;
+    }
+    if (a.sortDistanceKm == null) return 1;
+    if (b.sortDistanceKm == null) return -1;
+    const distanceDifference = a.sortDistanceKm - b.sortDistanceKm;
+    return distanceDifference !== 0 ? distanceDifference : b.listing.id - a.listing.id;
   });
 
   const total = scored.length;
