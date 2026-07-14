@@ -126,7 +126,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     lastCheckedAt: new Date(),
     sourceUrl: job.sourceUrl ?? null,
     companyLogoUrl,
-    applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "")),
+    applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "").slice(0, 1)),
     autoDeleteOnExpiry: true,
     expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
     publishedAt: job.createdAt ?? new Date(),

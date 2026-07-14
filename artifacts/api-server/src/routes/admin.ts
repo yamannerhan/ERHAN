@@ -1717,6 +1717,7 @@ const BOT_SOURCE_TAGS = ["telegram", "whatsapp", "eleman", "demo"] as const;
 const STAFF_FEATURE_DAYS = 3;
 
 router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  const isAdminRequest = req.user?.role === "admin";
   const page = Math.max(1, parseInt(String(req.query["page"] ?? "1"), 10));
   const requestedLimit = req.query["limit"] === "all" ? 500 : parseInt(String(req.query["limit"] ?? "50"), 10);
   const limit = Math.min(500, Math.max(1, requestedLimit || 50));
@@ -1799,11 +1800,22 @@ router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (re
       const isUserListing = !!l.authorId && (!l.sourceTag || !(BOT_SOURCE_TAGS as readonly string[]).includes(l.sourceTag));
       return {
         id: l.id, title: l.title, company, city: l.city, salary: l.salary,
-        workType: l.workType, description: l.description, requirements: l.requirements,
+        workType: l.workType,
+        description: l.description,
+        requirements: isAdminRequest
+          ? l.requirements
+          : l.requirements
+            ?.split(/\r?\n/)
+            .filter((line) => !/^\s*kaynak\s*:/i.test(line))
+            .join("\n")
+            .trim() || null,
         status: l.status, isFeatured: l.isFeatured, cardTheme: l.cardTheme, likeCount: l.likeCount,
-        applyUrl: l.applyUrl, sourceTag: l.sourceTag,
-        sourceUrl: l.sourceUrl ?? null,
-        messageId: l.messageId ?? null,
+        applyUrl: l.applyUrl,
+        ...(isAdminRequest ? {
+          sourceTag: l.sourceTag,
+          sourceUrl: l.sourceUrl ?? null,
+          messageId: l.messageId ?? null,
+        } : {}),
         featuredUntil: l.featuredUntil?.toISOString() ?? null,
         authorId: l.authorId ?? null,
         authorUsername: author?.username ?? null,

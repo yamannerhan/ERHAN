@@ -400,8 +400,8 @@ export function extractPhoneNumbers(text: string): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
   const patterns = [
-    /(?:\+90|0)?[\s\-./()]*(?:5(?:[\s\-./()]*\d){9})/g,
-    /(?<!\d)5(?:[\s\-./()]*\d){9}(?!\d)/g,
+    /(?:\+90|0)?[ \t\-./()]*(?:5(?:[ \t\-./()]*\d){9})/g,
+    /(?<!\d)5(?:[ \t\-./()]*\d){9}(?!\d)/g,
   ];
   for (const re of patterns) {
     re.lastIndex = 0;
@@ -425,6 +425,25 @@ export function extractPhoneNumbers(text: string): string[] {
     }
   }
   return found;
+}
+
+/** Bot metnindeki tekrar/yanlış eklenmiş telefonları temizleyip ilk gerçek numarayı korur. */
+export function keepPrimaryPhoneInText(text: string): string {
+  if (!text) return text;
+  let kept = false;
+  const phonePattern = /(?<!\d)(?:\+90|0)?[ \t\-./()]*(?:5(?:[ \t\-./()]*\d){9})(?!\d)/g;
+  return text
+    .replace(phonePattern, (raw) => {
+      const phone = extractPhoneNumbers(raw)[0];
+      if (!phone) return raw;
+      if (kept) return "";
+      kept = true;
+      return phone;
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]*([/,|])[ \t]*(?=\1|$)/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** İlk bulunan numara — geriye uyumlu. */

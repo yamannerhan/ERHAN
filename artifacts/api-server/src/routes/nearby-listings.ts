@@ -12,7 +12,7 @@ import {
 import { listDistrictsForProvince, listProvinces, resolveDistrictCenter } from "../lib/geo-centers";
 import { db, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
-import { extractPhoneNumbers, formatTelApplyUrl } from "../lib/job-parsing";
+import { extractPhoneNumbers, formatTelApplyUrl, keepPrimaryPhoneInText } from "../lib/job-parsing";
 import { matchKnownCompanySync, isPlaceholderListingLogo } from "../lib/known-companies";
 
 const router = Router();
@@ -34,15 +34,19 @@ function formatNearbyListing(
   favIds?: Set<number>,
 ) {
   const isAuth = userId != null;
-  const rawDesc = listing.description;
+  const rawDesc = listing.description && listing.sourceType === "bot_imported"
+    ? keepPrimaryPhoneInText(listing.description)
+    : listing.description;
   let rawApplyUrl = listing.applyUrl;
   if (rawApplyUrl && /t\.me\/|telegram\.me\/|wa\.me\//i.test(rawApplyUrl)) {
-    rawApplyUrl = formatTelApplyUrl(extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`));
+    rawApplyUrl = formatTelApplyUrl(
+      extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`).slice(0, 1),
+    );
   } else if (rawApplyUrl?.startsWith("tel:") || !rawApplyUrl) {
     const merged = formatTelApplyUrl([
       ...extractPhoneNumbers(rawApplyUrl ?? ""),
       ...extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`),
-    ]);
+    ].slice(0, 1));
     if (merged) rawApplyUrl = merged;
   }
   const description = rawDesc ? (isAuth ? rawDesc : maskContactInfo(rawDesc)) : null;
@@ -75,7 +79,11 @@ function formatNearbyListing(
     workType: listing.workType,
     employmentType: listing.workType,
     description,
-    requirements: listing.requirements,
+    requirements: listing.requirements
+      ?.split(/\r?\n/)
+      .filter((line) => !/^\s*kaynak\s*:/i.test(line))
+      .join("\n")
+      .trim() || null,
     applyUrl,
     companyLogoUrl,
     companyVerified,

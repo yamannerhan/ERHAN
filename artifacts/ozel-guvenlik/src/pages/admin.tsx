@@ -6175,9 +6175,9 @@ export default function AdminDashboard() {
                         "bg-destructive/20 text-destructive"
                       }`}>{l.status === "active" ? "Aktif" : l.status === "inactive" ? "Pasif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
                       {l.isUserListing && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Kullanıcı</span>}
-                      {l.sourceTag === "eleman" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Eleman.net</span>}
-                      {l.sourceTag === "whatsapp" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 font-medium">WhatsApp</span>}
-                      {l.sourceTag === "telegram" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Telegram</span>}
+                      {isAdmin && l.sourceTag === "eleman" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Eleman.net</span>}
+                      {isAdmin && l.sourceTag === "whatsapp" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 font-medium">WhatsApp</span>}
+                      {isAdmin && l.sourceTag === "telegram" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Telegram</span>}
                       {l.isFeatured && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">Öne Çıkan</span>}
                       {l.featuredUntil && <span className="text-[10px] text-amber-200/80">Öne: {formatDate(l.featuredUntil)}</span>}
                       {l.expiresAt && <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5" />{formatDate(l.expiresAt)}</span>}

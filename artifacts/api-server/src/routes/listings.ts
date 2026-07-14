@@ -18,7 +18,7 @@ import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
-import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumbers, extractSalary, extractTitle, extractWorkType, formatTelApplyUrl, normalizeSalaryString } from "../lib/job-parsing";
+import { buildListingRequirements, createSmartListingImage, extractBenefits, extractCompany, extractGender, extractLocation, extractPhoneNumbers, extractSalary, extractTitle, extractWorkType, formatTelApplyUrl, keepPrimaryPhoneInText, normalizeSalaryString } from "../lib/job-parsing";
 import { getRegionalDistrictProvinces } from "../lib/location-terms";
 import {
   districtsAndLandmarksForSide,
@@ -359,6 +359,16 @@ type CompanyOverlay = {
   id: number;
 };
 
+function hideSourceRequirementLines(requirements: string | null): string | null {
+  if (!requirements) return requirements;
+  const visible = requirements
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*kaynak\s*:/i.test(line))
+    .join("\n")
+    .trim();
+  return visible || null;
+}
+
 function formatListing(
   listing: typeof listingsTable.$inferSelect,
   userId?: number,
@@ -369,22 +379,24 @@ function formatListing(
   opts?: { includeSourceMeta?: boolean },
 ) {
   const isAuth = userId != null;
-  const rawDesc = listing.description;
+  const rawDesc = listing.description && listing.sourceType === "bot_imported"
+    ? keepPrimaryPhoneInText(listing.description)
+    : listing.description;
   let rawApplyUrl = listing.applyUrl;
 
-  // Telegram/WA linkine düşme — açıklamadan telefon varsa tel: kullan (tüm numaralar)
+  // Telegram/WA linkine düşme — açıklamadaki ilk gerçek telefonu kullan.
   if (rawApplyUrl && /t\.me\/|telegram\.me\/|wa\.me\//i.test(rawApplyUrl)) {
-    const phones = extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`);
+    const phones = extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}\n${listing.title}`).slice(0, 1);
     rawApplyUrl = formatTelApplyUrl(phones);
   } else if (!rawApplyUrl && rawDesc) {
-    const phones = extractPhoneNumbers(`${rawDesc}\n${listing.requirements ?? ""}\n${listing.title}`);
+    const phones = extractPhoneNumbers(`${rawDesc}\n${listing.requirements ?? ""}\n${listing.title}`).slice(0, 1);
     if (phones.length) rawApplyUrl = formatTelApplyUrl(phones);
   } else if (rawApplyUrl?.startsWith("tel:")) {
-    // applyUrl + açıklamadaki ekstra numaraları birleştir
+    // Eski bot kayıtlarında birikmiş numaraları kullanıcıya çoğaltma.
     const phones = [
       ...extractPhoneNumbers(rawApplyUrl),
       ...extractPhoneNumbers(`${rawDesc ?? ""}\n${listing.requirements ?? ""}`),
-    ];
+    ].slice(0, 1);
     const merged = formatTelApplyUrl(phones);
     if (merged) rawApplyUrl = merged;
   }
@@ -430,7 +442,9 @@ function formatListing(
     salary: listing.salary,
     workType: listing.workType,
     description,
-    requirements: listing.requirements,
+    requirements: opts?.includeSourceMeta
+      ? listing.requirements
+      : hideSourceRequirementLines(listing.requirements),
     status: listing.status,
     viewCount: listing.viewCount,
     likeCount: listing.likeCount,
@@ -445,25 +459,21 @@ function formatListing(
     companyVerified,
     authorId: listing.authorId,
     authorUsername: authorUsername ?? null,
-    sourceTag: listing.sourceTag ?? null,
-    sourceType: listing.sourceType ?? null,
-    sourceName: listing.sourceName ?? null,
-    verifiedPublisher: !!listing.verifiedPublisher,
-    directPriorityUntil: listing.directPriorityUntil ? listing.directPriorityUntil.toISOString() : null,
-    freshnessConfirmedAt: listing.freshnessConfirmedAt ? listing.freshnessConfirmedAt.toISOString() : null,
-    lastCheckedAt: listing.lastCheckedAt
-      ? listing.lastCheckedAt.toISOString()
-      : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
-    sourcePublishedAt: listing.sourcePublishedAt
-      ? listing.sourcePublishedAt.toISOString()
-      : null,
-    badges: listingBadgeMeta(listing),
-    // Bot kaynak linki: herkese (nofollow önerilir FE'de); admin meta ayrı
-    ...(listing.sourceType === "bot_imported" && listing.sourceUrl
-      ? { sourceUrl: listing.sourceUrl }
-      : {}),
     ...(opts?.includeSourceMeta
       ? {
+          sourceTag: listing.sourceTag ?? null,
+          sourceType: listing.sourceType ?? null,
+          sourceName: listing.sourceName ?? null,
+          verifiedPublisher: !!listing.verifiedPublisher,
+          directPriorityUntil: listing.directPriorityUntil ? listing.directPriorityUntil.toISOString() : null,
+          freshnessConfirmedAt: listing.freshnessConfirmedAt ? listing.freshnessConfirmedAt.toISOString() : null,
+          lastCheckedAt: listing.lastCheckedAt
+            ? listing.lastCheckedAt.toISOString()
+            : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
+          sourcePublishedAt: listing.sourcePublishedAt
+            ? listing.sourcePublishedAt.toISOString()
+            : null,
+          badges: listingBadgeMeta(listing),
           sourceUrl: listing.sourceUrl ?? null,
           messageId: listing.messageId ?? null,
         }

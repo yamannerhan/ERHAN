@@ -469,15 +469,17 @@ export default function ListingDetail() {
                 </div>
               </div>
 
-              <ListingSourceInfoCard listing={{
-                sourceType: ext?.sourceType,
-                sourceName: ext?.sourceName,
-                verifiedPublisher: ext?.verifiedPublisher,
-                lastCheckedAt: ext?.lastCheckedAt,
-                lastSeenAt: ext?.lastSeenAt,
-                sourceUrl: ext?.sourceUrl,
-                badges: ext?.badges,
-              }} />
+              {isAdminOnly && (
+                <ListingSourceInfoCard listing={{
+                  sourceType: ext?.sourceType,
+                  sourceName: ext?.sourceName,
+                  verifiedPublisher: ext?.verifiedPublisher,
+                  lastCheckedAt: ext?.lastCheckedAt,
+                  lastSeenAt: ext?.lastSeenAt,
+                  sourceUrl: ext?.sourceUrl,
+                  badges: ext?.badges,
+                }} />
+              )}
 
               {listing.description && (
                 <>
@@ -546,12 +548,14 @@ export default function ListingDetail() {
                     {ext?.authorUsername && (
                       <div><span className="text-muted-foreground">Yayınlayan:</span> @{ext.authorUsername}</div>
                     )}
-                    {ext?.sourceTag ? (
-                      <div><span className="text-muted-foreground">Kaynak:</span>{" "}
-                        {ext.sourceTag === "telegram" ? "Telegram" : ext.sourceTag === "whatsapp" ? "WhatsApp" : ext.sourceTag === "eleman" ? "Eleman.net" : ext.sourceTag}
-                      </div>
-                    ) : (
-                      <div><span className="text-muted-foreground">Kaynak:</span> Kullanıcı ilanı</div>
+                    {isAdminOnly && (
+                      ext?.sourceTag ? (
+                        <div><span className="text-muted-foreground">Kaynak:</span>{" "}
+                          {ext.sourceTag === "telegram" ? "Telegram" : ext.sourceTag === "whatsapp" ? "WhatsApp" : ext.sourceTag === "eleman" ? "Eleman.net" : ext.sourceTag}
+                        </div>
+                      ) : (
+                        <div><span className="text-muted-foreground">Kaynak:</span> Kullanıcı ilanı</div>
+                      )
                     )}
                   </div>
                 )}

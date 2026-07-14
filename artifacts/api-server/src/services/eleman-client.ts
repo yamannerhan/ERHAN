@@ -244,8 +244,7 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     if (!Number.isNaN(d.getTime())) postedAt = d;
   }
 
-  const phoneJoined = phones.join(",");
-  const rawText = [title, companyName, finalizeElemanListingText(description, phoneJoined)]
+  const rawText = [title, companyName, finalizeElemanListingText(description, phone)]
     .filter(Boolean)
     .join("\n\n");
   return {

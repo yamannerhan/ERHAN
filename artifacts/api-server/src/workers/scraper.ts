@@ -555,8 +555,9 @@ async function processMessage(
   });
   const city = v2City.city;
   const salary = extractSalary(text);
-  const phones = extractPhones(text);
-  const phone = phones[0] ?? null;
+  // Bir bot mesajı tek ilanı temsil eder; sayfa/ileti geçmişinden taşan
+  // numaraların aynı ilana eklenmesini önlemek için yalnızca ilk numarayı al.
+  const phones = extractPhones(text).slice(0, 1);
   const phoneField = phones.length ? phones.join(",") : null;
   const gender = extractGender(text);
   const workType = extractWorkType(text);
@@ -1376,9 +1377,12 @@ async function publishElemanJob(
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
   const city = parsedCity !== "Türkiye" ? parsedCity : (jobCity ?? parsedCity);
   const gender = extractGender(job.rawText);
+  const contactPhones = extractPhoneNumbers(
+    `${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`,
+  ).slice(0, 1);
   const cleanDescription = finalizeElemanListingText(
     job.description || job.rawText,
-    extractPhoneNumbers(`${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`).join(", ") || job.phone,
+    contactPhones[0] || job.phone || "",
   );
 
   const postedAt = job.postedAt ?? now;
@@ -1410,7 +1414,7 @@ async function publishElemanJob(
     sourcePublishedAt: postedAt,
     verifiedPublisher: false,
     lastCheckedAt: now,
-    applyUrl: formatTelApplyUrl(extractPhoneNumbers(`${job.phone || ""}\n${job.description || ""}\n${job.rawText || ""}`)),
+    applyUrl: formatTelApplyUrl(contactPhones),
     companyLogoUrl: brand?.logoUrl ?? null,
     publishedAt: postedAt,
     firstSeenAt: now,
@@ -2726,7 +2730,7 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     const newCity = v2.city;
     const newSalary = extractSalary(row.description || text);
     const newGender = extractGender(row.description || text);
-    const newPhones = extractPhones(row.description || text);
+    const newPhones = extractPhones(row.description || text).slice(0, 1);
     const newPhone = newPhones[0] ?? null;
 
     // Mevcut "Kaynak:" satırını koru
