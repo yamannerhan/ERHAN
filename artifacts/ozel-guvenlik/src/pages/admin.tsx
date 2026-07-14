@@ -3405,7 +3405,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       toast({
         title: usePairing ? "Onay kodu bekleniyor" : "QR bağlantısı başlatıldı",
         description: usePairing
-          ? "QR açılmaz. Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan"
+          ? "Kod 30–45 sn sürebilir. Tekrar tekrar basmayın (WhatsApp engeller). Gelmezse QR deneyin."
           : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut",
       });
     } catch (error) {
