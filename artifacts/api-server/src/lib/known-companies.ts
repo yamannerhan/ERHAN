@@ -82,11 +82,6 @@ function companyVariantScore(input: string, known: string): number {
   const inputCore = normalizeCompanyCore(input);
   const knownCore = normalizeCompanyCore(known);
   if (inputCore === knownCore) return 9_000 + knownCore.length;
-  const shorter = inputCore.length <= knownCore.length ? inputCore : knownCore;
-  const longer = inputCore.length <= knownCore.length ? knownCore : inputCore;
-  if (shorter.length >= 3 && (longer === shorter || longer.startsWith(`${shorter} `))) {
-    return 5_000 + shorter.split(" ").length * 100 + shorter.length;
-  }
   return 0;
 }
 
