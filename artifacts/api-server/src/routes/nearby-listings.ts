@@ -14,6 +14,10 @@ import { db, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { extractPhoneNumbers, formatTelApplyUrl, keepPrimaryPhoneInText } from "../lib/job-parsing";
 import { matchKnownCompanySync, isPlaceholderListingLogo } from "../lib/known-companies";
+import {
+  loadListingCompanyOverlays,
+  type ListingCompanyOverlay,
+} from "../lib/listing-company-overlays";
 
 const router = Router();
 
@@ -32,6 +36,7 @@ function formatNearbyListing(
   approximate: boolean,
   userId?: number,
   favIds?: Set<number>,
+  companyOverlay?: ListingCompanyOverlay,
 ) {
   const isAuth = userId != null;
   const rawDesc = listing.description && listing.sourceType === "bot_imported"
@@ -54,8 +59,8 @@ function formatNearbyListing(
     ? (isAuth ? rawApplyUrl : (rawApplyUrl.startsWith("tel:") || rawApplyUrl.startsWith("http") ? "auth_required" : rawApplyUrl))
     : null;
 
-  let companyLogoUrl = listing.companyLogoUrl;
-  let companyVerified = false;
+  let companyLogoUrl = companyOverlay?.logoPath ?? listing.companyLogoUrl;
+  let companyVerified = companyOverlay?.isVerified ?? false;
   try {
     if (isPlaceholderListingLogo(companyLogoUrl)) {
       const brand = matchKnownCompanySync(listing.company);
@@ -192,6 +197,7 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
 
   try {
     const { total, rows } = await findNearbyListings(query);
+    const companyOverlays = await loadListingCompanyOverlays(rows.map((row) => row.listing));
     const userId = req.user?.id;
     let favIds: Set<number> | undefined;
     if (userId && rows.length > 0) {
@@ -221,7 +227,15 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
       listings: rows.map((r) =>
-        formatNearbyListing(r.listing, r.distanceKm, r.sameDistrict, r.approximate, userId, favIds),
+        formatNearbyListing(
+          r.listing,
+          r.distanceKm,
+          r.sameDistrict,
+          r.approximate,
+          userId,
+          favIds,
+          companyOverlays.get(r.listing.id),
+        ),
       ),
     });
   } catch (e) {

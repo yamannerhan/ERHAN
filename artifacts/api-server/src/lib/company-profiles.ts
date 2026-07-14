@@ -1,7 +1,13 @@
 import { db, companyProfilesTable, usersTable, listingsTable } from "@workspace/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import crypto from "node:crypto";
 
 let schemaReady = false;
+
+function persistentLogoPath(profileId: number, logoData: string): string {
+  const version = crypto.createHash("sha256").update(logoData).digest("hex").slice(0, 12);
+  return `/api/company-logos/profile_${profileId}_${version}.webp`;
+}
 
 /** company_profiles + listings.company_profile_id — güvenli bootstrap */
 export async function ensureCompanySchema(): Promise<void> {
@@ -83,7 +89,7 @@ export async function rememberEmployerBasics(
     if (usableName) patch.companyName = usableName;
     if (phone) patch.phone = phone;
     if (incomingLogoData) {
-      savedLogoPath = `/api/company-logos/profile_${existing.id}.webp`;
+      savedLogoPath = persistentLogoPath(existing.id, incomingLogoData);
       patch.logoPath = savedLogoPath;
       patch.logoData = incomingLogoData;
     } else if (logoPath) {
@@ -110,7 +116,7 @@ export async function rememberEmployerBasics(
 
     if (profileId) {
       if (incomingLogoData) {
-        savedLogoPath = `/api/company-logos/profile_${profileId}.webp`;
+        savedLogoPath = persistentLogoPath(profileId, incomingLogoData);
         await db.update(companyProfilesTable)
           .set({ logoPath: savedLogoPath })
           .where(eq(companyProfilesTable.id, profileId));

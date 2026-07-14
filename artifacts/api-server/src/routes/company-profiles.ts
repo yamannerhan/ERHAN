@@ -200,22 +200,31 @@ router.post(
       .resize(512, 512, { fit: "cover", position: "centre" })
       .webp({ quality: 82 })
       .toBuffer();
+    let wroteToDisk = false;
     try {
       fs.writeFileSync(filepath, processedLogo);
+      wroteToDisk = true;
     } catch { /* DB kopyası kalıcı kaynak olarak kullanılacak */ }
 
     const logoPath = `/api/company-logos/${filename}`;
+    let updated: typeof companyProfilesTable.$inferSelect | undefined;
+    try {
+      [updated] = await db
+        .update(companyProfilesTable)
+        .set({
+          logoPath,
+          logoData: processedLogo.toString("base64"),
+          updatedAt: new Date(),
+        })
+        .where(eq(companyProfilesTable.id, existing.id))
+        .returning();
+    } catch (error) {
+      if (wroteToDisk) {
+        try { fs.unlinkSync(filepath); } catch { /* ignore cleanup failure */ }
+      }
+      throw error;
+    }
     deleteLogoFile(existing.logoPath);
-
-    const [updated] = await db
-      .update(companyProfilesTable)
-      .set({
-        logoPath,
-        logoData: processedLogo.toString("base64"),
-        updatedAt: new Date(),
-      })
-      .where(eq(companyProfilesTable.id, existing.id))
-      .returning();
 
     res.json(profileJson(updated!));
   },
@@ -233,12 +242,12 @@ router.delete("/company-profiles/me/logo", authMiddleware, async (req, res): Pro
     res.status(404).json({ error: "Şirket profili yok" });
     return;
   }
-  deleteLogoFile(existing.logoPath);
   const [updated] = await db
     .update(companyProfilesTable)
     .set({ logoPath: null, logoData: null, updatedAt: new Date() })
     .where(eq(companyProfilesTable.id, existing.id))
     .returning();
+  deleteLogoFile(existing.logoPath);
   res.json(profileJson(updated!));
 });
 
@@ -305,13 +314,23 @@ router.get("/company-logos/:filename", async (req, res): Promise<void> => {
     return;
   }
 
-  const [profile] = await db.select({ logoData: companyProfilesTable.logoData })
+  let [profile] = await db.select({ logoData: companyProfilesTable.logoData })
     .from(companyProfilesTable)
     .where(and(
       eq(companyProfilesTable.logoPath, logoPath),
       isNull(companyProfilesTable.deletedAt),
     ))
     .limit(1);
+  const profileId = Number(filename.match(/^profile_(\d+)(?:_|\.webp$)/)?.[1]);
+  if (!profile?.logoData && Number.isInteger(profileId) && profileId > 0) {
+    [profile] = await db.select({ logoData: companyProfilesTable.logoData })
+      .from(companyProfilesTable)
+      .where(and(
+        eq(companyProfilesTable.id, profileId),
+        isNull(companyProfilesTable.deletedAt),
+      ))
+      .limit(1);
+  }
   if (!profile?.logoData) {
     res.status(404).end();
     return;

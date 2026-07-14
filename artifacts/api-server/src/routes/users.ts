@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { db, usersTable, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { eq, sql, or, desc, ilike } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
+import { loadListingCompanyOverlays } from "../lib/listing-company-overlays";
 
 const router = Router();
 
@@ -212,6 +213,7 @@ router.get("/users/favorites", authMiddleware, async (req, res): Promise<void> =
 
   const listingIds = favs.map(f => f.listingId);
   const listings = await db.select().from(listingsTable).where(sql`${listingsTable.id} = ANY(${listingIds})`);
+  const companyOverlays = await loadListingCompanyOverlays(listings);
 
   res.json(listings.map(l => ({
     id: l.id,
@@ -228,7 +230,8 @@ router.get("/users/favorites", authMiddleware, async (req, res): Promise<void> =
     isFeatured: l.isFeatured,
     cardTheme: l.cardTheme,
     applyUrl: l.applyUrl,
-    companyLogoUrl: l.companyLogoUrl,
+    companyLogoUrl: companyOverlays.get(l.id)?.logoPath ?? l.companyLogoUrl,
+    companyVerified: companyOverlays.get(l.id)?.isVerified ?? false,
     authorId: l.authorId,
     authorUsername: null,
     isLikedByMe: false,
