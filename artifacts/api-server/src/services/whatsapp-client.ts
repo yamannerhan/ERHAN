@@ -592,6 +592,70 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   });
 }
 
+/** WA timestamp sn veya ms olabilir */
+function waTsToMs(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  // 1e12 ≈ 2001 ms; daha küçükse saniye kabul et
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+}
+
+function extractWaText(m: any): string {
+  const raw = m?.body
+    ?? m?.caption
+    ?? m?._data?.body
+    ?? m?._data?.caption
+    ?? m?.list?.description
+    ?? m?.hydratedButtonsMessage?.contentText
+    ?? m?.text
+    ?? "";
+  return String(raw).trim();
+}
+
+async function resolveWhatsAppChat(groupJid: string): Promise<any | null> {
+  if (!client) return null;
+  const jid = String(groupJid || "").trim();
+  if (!jid) return null;
+
+  try {
+    const chat = await client.getChatById(jid);
+    if (chat) return chat;
+  } catch (e) {
+    logger.warn({ err: e, groupJid: jid }, "wa: getChatById failed");
+  }
+
+  if (jid.includes("@newsletter")) {
+    try {
+      if (typeof client.getChannelById === "function") {
+        const ch = await client.getChannelById(jid);
+        if (ch) return ch;
+      }
+    } catch (e) {
+      logger.warn({ err: e, groupJid: jid }, "wa: getChannelById failed");
+    }
+  }
+
+  try {
+    const chats = await client.getChats();
+    const exact = (chats as any[]).find((c) => String(c?.id?._serialized ?? "") === jid);
+    if (exact) return exact;
+    const local = jid.split("@")[0] || "";
+    if (local) {
+      const fuzzy = (chats as any[]).find((c) => {
+        const id = String(c?.id?._serialized ?? "");
+        return id.startsWith(`${local}@`) || id.includes(local);
+      });
+      if (fuzzy) {
+        logger.info({ wanted: jid, found: fuzzy.id?._serialized }, "wa: chat fuzzy eşleşti");
+        return fuzzy;
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e, groupJid: jid }, "wa: getChats fallback failed");
+  }
+  return null;
+}
+
 /** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */
 async function harvestStoreMessages(
   page: { evaluate: (fn: (...args: any[]) => any, ...args: any[]) => Promise<any> },
@@ -599,22 +663,24 @@ async function harvestStoreMessages(
   groupJid: string,
   cutoff: number,
   byId: Map<string, WhatsAppMessage>,
-): Promise<{ count: number; oldest: number }> {
+): Promise<{ count: number; oldest: number; raw: number }> {
   const storeMsgs: Array<{ id: string; text: string; timestamp: number }> = await page.evaluate(
     (id: string, cut: number) => {
       const w = window as any;
+      const models = w.Store?.Chat?.models || [];
       const storeChat =
         w.Store?.Chat?.get?.(id) ||
         w.Store?.Chat?.find?.(id) ||
-        (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+        models.find((c: any) => c?.id?._serialized === id) ||
+        models.find((c: any) => String(c?.id?._serialized || "").includes(String(id).split("@")[0] || "__none__"));
       if (!storeChat) return [];
       const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
       for (const m of arr) {
         const mid = m.id?._serialized;
-        const ts = (m.t ?? m.timestamp ?? 0) * 1000;
+        const rawT = Number(m.t ?? m.timestamp ?? 0);
+        const ts = rawT > 0 && rawT < 1e12 ? rawT * 1000 : rawT;
         if (!mid || !ts || ts <= cut) continue;
-        // body, caption, veya medya açıklaması
         const text = String(
           m.body
           ?? m.caption
@@ -622,20 +688,20 @@ async function harvestStoreMessages(
           ?? m.hydratedButtonsMessage?.contentText
           ?? "",
         ).trim();
-        if (!text || text.length < 8) continue;
+        if (!text || text.length < 4) continue;
         out.push({ id: mid, text, timestamp: ts });
       }
       return out;
     },
     chatId,
     cutoff,
-  );
+  ).catch(() => [] as Array<{ id: string; text: string; timestamp: number }>);
   let oldest = Date.now();
   for (const m of storeMsgs) {
     byId.set(m.id, { id: m.id, remoteJid: groupJid, text: m.text, timestamp: m.timestamp });
     if (m.timestamp < oldest) oldest = m.timestamp;
   }
-  return { count: storeMsgs.length, oldest: storeMsgs.length ? oldest : Date.now() };
+  return { count: storeMsgs.length, oldest: storeMsgs.length ? oldest : Date.now(), raw: storeMsgs.length };
 }
 
 export type WhatsAppFetchResult = {
@@ -691,80 +757,100 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
   },
 ): Promise<WhatsAppFetchResult> {
   const page = (client as any).pupPage;
-  try {
-    // Sohbeti aç — geçmiş senkronu için şart
-    await (client as any).interface?.openChatWindow?.(groupJid);
-    await new Promise((r) => setTimeout(r, 2500));
-    if (page) {
-      try {
-        await page.evaluate((jid: string) => {
-          const w = window as any;
-          const chat =
-            w.Store?.Chat?.get?.(jid) ||
-            w.Store?.Chat?.find?.(jid);
-          if (chat?.presence?.subscribe) chat.presence.subscribe();
-          if (typeof chat?.syncHistory === "function") {
-            try { chat.syncHistory(); } catch { /* ignore */ }
-          }
-        }, groupJid);
-      } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-
-  let chat: any;
-  try {
-    chat = await client.getChatById(groupJid);
-  } catch (e) {
-    logger.warn({ err: e, groupJid }, "wa: getChatById failed");
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
-  }
-  if (!chat) {
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
-  }
-
-  // syncHistory (wwebjs) — sunucudan geçmiş çekmeye zorla
-  try {
-    if (typeof chat.syncHistory === "function") {
-      const synced = await chat.syncHistory();
-      logger.info({ groupJid, synced }, "wa: syncHistory");
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-  } catch (e) {
-    logger.warn({ err: e, groupJid }, "wa: syncHistory failed");
-  }
-
   const cutoff = opts.afterTimestampMs != null
     ? opts.afterTimestampMs
     : (Date.now() - (opts.maxAgeDays ?? 730) * 24 * 60 * 60 * 1000);
 
-  const chatId = (chat as any).id?._serialized ?? groupJid;
+  try {
+    await (client as any).interface?.openChatWindow?.(groupJid);
+    await new Promise((r) => setTimeout(r, 1800));
+  } catch { /* ignore */ }
+
+  let chat = await resolveWhatsAppChat(groupJid);
+  if (!chat) {
+    // Bir kez daha açıp dene — WA sohbet listesi gecikebilir
+    try {
+      await (client as any).interface?.openChatWindow?.(groupJid);
+      await new Promise((r) => setTimeout(r, 2500));
+    } catch { /* ignore */ }
+    chat = await resolveWhatsAppChat(groupJid);
+  }
+  if (!chat) {
+    logger.warn({ groupJid }, "wa: sohbet bulunamadı");
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+  }
+
+  const chatId = String((chat as any).id?._serialized ?? groupJid);
+  if (page) {
+    try {
+      await page.evaluate((jid: string) => {
+        const w = window as any;
+        const models = w.Store?.Chat?.models || [];
+        const storeChat =
+          w.Store?.Chat?.get?.(jid) ||
+          w.Store?.Chat?.find?.(jid) ||
+          models.find((c: any) => c?.id?._serialized === jid);
+        if (storeChat?.presence?.subscribe) storeChat.presence.subscribe();
+        if (typeof storeChat?.syncHistory === "function") {
+          try { storeChat.syncHistory(); } catch { /* ignore */ }
+        }
+      }, chatId);
+    } catch { /* ignore */ }
+  }
+
+  try {
+    if (typeof chat.syncHistory === "function") {
+      const synced = await chat.syncHistory();
+      logger.info({ groupJid: chatId, synced }, "wa: syncHistory");
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  } catch (e) {
+    logger.warn({ err: e, groupJid: chatId }, "wa: syncHistory failed");
+  }
+
   const byId = new Map<string, WhatsAppMessage>();
   let rounds = 0;
   let reachedCutoff = false;
   let historyExhausted = false;
+  let rawSeen = 0;
+
+  const ingestMessage = (m: any): boolean => {
+    const id = String(m?.id?._serialized ?? m?.id ?? "");
+    if (!id || byId.has(id)) return false;
+    const ts = waTsToMs(m?.timestamp ?? m?.t ?? m?._data?.t);
+    if (!ts || ts <= cutoff) return false;
+    const text = extractWaText(m);
+    if (!text || text.length < 4) return false;
+    byId.set(id, { id, remoteJid: chatId, text, timestamp: ts });
+    return true;
+  };
 
   const pullFetchMessages = async (limit: number) => {
     try {
       const batch = (await chat.fetchMessages({ limit })) ?? [];
+      rawSeen += batch.length;
+      let kept = 0;
       for (const m of batch) {
-        const id = m.id?._serialized;
-        if (!id || byId.has(id)) continue;
-        const ts = (m.timestamp ?? 0) * 1000;
-        if (!ts || ts <= cutoff) continue;
-        const text = String(m.body ?? (m as any).caption ?? "").trim();
-        if (!text || text.length < 8) continue;
-        byId.set(id, { id, remoteJid: groupJid, text, timestamp: ts });
+        if (ingestMessage(m)) kept += 1;
       }
+      logger.info({ groupJid: chatId, limit, batch: batch.length, kept, total: byId.size }, "wa: fetchMessages");
       return batch.length;
     } catch (e) {
-      logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
+      logger.warn({ err: e, groupJid: chatId, limit }, "wa: fetchMessages failed");
       return 0;
     }
   };
 
+  // Önce sığ çekim — en azından son mesajlar gelsin
+  for (const lim of [50, 100, 200, Math.min(opts.limit ?? 300, 500)]) {
+    await pullFetchMessages(lim);
+    if (byId.size > 0) break;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
   if (opts.deep && page) {
-    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
-    await pullFetchMessages(500);
+    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    if (byId.size === 0) await pullFetchMessages(500);
 
     let stagnant = 0;
     let lastHarvested = byId.size;
@@ -859,7 +945,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       await new Promise((r) => setTimeout(r, 500));
 
       // 3) Her tur harvest + ara ara fetchMessages
-      const harvested = await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+      const harvested = await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
       if (i % 5 === 0) await pullFetchMessages(Math.min(2000, 300 + i * 20));
 
       const oldest = Math.min(info.oldest ?? Date.now(), harvested.oldest);
@@ -868,7 +954,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       if (i % 5 === 0 || oldest <= cutoff || byId.size !== lastHarvested) {
         logger.info(
           {
-            groupJid,
+            groupJid: chatId,
             round: i + 1,
             storeCount: count,
             harvested: byId.size,
@@ -892,7 +978,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
         if (stagnant >= STAGNANT_LIMIT) {
           historyExhausted = true;
           logger.warn(
-            { groupJid, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString(), stagnant },
+            { groupJid: chatId, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString(), stagnant },
             "wa: geçmiş tükendi (Chromium daha eski yüklemiyor)",
           );
           break;
@@ -910,36 +996,48 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       historyExhausted = true;
     }
 
-    // Son bir syncHistory + büyük fetch
     try {
       if (typeof chat.syncHistory === "function") await chat.syncHistory();
     } catch { /* ignore */ }
-    await pullFetchMessages(5000);
-    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    await pullFetchMessages(2000);
+    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
 
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     if (finalOldest <= cutoff) {
       reachedCutoff = true;
       historyExhausted = false;
     } else if (!reachedCutoff && byId.size > 0) {
-      // Hedefe inilemedi ama mesaj var → mevcut geçmiş tükendi sayılır
       historyExhausted = true;
     }
-  } else {
-    if (page) await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
-    await pullFetchMessages(Math.min(opts.limit ?? 200, 500));
+  } else if (page) {
+    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    if (byId.size === 0) await pullFetchMessages(Math.min(opts.limit ?? 300, 500));
+    rounds = Math.max(1, rounds);
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     reachedCutoff = byId.size === 0 || finalOldest <= cutoff;
     historyExhausted = !reachedCutoff && byId.size > 0;
-    rounds = 1;
+  }
+
+  // Hâlâ boşsa son şans: sohbeti yeniden aç + küçük fetch
+  if (byId.size === 0) {
+    try {
+      await (client as any).interface?.openChatWindow?.(chatId);
+      await new Promise((r) => setTimeout(r, 3000));
+      chat = await resolveWhatsAppChat(chatId) || chat;
+      await pullFetchMessages(100);
+      if (page) await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    } catch (e) {
+      logger.warn({ err: e, groupJid: chatId }, "wa: son şans fetch failed");
+    }
   }
 
   const out = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
   const oldestTs = out.length ? out[0]!.timestamp : Date.now();
   logger.info(
     {
-      groupJid,
+      groupJid: chatId,
       inRange: out.length,
+      rawSeen,
       deep: !!opts.deep,
       reachedCutoff,
       historyExhausted,

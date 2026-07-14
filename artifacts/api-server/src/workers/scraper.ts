@@ -1739,10 +1739,22 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     void patchSourceProgress(source.id, { lastCheckedAt: new Date(), isScanning: true }).catch(() => undefined);
   }, 30_000);
   try {
-    // İlk tarama: derin geçmiş. Artımlı: son mesajdan itibaren (deep yok — kilit çakışmasın)
-    const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
-      ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true }
+    // İlk tarama: önce sığ son mesajlar, sonra derin geçmiş. Artımlı: imleç sonrası.
+    let fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
+      ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true, limit: 300 }
       : { afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS), limit: 1000 });
+
+    // İlk tur boşsa sığ tekrar (deep bazen Store'u boşa yorar)
+    if (isInitialScan && fetched.messages.length === 0) {
+      logger.warn({ sourceId: source.id, groupJid }, "scraper: wa derin tur boş — sığ tekrar");
+      await sleep(2_000);
+      fetched = await fetchWhatsAppMessagesDetailed(groupJid, {
+        maxAgeDays: 90,
+        deep: false,
+        limit: 300,
+      });
+    }
+
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
     historyExhausted = fetched.historyExhausted;
@@ -1766,7 +1778,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   if (isInitialScan && messages.length === 0) {
     clearInterval(heartbeat);
     await patchSourceProgress(source.id, {
-      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).",
+      lastError: "Bu turda mesaj çekilemedi — sohbet açılıp yeniden denenecek (grup geçmişi henüz senkron olmayabilir).",
       isScanning: false,
       lastCheckedAt: new Date(),
       initialScanDone: false,
@@ -1775,7 +1787,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       lastScanFound: 0,
       lastScanAdded: 0,
     });
-    logger.warn({ sourceId: source.id, name: source.name, lastTs, rounds: fetchRounds }, "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek");
+    logger.warn({ sourceId: source.id, name: source.name, lastTs, rounds: fetchRounds, groupJid }, "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek");
     return stats;
   }
 
@@ -1950,6 +1962,31 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   if (waSequentialRunning) return;
   waSequentialRunning = true;
   try {
+    // Yanlışlıkla "boş tur / sınırlı geçmiş" ile bitmiş grupları yeniden kuyruğa al
+    try {
+      const requeued = await db.update(sourcesTable)
+        .set({
+          initialScanDone: false,
+          initialScanProgress: 1,
+          initialScanPhase: "backward",
+          isScanning: false,
+          lastError: "WhatsApp yeniden tarama kuyruğunda…",
+        })
+        .where(and(
+          eq(sourcesTable.platform, "whatsapp"),
+          eq(sourcesTable.active, true),
+          eq(sourcesTable.initialScanDone, true),
+          sql`COALESCE(${sourcesTable.totalImported}, 0) = 0`,
+          sql`COALESCE(${sourcesTable.lastScanMessagesRead}, 0) = 0`,
+        ))
+        .returning({ id: sourcesTable.id });
+      if (requeued.length > 0) {
+        logger.warn({ count: requeued.length }, "scraper: wa boş bitmiş kaynaklar yeniden kuyrukta");
+      }
+    } catch (e) {
+      logger.warn({ err: e }, "scraper: wa requeue failed");
+    }
+
     const emptyBySource = new Map<number, number>();
     let idleLoops = 0;
     for (;;) {
@@ -2014,8 +2051,9 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
           if ((stats.messagesRead ?? 0) === 0) {
             const n = (emptyBySource.get(source.id) ?? 0) + 1;
             emptyBySource.set(source.id, n);
-            if (n >= 3) {
-              logger.warn({ sourceId: source.id, emptyPasses: n }, "scraper: wa 3 boş tur — best-effort done");
+            // Erken "done" yapma — mesaj gelene kadar dene (en az 8 boş tur)
+            if (n >= 8) {
+              logger.warn({ sourceId: source.id, emptyPasses: n }, "scraper: wa 8 boş tur — best-effort done");
               await patchSourceProgress(source.id, {
                 initialScanDone: true,
                 initialScanProgress: 100,
