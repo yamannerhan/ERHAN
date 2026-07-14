@@ -1,4 +1,4 @@
-/** Sohbet: son 100 üye mesajını yenilemede kaybetmeme yardımcıları */
+/** Sohbet: son 200 mesajı yenilemede kaybetmeme yardımcıları */
 
 export type ChatExtMsg = {
   id: number;
@@ -11,7 +11,8 @@ export type ChatExtMsg = {
   [key: string]: unknown;
 };
 
-const HUMANS_CACHE_KEY = "og_chat_humans_v1";
+const HUMANS_CACHE_KEY = "og_chat_humans_v2";
+const CHAT_CACHE_LIMIT = 200;
 
 export function isDbMessageId(id: number): boolean {
   return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
@@ -34,16 +35,22 @@ export function isChatJoinNotice(text: string): boolean {
   return /sohbete\s+katıldı/i.test(text);
 }
 
+/** İlan duyurusu (bot veya üye) */
+export function isListingAnnounce(text: string): boolean {
+  return /yeni\s+ilan|ilan\s+paylaştı|\/ilan\/\d+/i.test(text);
+}
+
 export function extractJoinUsername(text: string): string | null {
   // "🎉 **Ali** @ali_user aramıza katıldı!" | "ali sohbete katıldı"
   const at = text.match(/@(\w+)/);
   if (at?.[1]) return at[1];
   const m = text.match(/^@?(\w+)\s+(?:sohbete\s+katıldı|aramıza\s+katıldı)/i)
-    || text.match(/(\w+)\s+aramıza\s+katıldı/i);
-  return m?.[1] ?? null;
+    || text.match(/(\w+)\s+aramıza\s+katıldı/i)
+    || text.match(/^(.+?)\s+sohbete\s+katıldı/i);
+  return m?.[1]?.replace(/\*\*/g, "").trim() ?? null;
 }
 
-/** Her senkron: incremental + her zaman son 100 üye */
+/** Her senkron: incremental + her zaman son 200 mesaj (üye + sistem + ilan) */
 export async function fetchChatSyncPayload(opts: {
   after: number;
   headers: HeadersInit;
@@ -57,10 +64,10 @@ export async function fetchChatSyncPayload(opts: {
   const after = opts.after > 0 && isDbMessageId(opts.after) ? opts.after : 0;
   const [mixedOrInc, humans] = await Promise.all([
     after > 0
-      ? fetchJson(`/api/chat/messages?limit=100&after=${after}`)
-      : fetchJson("/api/chat/messages?limit=100"),
-    // KRİTİK: after yolu üye mesajlarını atlamasın — her seferinde son 100 üye
-    fetchJson("/api/chat/messages?limit=100&humansOnly=1"),
+      ? fetchJson(`/api/chat/messages?limit=200&after=${after}`)
+      : fetchJson("/api/chat/messages?limit=200"),
+    // Üye mesajlarının atlanmaması için ayrı çekim
+    fetchJson("/api/chat/messages?limit=200&humansOnly=1"),
   ]);
 
   const byId = new Map<number, ChatExtMsg>();
@@ -72,11 +79,11 @@ export async function fetchChatSyncPayload(opts: {
 
 export function loadCachedHumans<T extends ChatExtMsg>(): T[] {
   try {
-    const raw = sessionStorage.getItem(HUMANS_CACHE_KEY);
+    const raw = sessionStorage.getItem(HUMANS_CACHE_KEY) ?? sessionStorage.getItem("og_chat_humans_v1");
     if (!raw) return [];
     const parsed = JSON.parse(raw) as T[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((m) => isDbMessageId(m.id) && isRealHuman(m)).slice(-100);
+    return parsed.filter((m) => isDbMessageId(m.id) && isRealHuman(m)).slice(-CHAT_CACHE_LIMIT);
   } catch {
     return [];
   }
@@ -84,7 +91,7 @@ export function loadCachedHumans<T extends ChatExtMsg>(): T[] {
 
 export function saveCachedHumans(messages: Array<{ id: number; userId: number; isBot?: boolean; isFake?: boolean; userRole?: string | null } & Record<string, unknown>>): void {
   try {
-    const humans = messages.filter(isRealHuman).slice(-100);
+    const humans = messages.filter(isRealHuman).slice(-CHAT_CACHE_LIMIT);
     sessionStorage.setItem(HUMANS_CACHE_KEY, JSON.stringify(humans));
   } catch { /* quota */ }
 }

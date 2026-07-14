@@ -636,19 +636,25 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     await applyFreeFeatureIfAvailable(listing!.id, req.user!.id);
   } catch { /* ignore */ }
 
-  // Gerçek kullanıcı ilanı → herkese Web Push
+  // Gerçek kullanıcı ilanı → herkese Web Push (isimle)
+  const authorName = (req.user!.displayName || req.user!.username || "").trim();
   void import("../lib/web-push").then((m) =>
-    m.maybePushNewListing({ id: listing!.id, title: String(title), city: String(city) }),
+    m.maybePushNewListing({
+      id: listing!.id,
+      title: String(title),
+      city: String(city),
+      authorName,
+    }),
   ).catch(() => {});
 
   // Announce new listing in chat if enabled
   try {
     const settings = await db.select().from(adminSettingsTable).limit(1);
     if (settings[0]?.chatAnnounceListings !== false) {
-      const chatContent = `Yeni ilan: ${title} — ${resolvedCompany} (${city})${salary ? ` • ${salary}` : ""}`;
+      const chatContent = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city})${salary ? ` • ${salary}` : ""}\n/ilan/${listing!.id}`;
       const [chatMsg] = await db.insert(chatMessagesTable).values({
         content: chatContent,
-        userId: 0, // bot user
+        userId: 0, // bot duyurusu — kalıcı (trim son 200)
         isPinned: false,
         isDeleted: false,
       }).returning();
@@ -691,7 +697,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
           .where(or(eq(usersTable.role, "admin"), eq(usersTable.role, "moderator"))),
       ]);
       if (allUsers.length > 0) {
-        const msg = `Yeni ilan: ${title} — ${resolvedCompany} (${city})`;
+        const msg = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city})`;
         const link = `/ilan/${listing!.id}`;
         await db.insert(notificationsTable).values(
           allUsers.map(u => ({
@@ -709,7 +715,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
             userId: admin.id,
             type: "admin_listing",
             title: "Yeni kullanıcı ilanı incele",
-            message: `#${listing!.id} numaralı ilan yayınlandı: ${title} — ${resolvedCompany} (${city})`,
+            message: `${authorName} #${listing!.id} numaralı ilan yayınladı: ${title} — ${resolvedCompany} (${city})`,
             relatedId: listing!.id,
             linkUrl: `/ilan/${listing!.id}`,
             isRead: false,

@@ -99,7 +99,7 @@ async function formatMessage(
 
 router.get("/chat/messages", optionalAuthMiddleware, async (req, res): Promise<void> => {
   try {
-    const limit = Math.min(200, Math.max(1, parseInt(String(req.query["limit"] ?? "100"), 10)));
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query["limit"] ?? "200"), 10)));
     const before = req.query["before"] ? parseInt(String(req.query["before"]), 10) : undefined;
     const after = req.query["after"] ? parseInt(String(req.query["after"]), 10) : undefined;
     const humansOnly = String(req.query["humansOnly"] ?? "") === "1" || String(req.query["humans"] ?? "") === "1";

@@ -15,6 +15,7 @@ import {
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
 import { extractSalary, extractGender, extractLocation, extractPhoneNumber, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
@@ -540,7 +541,14 @@ async function processMessage(
   if (!imported) return "skipped";
 
   const title = extractTitle(text);
-  const city = resolveListingCity(location);
+  const v2City = await maybeClassifyWithV2({
+    title,
+    text,
+    sourceName: source.name,
+    sourceUrl,
+    legacy: location,
+  });
+  const city = v2City.city;
   const salary = extractSalary(text);
   const phone = extractPhone(text);
   const gender = extractGender(text);
@@ -2637,7 +2645,16 @@ export async function reparseImportedListings(): Promise<{ total: number; update
     if (!text.trim()) continue;
 
     const newTitle = extractTitle(row.description || text);
-    const newCity = resolveListingCity(extractLocation(text));
+    const legacy = extractLocation(text);
+    const v2 = await maybeClassifyWithV2({
+      jobId: row.id,
+      title: row.title || newTitle,
+      text,
+      sourceName: row.sourceTag,
+      sourceUrl: row.sourceUrl,
+      legacy,
+    });
+    const newCity = v2.city;
     const newSalary = extractSalary(row.description || text);
     const newGender = extractGender(row.description || text);
     const newPhone = extractPhone(row.description || text);

@@ -5,7 +5,10 @@
   "scripts": {
     "build": "pnpm -r --if-present run build",
     "start": "node scripts/start.mjs",
-    "typecheck": "echo 'Type check skipped'"
+    "typecheck": "echo 'Type check skipped'",
+    "locations:sync": "pnpm --filter @workspace/api-server run locations:sync",
+    "jobs:reclassify-locations": "pnpm --filter @workspace/api-server run jobs:reclassify-locations",
+    "test:location-classifier-v2": "pnpm --filter @workspace/api-server run test:location-classifier-v2"
   },
   "private": true,
   "packageManager": "pnpm@9.15.0",

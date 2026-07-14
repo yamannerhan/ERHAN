@@ -22,6 +22,7 @@ import {
   welcomeChatJoinText,
   extractJoinUsername,
   isJoinAnnounce as isJoinAnnounceShared,
+  isChatJoinNotice,
   canGreetUser,
   markGreetedUser,
 } from "@/lib/chat-sync";
@@ -67,7 +68,7 @@ function isJoinAnnounce(msg: ExtMsg): boolean {
   return isJoinAnnounceShared(msg);
 }
 
-/** Son 100 üye + son 120 diğer mesajı koru (giriş/çıkışta üye mesajları silinmesin) */
+/** Son 200 mesajı koru (üye + ilan + katılım + sistem) */
 function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   const map = new Map<number, ExtMsg>();
   for (const m of prev) {
@@ -78,11 +79,9 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
     map.set(m.id, m);
   }
   const all = [...map.values()].sort((a, b) => a.id - b.id);
-  const humans = all.filter(isRealHuman).slice(-100);
-  const others = all.filter((m) => !isRealHuman(m)).slice(-120);
-  const keep = new Set<number>([...humans, ...others].map((m) => m.id));
-  saveCachedHumans(humans);
-  return all.filter((m) => keep.has(m.id));
+  const kept = all.slice(-200);
+  saveCachedHumans(kept.filter(isRealHuman));
+  return kept;
 }
 
 function renderMessageContent(content: string) {
@@ -125,7 +124,7 @@ export default function Chat() {
   const systemKeysRef = useRef<Set<string>>(new Set());
   const lastSeenMessageIdRef = useRef(0);
 
-  const { data: initialData, isLoading } = useGetChatMessages({ limit: 100 });
+  const { data: initialData, isLoading } = useGetChatMessages({ limit: 200 });
 
   // Çift mesaj önleme: aynı id'li mesaj zaten varsa ekleme
   const rememberMessageIds = (items: AnyMsg[]) => {
@@ -258,8 +257,11 @@ export default function Chat() {
         !isSystem(m) && (m as ExtMsg).id === id ? { ...(m as ExtMsg), isPinned } : m
       ));
     });
-    s.on("chat:join", ({ username }: { username: string }) => {
-      addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
+    s.on("chat:join", ({ username, messageId }: { username: string; messageId?: number | null }) => {
+      // messageId varsa DB’den chat:message ile geldi — ephemeral çoğaltma
+      if (!messageId) {
+        addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
+      }
       if (username && canGreetUser(username, user?.username)) {
         setPendingWelcome({ username, kind: "join" });
       }
@@ -456,6 +458,16 @@ export default function Chat() {
     }
 
     const chatMsg = msg as ExtMsg;
+    // DB’deki “X sohbete katıldı” duyurusunu join satırı gibi göster
+    if (isChatJoinNotice(chatMsg.content ?? "")) {
+      return (
+        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center my-1">
+          <div className="flex items-center gap-1.5 bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-semibold px-3 py-1 rounded-full">
+            <Zap className="w-2.5 h-2.5" />{chatMsg.content}
+          </div>
+        </motion.div>
+      );
+    }
     const isBot = isSystemBot(chatMsg);
     const isMe = !isBot && user?.id === chatMsg.userId;
     const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
@@ -645,9 +657,10 @@ export default function Chat() {
                   return false;
                 }
                 if (feedMode === "all") return true;
-                return isRealHuman(msg) || isJoinAnnounce(msg);
+                const text = msg.content ?? "";
+                return isRealHuman(msg) || isJoinAnnounce(msg) || isChatJoinNotice(text) || /ilan\s+paylaştı|yeni\s+ilan/i.test(text);
               })
-              .slice(feedMode === "members" ? -100 : undefined)
+              .slice(feedMode === "members" ? -200 : undefined)
               .map(msg => renderMsg(msg))
           )}
           <div ref={scrollRef} />

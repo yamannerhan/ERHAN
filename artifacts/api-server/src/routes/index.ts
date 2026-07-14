@@ -16,6 +16,7 @@ import pushRouter from "./push";
 import managementTeamRouter from "./management-team";
 import chatBannersRouter from "./chat-banners";
 import companyProfilesRouter from "./company-profiles";
+import locationAdminRouter from "./location-admin";
 
 const router: IRouter = Router();
 
@@ -27,6 +28,7 @@ router.use(usersRouter);
 router.use(notificationsRouter);
 router.use(announcementsRouter);
 router.use(adminRouter);
+router.use(locationAdminRouter);
 router.use(supportRouter);
 router.use(parttimeRouter);
 router.use(sourcesRouter);

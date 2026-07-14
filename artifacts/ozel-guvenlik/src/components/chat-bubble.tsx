@@ -22,6 +22,7 @@ import {
   welcomeChatJoinText,
   extractJoinUsername,
   isJoinAnnounce as isJoinAnnounceShared,
+  isChatJoinNotice,
   canGreetUser,
   markGreetedUser,
 } from "@/lib/chat-sync";
@@ -77,7 +78,7 @@ function isDbMessageId(id: number): boolean {
   return Number.isFinite(id) && id > 0 && id < 1_000_000_000;
 }
 
-/** Son 100 üye + son 120 diğer mesajı koru (giriş/çıkışta üye mesajları silinmesin) */
+/** Son 200 mesajı koru (üye + ilan + katılım + sistem) */
 function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   const map = new Map<number, ExtMsg>();
   for (const m of prev) {
@@ -88,11 +89,9 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
     map.set(m.id, m);
   }
   const all = [...map.values()].sort((a, b) => a.id - b.id);
-  const humans = all.filter(isRealHuman).slice(-100);
-  const others = all.filter((m) => !isRealHuman(m)).slice(-120);
-  const keep = new Set<number>([...humans, ...others].map((m) => m.id));
-  saveCachedHumans(humans);
-  return all.filter((m) => keep.has(m.id));
+  const kept = all.slice(-200);
+  saveCachedHumans(kept.filter(isRealHuman));
+  return kept;
 }
 
 const STICKY_SKIP_KEY = "chat_skipped_sticky_id";
@@ -397,8 +396,10 @@ export function ChatBubble() {
       ));
     });
     s.on("chat:cleared", () => setMessages([]));
-    s.on("chat:join", ({ username }: { username: string }) => {
-      addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
+    s.on("chat:join", ({ username, messageId }: { username: string; messageId?: number | null }) => {
+      if (!messageId) {
+        addMsg({ id: Date.now(), type: "join", text: `${username} sohbete katıldı`, createdAt: new Date().toISOString() });
+      }
       if (username && canGreetUser(username, userRef.current?.username)) {
         setPendingWelcome({ username, kind: "join" });
       }
@@ -504,8 +505,9 @@ export function ChatBubble() {
       return base.filter(m => {
         if (isSystem(m)) return true;
         const msg = m as ExtMsg;
-        return isRealHuman(msg) || isJoinAnnounce(msg);
-      }).slice(-100);
+        const text = msg.content ?? "";
+        return isRealHuman(msg) || isJoinAnnounce(msg) || isChatJoinNotice(text) || /ilan\s+paylaştı|yeni\s+ilan/i.test(text);
+      }).slice(-200);
     }
     return base;
   }, [messages, feedMode]);
@@ -706,6 +708,17 @@ export function ChatBubble() {
     }
 
     const chatMsg = msg;
+    // DB’deki “X sohbete katıldı” → join satırı
+    if (isChatJoinNotice(chatMsg.content ?? "")) {
+      return (
+        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center">
+          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {chatMsg.content}
+          </div>
+        </motion.div>
+      );
+    }
     const isMe = user?.id === chatMsg.userId;
     const canMod = !!(user && (user.role === "admin" || user.role === "moderator"));
 

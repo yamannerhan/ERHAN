@@ -20,21 +20,26 @@ export type AnnounceOptions = {
 
 const BOT_USER_ID = 0;
 
-function announcementText(listing: ListingAnnouncement): string {
+function announcementText(listing: ListingAnnouncement, authorName?: string | null): string {
   const location = listing.city ? ` · ${listing.city}` : "";
   const company = listing.company && listing.company !== "Belirtilmemiş" ? ` · ${listing.company}` : "";
+  const who = (authorName || "").trim();
+  if (who) {
+    return `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+  }
   return `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
 }
 
 export async function announceNewListing(
   listing: ListingAnnouncement,
-  opts: AnnounceOptions = {},
+  opts: AnnounceOptions & { authorName?: string | null } = {},
 ): Promise<void> {
   const linkUrl = `/ilan/${listing.id}`;
-  const message = announcementText(listing);
+  const message = announcementText(listing, opts.authorName);
   const adminOnly = !!opts.adminOnly;
   const skipChat = opts.skipChat ?? adminOnly;
   const sourceLabel = opts.sourceLabel?.trim() || null;
+  const authorName = (opts.authorName || "").trim();
 
   if (!skipChat) {
     const settings = await db.select({ chatAnnounceListings: adminSettingsTable.chatAnnounceListings })
@@ -74,7 +79,9 @@ export async function announceNewListing(
 
   const notifMessage = adminOnly
     ? `${sourceLabel ?? "Kaynak"} ilanı yayınlandı: ${listing.title}`
-    : `Yeni ilan eklendi: ${listing.title}`;
+    : authorName
+      ? `${authorName} yeni ilan paylaştı: ${listing.title}`
+      : `Yeni ilan eklendi: ${listing.title}`;
   const notifType = adminOnly ? "admin_listing" : "listing";
 
   const users = adminOnly

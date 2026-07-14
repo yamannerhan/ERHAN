@@ -14,6 +14,7 @@ export * from "./imported-posts";
 export * from "./pending-jobs";
 export * from "./telegram-sessions";
 export * from "./location-filter-terms";
+export * from "./locations-v2";
 export * from "./push";
 export * from "./chat-polls";
 export * from "./badges";

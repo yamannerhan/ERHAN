@@ -283,6 +283,12 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
 
         <footer className="og-hd-footer">
           <div className="og-hd-footer-text">ÖZEL GÜVENLİK TOPLULUĞU</div>
+          <div className="og-hd-footer-osm text-[10px] opacity-60 mt-1">
+            Harita verisi ©{" "}
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">
+              OpenStreetMap contributors
+            </a>
+          </div>
         </footer>
       </div>
     </>

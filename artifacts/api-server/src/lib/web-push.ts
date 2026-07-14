@@ -284,13 +284,19 @@ export async function broadcastPush(
 }
 
 /** Sadece gerçek kullanıcı ilanı — bot/scraper çağırmaz */
-export async function maybePushNewListing(listing: { id: number; title: string; city?: string | null }): Promise<void> {
+export async function maybePushNewListing(listing: {
+  id: number;
+  title: string;
+  city?: string | null;
+  authorName?: string | null;
+}): Promise<void> {
   try {
     const s = await getOrCreateSettings();
     if (s.pushEnabled === false || s.pushOnNewListing === false) return;
     const city = listing.city ? ` · ${listing.city}` : "";
+    const who = (listing.authorName || "").trim();
     await broadcastPush({
-      title: "Yeni üye ilanı",
+      title: who ? `${who} ilan paylaştı` : "Yeni ilan",
       body: `${listing.title}${city}`,
       url: `/ilan/${listing.id}`,
       tag: `listing-${listing.id}`,

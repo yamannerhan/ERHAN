@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ManagementTeamAdminSection } from "@/components/management-team-admin";
 import { ChatBannersAdminSection } from "@/components/chat-banners-admin";
 import { HomeBannersAdminSection } from "@/components/home-banners-admin";
+import { LocationReviewSection } from "@/components/location-review-admin";
 
 function getToken() {
   return localStorage.getItem("auth_token") ?? "";
@@ -3647,7 +3648,7 @@ type AdminTab =
   | "dashboard" | "ilanlar" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "yetkiler" | "ilan-haklari" | "yonetim-ekibi" | "anasayfa-banner" | "sohbet-banner"
   | "telegram" | "whatsapp" | "eleman" | "mesajlar" | "destek"
-  | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar";
+  | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar" | "konum-dogrulama";
 
 interface SidebarItem {
   id: AdminTab;
@@ -3698,6 +3699,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
     items: [
       { id: "bakiye", label: "Bakiye İşlemleri", icon: CreditCard },
       { id: "kaynaklar", label: "İlan Kaynakları", icon: Globe2 },
+      { id: "konum-dogrulama", label: "Konum Doğrulama", icon: MapPin },
       { id: "bildirimler", label: "Bildirimler", icon: Bell },
       { id: "push", label: "Canlı Push", icon: Zap },
       { id: "ayarlar", label: "Ayarlar", icon: Settings },
@@ -5522,6 +5524,10 @@ export default function AdminDashboard() {
         {activeTab === "part-time" && <PartTimeAdminSection apiCall={apiCall} toast={toast} />}
 
         {(activeTab === "kaynaklar" || activeTab === "telegram") && <SourcesSection apiCall={apiCall} toast={toast} />}
+
+        {activeTab === "konum-dogrulama" && (
+          <LocationReviewSection apiCall={apiCall} toast={toast} />
+        )}
 
         {activeTab === "ilanlar" && <PendingJobsSection apiCall={apiCall} toast={toast} />}
 

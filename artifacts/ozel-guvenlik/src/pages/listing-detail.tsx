@@ -126,6 +126,21 @@ export default function ListingDetail() {
     if (listingId > 0) markListingRead(listingId);
   }, [listingId]);
 
+  // Anasayfa/listeden gelince scroll pozisyonu kalır; detayı her zaman üste al
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [listingId]);
+
+  // İlan içeriği yüklenince (sayfa uzayınca) tekrar üste sabitle
+  useEffect(() => {
+    if (!listing) return;
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+  }, [listing?.id]);
+
   const toggleFavorite = useToggleListingFavorite();
   const canManageListing = user?.role === "admin" || user?.role === "moderator";
   const ext = listing as (typeof listing & ExtListing) | undefined;

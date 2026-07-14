@@ -45,37 +45,22 @@ export async function saveChatMessage(userId: number, content: string): Promise<
 
 async function trimChatHistory(): Promise<void> {
   try {
-    // Keep last 200 real (human) messages — well above the 100 client cache floor.
-    // Sadece görünür (silinmemiş) mesajları say — soft-delete trim penceresini kirletmesin
-    const realKept = await db
+    // Son 200 görünür mesajı koru (üye + ilan duyurusu + katılım + yeni üye — hepsi)
+    const kept = await db
       .select({ id: chatMessagesTable.id })
       .from(chatMessagesTable)
-      .where(and(sql`${chatMessagesTable.userId} > 0`, eq(chatMessagesTable.isDeleted, false)))
+      .where(eq(chatMessagesTable.isDeleted, false))
       .orderBy(desc(chatMessagesTable.createdAt))
       .limit(200);
 
-    const botKept = await db
-      .select({ id: chatMessagesTable.id })
-      .from(chatMessagesTable)
-      .where(and(sql`${chatMessagesTable.userId} <= 0`, eq(chatMessagesTable.isDeleted, false)))
-      .orderBy(desc(chatMessagesTable.createdAt))
-      .limit(120);
-
-    if (realKept.length >= 200) {
-      const minRealId = Math.min(...realKept.map((r) => r.id));
+    if (kept.length >= 200) {
+      const minId = Math.min(...kept.map((r) => r.id));
       await db
         .delete(chatMessagesTable)
-        .where(and(sql`${chatMessagesTable.userId} > 0`, lt(chatMessagesTable.id, minRealId)));
+        .where(and(eq(chatMessagesTable.isDeleted, false), lt(chatMessagesTable.id, minId)));
     }
 
-    if (botKept.length >= 120) {
-      const minBotId = Math.min(...botKept.map((r) => r.id));
-      await db
-        .delete(chatMessagesTable)
-        .where(and(sql`${chatMessagesTable.userId} <= 0`, lt(chatMessagesTable.id, minBotId)));
-    }
-
-    // Soft-deleted eski kayıtları temizle
+    // Soft-deleted: admin/moderatör silince 2 gün sonra fiziksel temizle
     await db.delete(chatMessagesTable).where(and(
       eq(chatMessagesTable.isDeleted, true),
       lt(chatMessagesTable.createdAt, new Date(Date.now() - 2 * 24 * 3600 * 1000)),
@@ -833,10 +818,16 @@ io.on("connection", (socket) => {
             const awayLong = !lastDisconnect || (Date.now() - lastDisconnect) >= JOIN_THRESHOLD_MS;
             if (awayLong) {
               const joinName = user.displayName || user.username;
-              // Sadece sohbet UI satırı — push YOK (reconnect spam olmasın; kayıt bildirimi register'da)
+              const joinText = `${joinName} sohbete katıldı`;
+              // DB’ye yaz — herkes siteye girince görsün; admin/mod silmedikçe kalsın
+              const saved = await saveChatMessage(0, joinText);
+              if (saved) {
+                io.emit("chat:message", makeBotMsg(joinText, null, saved.id, saved.createdAt.toISOString()));
+              }
               io.emit("chat:join", {
                 username: joinName,
                 isVip: user.isVip && (!user.vipUntil || user.vipUntil > new Date()),
+                messageId: saved?.id ?? null,
               });
             }
           }
@@ -1081,10 +1072,30 @@ async function bootstrapWorkers(): Promise<void> {
     void reparseImportedListings()
       .then((r) => logger.info({ total: r.total, updated: r.updated }, "Listing city reparse done"))
       .catch((err) => logger.warn({ err }, "Listing city reparse skipped"));
-    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push; feature-expiry)");
+
+    // Her pazar 04:00 — Geofabrik konum sync
+    scheduleWeeklyLocationSync();
+    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push; feature-expiry; location-sync)");
   } catch (e) {
     logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
   }
+}
+
+function scheduleWeeklyLocationSync(): void {
+  const tick = async () => {
+    const now = new Date();
+    // Pazar = 0, saat 04:00 (±1 dk pencerede)
+    if (now.getDay() === 0 && now.getHours() === 4 && now.getMinutes() < 2) {
+      try {
+        const { runLocationsSync } = await import("./jobs/runLocationsSync");
+        const report = await runLocationsSync();
+        logger.info({ report }, "Weekly location sync finished");
+      } catch (err) {
+        logger.warn({ err }, "Weekly location sync failed — existing data kept");
+      }
+    }
+  };
+  setInterval(() => { void tick(); }, 60_000);
 }
 
 // Önce dinle (Railway healthcheck), sonra worker'ları başlat

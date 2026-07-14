@@ -51,3 +51,6 @@ uploads/
 # WhatsApp Web session (LocalAuth)
 .wwebjs_auth/
 **/.wwebjs_auth/
+
+# Geofabrik / location import cache
+.data/
