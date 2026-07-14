@@ -337,7 +337,7 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     url: groupId,
     active: true,
     status: "active",
-    checkInterval: 5,
+    checkInterval: 30,
     autoPublish: true,
     requireApproval: false,
     initialScanDone: false,
@@ -403,6 +403,10 @@ router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req,
       lastScanErrors: s.lastScanErrors ?? 0,
       lastScanPublished: s.lastScanPublished ?? 0,
       lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
+      lastMessageAt: (() => {
+        const timestamp = Number(s.lastTelegramMessageId);
+        return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : null;
+      })(),
       lastError: s.lastError ?? null,
     };
   }));
@@ -431,7 +435,7 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
     const msg = result.mode === "initial"
       ? `${result.pendingGroups} grupta 30 gün tarama devam ediyor` +
         (result.currentGroup ? ` — şimdi: ${result.currentGroup}` : "") +
-        ". Bitince her 5 dk yeni mesaj dinler."
+        ". Bitince her 30 dakikada tüm gruplar kaldığı yerden taranır."
       : `${result.pendingGroups} grup kaldığı yerden taranıyor (sadece yeni mesajlar). Üstüne aynı ilan eklenmez.`;
     res.json({
       success: true,

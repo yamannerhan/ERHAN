@@ -291,7 +291,11 @@ export async function saveKnownCompanyLogoBuffer(companyId: number, buf: Buffer)
   const cropped = await trimLogoWhitespace(buf);
   const filename = `kc_${companyId}_${crypto.randomBytes(6).toString("hex")}.webp`;
   const filepath = path.join(LOGO_DIR, filename);
-  await fs.promises.writeFile(filepath, cropped);
+  try {
+    await fs.promises.writeFile(filepath, cropped);
+  } catch {
+    // Kalıcı kaynak DB'deki logoData; salt-okunur/geçici diskte yükleme yine başarılı olsun.
+  }
   const b64 = cropped.toString("base64");
   const logoUrl = `/api/known-company-logos/${companyId}`;
   await db

@@ -73,6 +73,14 @@ function formatNearbyListing(
       if (brand) companyVerified = true;
     }
   } catch { /* ignore */ }
+  if (
+    listing.sourceType === "bot_imported"
+    || ["telegram", "whatsapp", "eleman", "demo"].includes(listing.sourceTag ?? "")
+  ) {
+    companyVerified = false;
+  } else if (listing.authorId) {
+    companyVerified = true;
+  }
 
   return {
     id: listing.id,

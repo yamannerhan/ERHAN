@@ -4,6 +4,7 @@ import { eq, desc, and, lt, gt, inArray, sql, or } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { userHasPermission } from "../middlewares/moderation";
 import { triggerContextualReply } from "../lib/chat-bot";
+import { trimChatHistory } from "../lib/chat-retention";
 import { filterProfanity } from "../lib/profanity";
 import { getExtraBannedWords } from "../lib/banned-words-cache";
 import { VIRTUAL_USERS } from "../lib/virtual-users";
@@ -217,6 +218,7 @@ router.post("/chat/messages", authMiddleware, async (req, res): Promise<void> =>
     isPinned: false,
     isDeleted: false,
   }).returning();
+  void trimChatHistory();
 
   // Hızlı yanıt: yalnızca gönderen kullanıcıyı yükle (tüm users taraması yok)
   const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)).limit(1);

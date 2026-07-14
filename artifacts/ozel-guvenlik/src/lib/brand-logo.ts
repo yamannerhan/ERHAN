@@ -1,5 +1,5 @@
 /** Varsayılan marka logosu — firma logosu yoksa kullanılır */
-export const BRAND_LOGO_URL = "/brand-logo.png";
+export const BRAND_LOGO_URL = "/api/default-company-logo";
 export const BRAND_LOGO_ICON_URL = "/brand-logo-icon.png";
 
 export function isRealCompanyLogo(url?: string | null): boolean {
@@ -9,6 +9,7 @@ export function isRealCompanyLogo(url?: string | null): boolean {
   if (/unsplash\.com|randomuser\.me|picsum/i.test(u)) return false;
   return (
     u.startsWith("/api/company-logos/") ||
+    u.startsWith("/api/default-company-logo") ||
     u.startsWith("/api/known-company-logos/") ||
     u.startsWith("/known-logos/") ||
     u.startsWith("/api/listing-images/") ||
@@ -25,7 +26,9 @@ export function resolveCompanyLogo(url?: string | null): string {
 export function useBrandLogoFallback(image: HTMLImageElement): void {
   if (image.dataset["fallbackApplied"] === "1") return;
   image.dataset["fallbackApplied"] = "1";
-  image.src = BRAND_LOGO_URL;
+  image.src = image.src.includes("/api/default-company-logo")
+    ? "/brand-logo.png"
+    : BRAND_LOGO_URL;
   image.style.objectFit = "contain";
   image.style.padding = "6px";
   image.style.boxSizing = "border-box";

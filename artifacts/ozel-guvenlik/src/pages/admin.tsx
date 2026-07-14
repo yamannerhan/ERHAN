@@ -3319,7 +3319,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     totalImported: number; listingCount: number;
     lastScanMessagesRead: number; lastScanFound: number; lastScanAdded: number;
     lastScanDuplicates: number; lastScanErrors: number;
-    lastCheckedAt: string | null; lastError: string | null;
+    lastCheckedAt: string | null; lastMessageAt: string | null; lastError: string | null;
   }>>([]);
   const [totals, setTotals] = useState({ groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 });
   const [resetting, setResetting] = useState(false);
@@ -3536,7 +3536,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <div className="grid gap-2 text-xs text-slate-400">
               <div>• <strong className="text-slate-200">Sıfırla / Tekrar Tara:</strong> WA ilanlarını siler, gidebildiği kadar çeker (sitede 15 gün kalır)</div>
               <div>• <strong className="text-slate-200">Şimdi Tara:</strong> silmez — bitmemiş geçmişi devam / bittiyse sadece yeni mesaj</div>
-              <div>• İlk tarama bitince her <strong className="text-slate-200">5 dk</strong> kaldığı yerden dinler (gruplar ayrı)</div>
+              <div>• İlk tarama bitince her <strong className="text-slate-200">30 dk</strong> tüm grupları son mesaj saatinden itibaren sırayla tarar</div>
               <div>• Çift ilan: yalnızca <strong className="text-slate-200">aynı metnin tamamı</strong> eşleşirse</div>
             </div>
           </div>
@@ -3667,7 +3667,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   <div className="flex items-center gap-2 shrink-0">
                     {s.isScanning && <span className="text-[10px] font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-                      {s.initialScanDone ? "Günlük (5 dk)" : `İlk tarama %${s.initialScanProgress || 1}`}
+                      {s.initialScanDone ? "Kaldığı yerden (30 dk)" : `İlk tarama %${s.initialScanProgress || 1}`}
                     </span>
                   </div>
                 </div>
@@ -3681,6 +3681,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   <span>Bulunan: {s.lastScanFound}</span>
                   <span>Çift: {s.lastScanDuplicates}</span>
                   <span>Hata: {s.lastScanErrors}</span>
+                  <span>Son mesaj: {s.lastMessageAt ? new Date(s.lastMessageAt).toLocaleString("tr-TR") : "—"}</span>
                   <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
                   <div className="ml-auto flex items-center gap-3">
                     <button
@@ -4021,7 +4022,14 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
                   <div className="mt-2 pt-2 border-t border-white/5">
                     <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-6">{job.rawText}</p>
                     {job.sourceUrl && (
-                      <a href={job.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] text-primary flex items-center gap-0.5 mt-1 hover:underline">
+                      <a
+                        href={job.platform === "whatsapp" || job.sourceUrl.startsWith("whatsapp://")
+                          ? "https://web.whatsapp.com/"
+                          : job.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-primary flex items-center gap-0.5 mt-1 hover:underline"
+                      >
                         <ExternalLink className="w-2.5 h-2.5" /> Kaynağa git
                       </a>
                     )}
@@ -6227,7 +6235,9 @@ export default function AdminDashboard() {
                   </button>
                   {isAdmin && l.sourceUrl && (
                     <a
-                      href={l.sourceUrl}
+                      href={l.sourceTag === "whatsapp" || l.sourceUrl.startsWith("whatsapp://")
+                        ? "https://web.whatsapp.com/"
+                        : l.sourceUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-sky-500/15 text-sky-300 rounded-lg hover:bg-sky-500/25 transition-colors"

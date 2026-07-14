@@ -3,13 +3,27 @@ import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { onlineSockets } from "./routes/chat";
-import { setBotIo, isGuvenlikBotEnabled, isBilgiBotEnabled, isFakeBotEnabled } from "./lib/chat-bot";
+import {
+  setBotIo,
+  isGuvenlikBotEnabled,
+  isBilgiBotEnabled,
+  isFakeBotEnabled,
+  invalidateBotFlagsCache,
+} from "./lib/chat-bot";
 import { setRealtimeServer } from "./lib/realtime";
-import { startScraperWorker, purgeExpiredListings, purgeDemoListings, reparseImportedListings } from "./workers/scraper";
+import {
+  startScraperWorker,
+  purgeExpiredListings,
+  purgeDemoListings,
+  reparseImportedListings,
+  ensureExactBotDeduplication,
+  dedupeExistingListings,
+} from "./workers/scraper";
 import { initTelegramClient } from "./services/telegram-client";
 import { initWhatsAppClient } from "./services/whatsapp-client";
 import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
-import { eq, count, sql, desc, lt, asc, and, or, isNotNull } from "drizzle-orm";
+import { eq, count, sql, asc, and, or, isNotNull } from "drizzle-orm";
+import { trimChatHistory } from "./lib/chat-retention";
 
 const rawPort = process.env["PORT"] || "3000";
 const port = Number(rawPort);
@@ -36,37 +50,11 @@ export async function saveChatMessage(userId: number, content: string): Promise<
       isPinned: false,
       isDeleted: false,
     }).returning({ id: chatMessagesTable.id, createdAt: chatMessagesTable.createdAt });
+    void trimChatHistory();
     return row ?? null;
   } catch (e) {
     logger.error(e, "saveChatMessage error");
     return null;
-  }
-}
-
-async function trimChatHistory(): Promise<void> {
-  try {
-    // Son 200 görünür mesajı koru (üye + ilan duyurusu + katılım + yeni üye — hepsi)
-    const kept = await db
-      .select({ id: chatMessagesTable.id })
-      .from(chatMessagesTable)
-      .where(eq(chatMessagesTable.isDeleted, false))
-      .orderBy(desc(chatMessagesTable.createdAt))
-      .limit(200);
-
-    if (kept.length >= 200) {
-      const minId = Math.min(...kept.map((r) => r.id));
-      await db
-        .delete(chatMessagesTable)
-        .where(and(eq(chatMessagesTable.isDeleted, false), lt(chatMessagesTable.id, minId)));
-    }
-
-    // Soft-deleted: admin/moderatör silince 2 gün sonra fiziksel temizle
-    await db.delete(chatMessagesTable).where(and(
-      eq(chatMessagesTable.isDeleted, true),
-      lt(chatMessagesTable.createdAt, new Date(Date.now() - 2 * 24 * 3600 * 1000)),
-    ));
-  } catch (e) {
-    logger.error(e, "trimChatHistory error");
   }
 }
 
@@ -1078,10 +1066,14 @@ void purgeExpiredListings();
 void purgeDemoListings();
 setInterval(() => { void purgeExpiredListings(); }, 30 * 60 * 1000);
 void trimChatHistory();
-setInterval(() => { void trimChatHistory(); }, 5 * 60 * 1000);
+setInterval(() => { void trimChatHistory(); }, 60 * 1000);
 setInterval(() => { void broadcastOnlineCount(); }, 45000);
 
 // Bot zamanlayıcıları — başlangıçta birbirinden uzak başlasın (spam hissi azalır)
+void db.update(adminSettingsTable)
+  .set({ botGuvenlikEnabled: true, botBilgiEnabled: true, botFakeEnabled: true })
+  .then(() => invalidateBotFlagsCache({ guvenlik: true, bilgi: true, fake: true }))
+  .catch((error) => logger.warn({ err: error }, "Chat botları otomatik başlatılamadı"));
 setTimeout(() => scheduleBotMessage(), 90 * 1000);
 setTimeout(() => scheduleFakeConversation(), 45 * 1000);
 setTimeout(() => {
@@ -1103,11 +1095,19 @@ async function bootstrapWorkers(): Promise<void> {
         eq(sourcesTable.active, true),
         or(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.platform, "whatsapp")),
       ));
+    await db.update(sourcesTable)
+      .set({ checkInterval: 30 })
+      .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
 
     await initTelegramClient();
     // Kayıtlı WA oturumu varsa otomatik bağlan (imleçler DB'de kalır; Sıfırla gerekmez).
     // WA_AUTO_CONNECT=0 ile boot bağlantısı kapatılabilir.
     void initWhatsAppClient();
+    await ensureExactBotDeduplication()
+      .catch((error) => logger.warn({ err: error }, "Exact duplicate index bootstrap skipped"));
+    void dedupeExistingListings()
+      .then((result) => logger.info(result, "Exact duplicate bot listings cleaned"))
+      .catch((error) => logger.warn({ err: error }, "Exact duplicate cleanup skipped"));
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
     void import("./lib/listing-feature").then((m) => m.startFeatureExpiryWorker()).catch(() => {});

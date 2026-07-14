@@ -2,8 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { db, knownCompaniesTable, knownCompanyAliasesTable } from "@workspace/db";
-import { asc, desc, eq } from "drizzle-orm";
+import { db, knownCompaniesTable, knownCompanyAliasesTable, listingsTable } from "@workspace/db";
+import { asc, desc, eq, ne, or, isNull, sql } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import {
   applyKnownLogoToListings,
@@ -18,6 +18,7 @@ import {
 } from "../lib/known-companies";
 
 const router = Router();
+const DEFAULT_COMPANY_SLUG = "__default_listing_company__";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -44,6 +45,32 @@ function companyJson(c: typeof knownCompaniesTable.$inferSelect, aliases: string
     updatedAt: c.updatedAt.toISOString(),
   };
 }
+
+async function getDefaultCompanyLogoRow(): Promise<typeof knownCompaniesTable.$inferSelect> {
+  await ensureKnownCompaniesSchema();
+  const [existing] = await db.select().from(knownCompaniesTable)
+    .where(eq(knownCompaniesTable.slug, DEFAULT_COMPANY_SLUG))
+    .limit(1);
+  if (existing) return existing;
+  const [created] = await db.insert(knownCompaniesTable).values({
+    name: "Varsayılan Firma",
+    slug: DEFAULT_COMPANY_SLUG,
+    isActive: false,
+  }).returning();
+  return created!;
+}
+
+/** Firma bilgisi olmayan tüm ilanların ortak, DB tabanlı logosu. */
+router.get("/default-company-logo", async (_req, res): Promise<void> => {
+  const row = await getDefaultCompanyLogoRow();
+  if (!row.logoData) {
+    res.redirect(302, "/brand-logo.png");
+    return;
+  }
+  res.setHeader("Content-Type", "image/webp");
+  res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+  res.send(Buffer.from(row.logoData, "base64"));
+});
 
 /** Public: logo binary */
 router.get("/known-company-logos/:id", async (req, res): Promise<void> => {
@@ -102,7 +129,9 @@ router.get("/known-companies", async (_req, res): Promise<void> => {
 
 router.get("/admin/known-companies", authMiddleware, requireAdminOrModerator, async (_req, res): Promise<void> => {
   await ensureKnownCompaniesSchema();
-  const rows = await db.select().from(knownCompaniesTable).orderBy(desc(knownCompaniesTable.updatedAt));
+  const rows = await db.select().from(knownCompaniesTable)
+    .where(ne(knownCompaniesTable.slug, DEFAULT_COMPANY_SLUG))
+    .orderBy(desc(knownCompaniesTable.updatedAt));
   const aliases = await db.select().from(knownCompanyAliasesTable);
   const byCo = new Map<number, string[]>();
   for (const a of aliases) {
@@ -112,6 +141,39 @@ router.get("/admin/known-companies", authMiddleware, requireAdminOrModerator, as
   }
   res.json(rows.map((c) => companyJson(c, byCo.get(c.id) ?? [])));
 });
+
+router.get("/admin/default-company-logo", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  const row = await getDefaultCompanyLogoRow();
+  res.json({
+    logoUrl: row.logoData ? `/api/default-company-logo?v=${row.updatedAt.getTime()}` : "/brand-logo.png",
+    updatedAt: row.updatedAt.toISOString(),
+  });
+});
+
+router.post(
+  "/admin/default-company-logo",
+  authMiddleware,
+  requireAdmin,
+  upload.single("logo"),
+  async (req, res): Promise<void> => {
+    if (!req.file) {
+      res.status(400).json({ error: "Logo dosyası gerekli" });
+      return;
+    }
+    const row = await getDefaultCompanyLogoRow();
+    await saveKnownCompanyLogoBuffer(row.id, req.file.buffer);
+    const versionedUrl = `/api/default-company-logo?v=${Date.now()}`;
+    const updated = await db.update(listingsTable)
+      .set({ companyLogoUrl: versionedUrl })
+      .where(or(
+        isNull(listingsTable.company),
+        sql`BTRIM(COALESCE(${listingsTable.company}, '')) = ''`,
+        sql`LOWER(BTRIM(COALESCE(${listingsTable.company}, ''))) IN ('belirtilmedi', 'belirtilmemiş', 'firma')`,
+      ))
+      .returning({ id: listingsTable.id });
+    res.json({ success: true, logoUrl: versionedUrl, appliedListings: updated.length });
+  },
+);
 
 router.post("/admin/known-companies/seed", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
   try {

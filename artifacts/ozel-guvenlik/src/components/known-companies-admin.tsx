@@ -29,13 +29,20 @@ export function KnownCompaniesAdminSection({
   const [aliases, setAliases] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [defaultLogoUrl, setDefaultLogoUrl] = useState("/brand-logo.png");
+  const [defaultLogoUploading, setDefaultLogoUploading] = useState(false);
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const defaultLogoRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiCall("/admin/known-companies", "GET");
+      const [data, defaultLogo] = await Promise.all([
+        apiCall("/admin/known-companies", "GET"),
+        apiCall("/admin/default-company-logo", "GET"),
+      ]);
       setItems(Array.isArray(data) ? data : []);
+      setDefaultLogoUrl(defaultLogo?.logoUrl || "/brand-logo.png");
     } catch (e: any) {
       toast({ title: "Firmalar yüklenemedi", description: e?.message, variant: "destructive" });
     } finally {
@@ -44,6 +51,33 @@ export function KnownCompaniesAdminSection({
   }, [apiCall, toast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const uploadDefaultLogo = async (file: File | null) => {
+    if (!file) return;
+    setDefaultLogoUploading(true);
+    try {
+      const token = getToken();
+      const fd = new FormData();
+      fd.append("logo", file);
+      const res = await fetch("/api/admin/default-company-logo", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Yükleme başarısız");
+      setDefaultLogoUrl((data as { logoUrl?: string }).logoUrl || "/api/default-company-logo");
+      toast({
+        title: "Varsayılan firma logosu güncellendi",
+        description: `${(data as { appliedListings?: number }).appliedListings ?? 0} firmasız ilan anında güncellendi`,
+      });
+    } catch (e: any) {
+      toast({ title: "Varsayılan logo yüklenemedi", description: e?.message, variant: "destructive" });
+    } finally {
+      setDefaultLogoUploading(false);
+      if (defaultLogoRef.current) defaultLogoRef.current.value = "";
+    }
+  };
 
   const seed = async () => {
     setSaving(true);
@@ -141,6 +175,36 @@ export function KnownCompaniesAdminSection({
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => void seed()} disabled={saving}>
             Seed Logoları Yükle
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-amber-500/30 p-3 bg-amber-500/5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="h-16 w-16 rounded-full bg-white border border-amber-500/30 overflow-hidden shrink-0 flex items-center justify-center">
+            <img src={defaultLogoUrl} alt="Varsayılan firma" className="w-full h-full object-contain box-border p-1" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">Firması belirtilmeyen ilanların logosu</div>
+            <p className="text-xs text-muted-foreground">
+              Değiştirildiğinde firma adı olmayan mevcut ve yeni ilanlarda anında kullanılır.
+            </p>
+          </div>
+          <input
+            ref={defaultLogoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => void uploadDefaultLogo(event.target.files?.[0] ?? null)}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => defaultLogoRef.current?.click()}
+            disabled={defaultLogoUploading}
+          >
+            {defaultLogoUploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+            Varsayılan logoyu değiştir
           </Button>
         </div>
       </div>

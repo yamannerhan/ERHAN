@@ -20,7 +20,7 @@ import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
 import { announceNewListing } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
-import { createDuplicateHash, isLikelyDuplicateJob } from "../lib/job-dedup";
+import { createDuplicateHash } from "../lib/job-dedup";
 
 // ── Keyword lists ──────────────────────────────────────────────────
 const CHAT_SKIP_KEYWORDS = [
@@ -183,6 +183,8 @@ const STALE_SCAN_LOCK_MS = 90 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
 const WA_MESSAGE_PROCESS_DELAY_MS = 200;
 const WA_GROUP_GAP_MS = 12_000;
+const WA_INCREMENTAL_SCAN_INTERVAL_MS = 30 * 60 * 1000;
+const WA_CURSOR_OVERLAP_MS = 2 * 60 * 1000;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
 const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
@@ -542,9 +544,9 @@ async function processMessage(
     duplicateHash: hash,
     isJob: true,
     status: "pending",
-  }).returning();
+  }).onConflictDoNothing().returning();
 
-  if (!imported) return "skipped";
+  if (!imported) return "duplicate";
 
   const title = extractTitle(text);
   const v2City = await maybeClassifyWithV2({
@@ -1388,8 +1390,8 @@ async function publishElemanJob(
     duplicateHash: hash,
     isJob: true,
     status: "pending",
-  }).returning();
-  if (!imported) return "skipped";
+  }).onConflictDoNothing().returning();
+  if (!imported) return "duplicate";
 
   const jobCity = job.locationDisplay ?? job.city;
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
@@ -1682,7 +1684,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     // İlk tarama: WA gidebildiği kadar (Chromium); TG ayrı 30g
     const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
       ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true }
-      : { afterTimestampMs: lastTs, limit: 300 });
+      : { afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS), limit: 1000, deep: true });
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
     historyExhausted = fetched.historyExhausted;
@@ -1994,27 +1996,35 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   }
 }
 
-async function runWhatsAppIncrementalNow(): Promise<void> {
-  const sources = await db.select().from(sourcesTable)
-    .where(and(
-      eq(sourcesTable.active, true),
-      eq(sourcesTable.platform, "whatsapp"),
-      eq(sourcesTable.initialScanDone, true),
-    ))
-    .orderBy(asc(sourcesTable.id));
+let waIncrementalRunning = false;
 
-  for (const source of sources) {
-    if (source.isScanning) continue;
-    const locked = await acquireSourceScanLock(source.id);
-    if (!locked) continue;
-    try {
-      await checkWhatsAppSource(source);
-    } catch (e) {
-      logger.warn({ err: e, sourceId: source.id }, "scraper: wa incremental failed");
-    } finally {
-      await releaseSourceScanLock(source.id);
+async function runWhatsAppIncrementalNow(): Promise<void> {
+  if (waIncrementalRunning) return;
+  waIncrementalRunning = true;
+  try {
+    const sources = await db.select().from(sourcesTable)
+      .where(and(
+        eq(sourcesTable.active, true),
+        eq(sourcesTable.platform, "whatsapp"),
+        eq(sourcesTable.initialScanDone, true),
+      ))
+      .orderBy(asc(sourcesTable.id));
+
+    for (const source of sources) {
+      if (source.isScanning) continue;
+      const locked = await acquireSourceScanLock(source.id);
+      if (!locked) continue;
+      try {
+        await checkWhatsAppSource(source);
+      } catch (e) {
+        logger.warn({ err: e, sourceId: source.id }, "scraper: wa incremental failed");
+      } finally {
+        await releaseSourceScanLock(source.id);
+      }
+      await sleep(5_000);
     }
-    await sleep(5_000);
+  } finally {
+    waIncrementalRunning = false;
   }
 }
 
@@ -2175,7 +2185,7 @@ async function scanWhatsAppSources(
   const ordered = [...whatsappSources].sort((a, b) => a.id - b.id);
 
   for (const source of ordered) {
-    const intervalMin = Math.max(5, source.checkInterval ?? 5);
+    const intervalMin = 30;
     const intervalMs = intervalMin * 60 * 1000;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
     if (!force && now - lastChecked < intervalMs) continue;
@@ -2375,6 +2385,18 @@ export function startScraperWorker(): void {
     ensureWhatsAppAutoConnect();
   }, 5 * 60 * 1000);
 
+  // Canlı dinleme kaçırsa bile her 30 dakikada tüm WhatsApp gruplarını
+  // DB'de saklanan son mesaj zaman damgasından başlayarak sırayla kontrol et.
+  setInterval(() => {
+    if (!isWhatsAppReady()) {
+      ensureWhatsAppAutoConnect();
+      return;
+    }
+    void triggerWhatsAppScan().catch((error) => {
+      logger.error({ err: error }, "scraper: 30dk WhatsApp taraması başarısız");
+    });
+  }, WA_INCREMENTAL_SCAN_INTERVAL_MS);
+
   if (isBotTokenSet()) {
     void (async () => {
       const minutes = await getTelegramScanIntervalMinutes();
@@ -2415,7 +2437,22 @@ async function deleteListingsByIds(ids: number[]): Promise<number> {
   return deleted.length;
 }
 
-/** Mevcut aktif Telegram ilanlarından çift kopyaları temizle (en eskisini koru). */
+/** Mevcut aktif bot ilanlarından tam aynı kopyaları temizle (en eskisini koru). */
+export async function ensureExactBotDeduplication(): Promise<void> {
+  // Eski aynı-hash kayıtlarında ilkini koru; ardından eşzamanlı bot taramalarını
+  // veritabanı seviyesinde de tekilleştir.
+  await db.execute(sql`
+    DELETE FROM imported_posts newer
+    USING imported_posts older
+    WHERE newer.duplicate_hash = older.duplicate_hash
+      AND newer.id > older.id
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS imported_posts_duplicate_hash_uidx
+    ON imported_posts (duplicate_hash)
+  `);
+}
+
 export async function dedupeExistingListings(): Promise<{ removed: number; kept: number }> {
   const rows = await db.select({
     id: listingsTable.id,
@@ -2433,16 +2470,18 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
     .orderBy(listingsTable.createdAt);
 
   const survivors: typeof rows = [];
+  const seenHashes = new Set<string>();
   const toRemove: number[] = [];
 
   for (const row of rows) {
     const content = row.rawText ?? row.description ?? row.title ?? "";
-    const isDupe = survivors.some((s) => {
-      const sContent = s.rawText ?? s.description ?? s.title ?? "";
-      return isLikelyDuplicateJob(content, sContent);
-    });
-    if (isDupe) toRemove.push(row.id);
-    else survivors.push(row);
+    const hash = createDuplicateHash(content);
+    if (seenHashes.has(hash)) {
+      toRemove.push(row.id);
+    } else {
+      seenHashes.add(hash);
+      survivors.push(row);
+    }
   }
 
   const removed = await deleteListingsByIds(toRemove);

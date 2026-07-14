@@ -231,7 +231,10 @@ router.get("/users/favorites", authMiddleware, async (req, res): Promise<void> =
     cardTheme: l.cardTheme,
     applyUrl: l.applyUrl,
     companyLogoUrl: companyOverlays.get(l.id)?.logoPath ?? l.companyLogoUrl,
-    companyVerified: companyOverlays.get(l.id)?.isVerified ?? false,
+    companyVerified: l.sourceType === "bot_imported"
+      || ["telegram", "whatsapp", "eleman", "demo"].includes(l.sourceTag ?? "")
+      ? false
+      : !!l.authorId || (companyOverlays.get(l.id)?.isVerified ?? false),
     authorId: l.authorId,
     authorUsername: null,
     isLikedByMe: false,
