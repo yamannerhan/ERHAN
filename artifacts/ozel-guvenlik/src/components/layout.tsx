@@ -153,7 +153,7 @@ export function Layout({
   headerVariant?: "default" | "listings" | "parttime" | "create-listing";
 }) {
   const { user, isAdmin, isModerator } = useAuth();
-  const { isLite } = useDisplayMode();
+  const { isLite, isDesktop } = useDisplayMode();
   const [location, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -324,11 +324,12 @@ export function Layout({
 
   const onlineNum = liveCount ?? onlineData?.count ?? 0;
 
-  const customHeader = headerVariant === "listings"
+  /* Mobilde sayfaya özel header; PC'de her zaman tam üst menü (Ana Sayfa, İlanlar, …) */
+  const customHeader = !isDesktop && headerVariant === "listings"
     ? { title: "ilanlar", subtitle: "Güncel güvenlik iş ilanları", searchId: "og-listings-search", titleLower: true }
-    : headerVariant === "parttime"
+    : !isDesktop && headerVariant === "parttime"
       ? { title: "PartTime", subtitle: "Saatlik, günlük ve kısa süreli işler", searchId: "og-parttime-search", titleLower: false }
-      : headerVariant === "create-listing"
+      : !isDesktop && headerVariant === "create-listing"
         ? { title: "İlan Oluştur", subtitle: "Metni yapıştır, ilanı hızlıca oluştur", searchId: "og-create-listing-search", titleLower: false }
         : null;
 
@@ -403,9 +404,9 @@ export function Layout({
 
           {/* Desktop nav — ≥1024 via CSS (.og-desktop-nav) */}
           {!customHeader && (
-          <nav className="og-desktop-nav hidden lg:flex items-center gap-1 ml-6 mr-auto">
+          <nav className="og-desktop-nav hidden lg:flex items-center gap-1 ml-6 mr-auto" aria-label="Üst menü">
             {[
-              { label: "Ana Sayfa", path: "/" },
+              { label: "Anasayfa", path: "/" },
               { label: "İlanlar", path: "/ilanlar" },
               { label: "İlan Oluştur", path: "/ilan-ekle" },
               { label: "Part Time", path: "/part-time" },
