@@ -7,7 +7,7 @@ import { Link, useLocation } from "wouter";
 import {
   Bell, X, Heart, MessageCircle, Info, Briefcase, CheckCheck, ChevronRight, ChevronLeft,
   Menu, Sun, Moon, Home as HomeIcon, Tag, Plus, Clock3, Search,
-  FileText, User as UserIcon, Bookmark,
+  MapPin, User as UserIcon, Bookmark,
 } from "lucide-react";
 import "./mobile-bottom-nav.css";
 import "@/styles/desktop-home.css";
@@ -83,7 +83,7 @@ function MobileBottomNav() {
     { icon: Tag, label: "İlanlar", path: "/ilanlar" },
     { icon: Plus, label: "İlan Oluştur", path: "/ilan-ekle", center: true },
     { icon: Clock3, label: "İş Arayanlar", path: "/part-time" },
-    { icon: FileText, label: "CV", path: "/cv-olustur" },
+    { icon: MapPin, label: "Yakınımda", path: "/yakindaki-ilanlar" },
   ];
 
   const hasDividerAfter = (index: number) => index === 0 || index === 1 || index === 3;

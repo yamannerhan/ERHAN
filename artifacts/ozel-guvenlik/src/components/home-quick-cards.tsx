@@ -5,7 +5,7 @@ import "./home-ref-ui.css";
 /** Tasarım hazır olunca ilgili kartı true yapın — link/onClick tekrar açılır */
 const QUICK_CARDS_ENABLED = {
   news: false,
-  near: true,
+  near: false,
 } as const;
 
 type HomeQuickCardsProps = {
@@ -17,7 +17,7 @@ function SoonQuickCard({ children }: { children: ReactNode }) {
   return (
     <div className="og-ref-quick-card og-ref-quick-card--soon" aria-disabled="true">
       <div className="og-ref-quick-soon-overlay">
-        <span>Çok yakında hizmetinizde</span>
+        <span>Yakında hizmetinizde</span>
       </div>
       {children}
     </div>
@@ -30,13 +30,13 @@ export function HomeQuickCards({
 }: HomeQuickCardsProps) {
   return (
     <section className="og-ref-quick-row" aria-label="Hızlı erişim">
-      <div className="og-ref-quick-card og-ref-quick-card--disabled" aria-disabled="true">
+      <SoonQuickCard>
         <div className="og-ref-quick-icon" aria-hidden>
           <Briefcase className="w-4 h-4" strokeWidth={2.25} />
         </div>
         <div className="og-ref-quick-title">Bana Uygun İş İlanları</div>
-        <div className="og-ref-quick-sub">Yakında</div>
-      </div>
+        <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
+      </SoonQuickCard>
 
       {QUICK_CARDS_ENABLED.news ? (
         <a href="/blog" className="og-ref-quick-card">
@@ -62,16 +62,16 @@ export function HomeQuickCards({
           <div className="og-ref-quick-icon" aria-hidden>
             <MapPin className="w-4 h-4" strokeWidth={2.25} />
           </div>
-          <div className="og-ref-quick-title">Yakınımda</div>
-          <div className="og-ref-quick-sub">Yakındaki ilanları keşfet</div>
+          <div className="og-ref-quick-title">Ö.GG ARAÇLARI</div>
+          <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
         </button>
       ) : (
         <SoonQuickCard>
           <div className="og-ref-quick-icon" aria-hidden>
             <MapPin className="w-4 h-4" strokeWidth={2.25} />
           </div>
-          <div className="og-ref-quick-title">Yakınımda</div>
-          <div className="og-ref-quick-sub">Yakındaki ilanları keşfet</div>
+          <div className="og-ref-quick-title">Ö.GG ARAÇLARI</div>
+          <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
         </SoonQuickCard>
       )}
 

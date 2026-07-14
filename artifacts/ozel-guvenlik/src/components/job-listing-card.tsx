@@ -8,7 +8,6 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
-import { ListingSourceBadges } from "@/components/listing-source-badges";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -194,7 +193,6 @@ export function JobListingCard({
                 </span>
               )}
             </div>
-            <ListingSourceBadges listing={listing} compact={compact} />
           </div>
 
           <div className="og-job__aside">
