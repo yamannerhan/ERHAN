@@ -251,8 +251,8 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     ...item,
     title,
     companyName,
-    description: finalizeElemanListingText(description, phoneJoined),
-    phone: phoneJoined,
+    description: finalizeElemanListingText(description, phone),
+    phone,
     rawText,
     postedAt,
   };
