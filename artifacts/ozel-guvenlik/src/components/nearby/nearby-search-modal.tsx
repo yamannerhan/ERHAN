@@ -34,15 +34,15 @@ type Prefs = {
 function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return { radius: 25, sort: "distance", filters: [] };
+    if (!raw) return { radius: 50, sort: "distance", filters: [] };
     const p = JSON.parse(raw) as Prefs;
     return {
-      radius: RADII.includes(p.radius as (typeof RADII)[number]) ? p.radius : 25,
+      radius: RADII.includes(p.radius as (typeof RADII)[number]) ? p.radius : 50,
       sort: SORTS.some((s) => s.id === p.sort) ? p.sort : "distance",
       filters: Array.isArray(p.filters) ? p.filters : [],
     };
   } catch {
-    return { radius: 25, sort: "distance", filters: [] };
+    return { radius: 50, sort: "distance", filters: [] };
   }
 }
 
@@ -145,24 +145,44 @@ export function NearbySearchModal({ open, onClose }: Props) {
       setPhase("manual");
       return;
     }
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setError("Konum için güvenli bağlantı (HTTPS) gerekli. İl ve ilçe seçerek devam edebilirsiniz.");
+      setPhase("manual");
+      return;
+    }
     setPhase("locating");
+
+    const onOk = (pos: GeolocationPosition) => {
+      toast({ title: "Konumunuz başarıyla bulundu." });
+      goWithCoords(pos.coords.latitude, pos.coords.longitude);
+    };
+
+    const onFail = (err: GeolocationPositionError, triedHighAccuracy: boolean) => {
+      // Android'de önce ağ konumu, sonra GPS dene
+      if (!triedHighAccuracy && (err.code === err.TIMEOUT || err.code === err.POSITION_UNAVAILABLE)) {
+        navigator.geolocation.getCurrentPosition(
+          onOk,
+          (err2) => onFail(err2, true),
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+        );
+        return;
+      }
+      setPhase("main");
+      if (err.code === err.PERMISSION_DENIED) {
+        setError("Konum izni verilmedi. İl ve ilçe seçerek yakınındaki ilanları görüntüleyebilirsin.");
+        toast({ title: "Konum izni verilmedi." });
+      } else if (err.code === err.POSITION_UNAVAILABLE) {
+        setError("Konum servisi kapalı görünüyor. Cihaz ayarlarından konumu açabilir veya manuel seçim yapabilirsin.");
+      } else {
+        setError("Konumunuz alınamadı. Tekrar deneyebilir veya il ve ilçe seçebilirsin.");
+      }
+    };
+
+    // Ağ / kaba konum önce (Android'de daha hızlı ve güvenilir)
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        toast({ title: "Konumunuz başarıyla bulundu." });
-        goWithCoords(pos.coords.latitude, pos.coords.longitude);
-      },
-      (err) => {
-        setPhase("main");
-        if (err.code === err.PERMISSION_DENIED) {
-          setError("Konum izni verilmedi. İl ve ilçe seçerek yakınındaki ilanları görüntüleyebilirsin.");
-          toast({ title: "Konum izni verilmedi." });
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
-          setError("Konum servisi kapalı görünüyor. Cihaz ayarlarından konumu açabilir veya manuel seçim yapabilirsin.");
-        } else {
-          setError("Konumunuz alınamadı. Tekrar deneyebilir veya il ve ilçe seçebilirsin.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 },
+      onOk,
+      (err) => onFail(err, false),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 },
     );
   };
 

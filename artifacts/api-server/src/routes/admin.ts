@@ -1855,18 +1855,38 @@ async function ensureDefaultBanners(): Promise<void> {
     .select({ id: bannersTable.id, imageUrl: bannersTable.imageUrl })
     .from(bannersTable);
 
-  const needsResync =
-    existing.length === 0
-    || existing.length > DEFAULT_BANNERS.length
-    || existing.some((b) => isLegacyBannerSeed(b.imageUrl));
-
-  if (needsResync) {
-    await db.delete(bannersTable);
+  // Sadece tablo tamamen boşsa varsayılan ekle — custom banner'ları ASLA silme
+  if (existing.length === 0) {
     await db.insert(bannersTable).values(DEFAULT_BANNERS.map((b) => ({ ...b, isActive: true })));
     return;
   }
 
+  // Eski unsplash / png seed satırlarını tek tek public jpg'e çevir (toplu silme yok)
+  for (const row of existing) {
+    if (!isLegacyBannerSeed(row.imageUrl)) continue;
+    const idx = existing.indexOf(row) % DEFAULT_BANNERS.length;
+    const fallback = DEFAULT_BANNERS[idx]!.imageUrl;
+    await db.update(bannersTable).set({ imageUrl: fallback, linkUrl: null }).where(eq(bannersTable.id, row.id));
+  }
+
   await db.update(bannersTable).set({ linkUrl: null }).where(sql`${bannersTable.linkUrl} is not null`);
+}
+
+/** Diskteki eski yüklemeyi DB'ye (data URL) taşı — deploy sonrası kaybolmasın */
+async function migrateBannerToDurable(id: number, imageUrl: string): Promise<string | null> {
+  const uploaded = imageUrl.match(/\/api\/banner-images\/([^/?#]+)/);
+  if (!uploaded?.[1]) return null;
+  const filepath = path.join(BANNER_IMAGES_DIR, path.basename(uploaded[1]));
+  if (!fs.existsSync(filepath)) return null;
+  try {
+    const buf = await fs.promises.readFile(filepath);
+    if (buf.length > 2.8 * 1024 * 1024) return null;
+    const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
+    await db.update(bannersTable).set({ imageUrl: dataUrl }).where(eq(bannersTable.id, id));
+    return dataUrl;
+  } catch {
+    return null;
+  }
 }
 
 router.get("/banner-images/:filename", (req, res): void => {
@@ -1888,18 +1908,24 @@ router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUp
     res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" });
     return;
   }
-  const filename = `banner_${req.user!.id}_${Date.now()}.jpg`;
-  const filepath = path.join(BANNER_IMAGES_DIR, filename);
-  await sharp(req.file.buffer)
+  const buf = await sharp(req.file.buffer)
     .rotate()
     .resize(BANNER_WIDTH, BANNER_HEIGHT, {
       fit: "cover",
       position: "centre",
     })
-    .jpeg({ quality: 90, mozjpeg: true })
-    .toFile(filepath);
+    .jpeg({ quality: 85, mozjpeg: true })
+    .toBuffer();
+
+  if (buf.length > 2.8 * 1024 * 1024) {
+    res.status(400).json({ error: "Banner çok büyük. Daha küçük bir görsel yükleyin." });
+    return;
+  }
+
+  // Postgres'te sakla — Railway redeploy diskini silse bile banner kalır
+  const dataUrl = `data:image/jpeg;base64,${buf.toString("base64")}`;
   res.json({
-    url: `/api/banner-images/${filename}`,
+    url: dataUrl,
     width: BANNER_WIDTH,
     height: BANNER_HEIGHT,
     aspectRatio: "3:1",
@@ -1909,7 +1935,24 @@ router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUp
 router.get("/admin/banners", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
   await ensureDefaultBanners();
   const banners = await db.select().from(bannersTable).orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
-  res.json(banners.map(b => ({ id: b.id, title: b.title, imageUrl: b.imageUrl, linkUrl: b.linkUrl, isActive: b.isActive, sortOrder: b.sortOrder, createdAt: b.createdAt.toISOString() })));
+  const out = [];
+  for (const b of banners) {
+    let imageUrl = b.imageUrl;
+    if (imageUrl.includes("/api/banner-images/")) {
+      const migrated = await migrateBannerToDurable(b.id, imageUrl);
+      if (migrated) imageUrl = migrated;
+    }
+    out.push({
+      id: b.id,
+      title: b.title,
+      imageUrl,
+      linkUrl: b.linkUrl,
+      isActive: b.isActive,
+      sortOrder: b.sortOrder,
+      createdAt: b.createdAt.toISOString(),
+    });
+  }
+  res.json(out);
 });
 
 router.post("/admin/banners/reorder", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
@@ -1964,6 +2007,9 @@ function resolveBannerImageUrl(imageUrl: string | null, index: number): string {
   const fallback = `/banners/banner-${(index % 3) + 1}.jpg`;
   if (!imageUrl || !imageUrl.trim()) return fallback;
 
+  // DB'de saklanan kalıcı banner
+  if (imageUrl.startsWith("data:image/")) return imageUrl;
+
   // Yüklenen dosya diskte yoksa (Railway ephemeral) public yedek kullan
   const uploaded = imageUrl.match(/\/api\/banner-images\/([^/?#]+)/);
   if (uploaded?.[1]) {
@@ -1972,7 +2018,6 @@ function resolveBannerImageUrl(imageUrl: string | null, index: number): string {
     return imageUrl;
   }
 
-  // Eski /banners/*.png veya kırık path → jpg yedek
   if (imageUrl.includes("unsplash.com")) return fallback;
   if (imageUrl.startsWith("/banners/") && imageUrl.endsWith(".png")) return fallback;
 
@@ -1987,15 +2032,25 @@ router.get("/banners", async (_req, res): Promise<void> => {
     .where(eq(bannersTable.isActive, true))
     .orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
 
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-  res.json(
-    banners.map((b, i) => ({
-      id: b.id,
-      title: b.title,
-      imageUrl: resolveBannerImageUrl(b.imageUrl, i),
-      linkUrl: null,
-    })),
+  // Diskteki eski /api/banner-images/... dosyalarını DB'ye taşı (bir sonraki deploy'da kaybolmasın)
+  const resolved = await Promise.all(
+    banners.map(async (b, i) => {
+      let imageUrl = b.imageUrl;
+      if (imageUrl.includes("/api/banner-images/")) {
+        const migrated = await migrateBannerToDurable(b.id, imageUrl);
+        if (migrated) imageUrl = migrated;
+      }
+      return {
+        id: b.id,
+        title: b.title,
+        imageUrl: resolveBannerImageUrl(imageUrl, i),
+        linkUrl: null,
+      };
+    }),
   );
+
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.json(resolved);
 });
 
 // ─── Akıllı İlan Yayınlama Yetkileri (Grant) ─────────────────────

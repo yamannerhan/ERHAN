@@ -21,3 +21,12 @@ export function parseNearbySort(raw: unknown): NearbySort {
   if (s === "salary" || s === "newest" || s === "views" || s === "distance") return s;
   return "distance";
 }
+
+/** NUMERIC/null → sayı; Number(null)===0 tuzağını önle */
+export function parseListingCoord(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return null;
+  return n;
+}

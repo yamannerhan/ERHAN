@@ -3,9 +3,9 @@ import { and, eq, sql, isNotNull, ne, or, ilike, gte, isNull, desc } from "drizz
 import { haversineKm, resolveGeoFromCityText } from "./geo-centers";
 import { logger } from "./logger";
 import { NEARBY_RADII_KM, type NearbyRadiusKm, type NearbySort } from "./nearby-types";
-import { parseCoord, parseNearbyRadius, parseNearbySort } from "./nearby-validator";
+import { parseCoord, parseListingCoord, parseNearbyRadius, parseNearbySort } from "./nearby-validator";
 
-export { NEARBY_RADII_KM, parseCoord, parseNearbyRadius, parseNearbySort };
+export { NEARBY_RADII_KM, parseCoord, parseListingCoord, parseNearbyRadius, parseNearbySort };
 export type { NearbyRadiusKm, NearbySort };
 
 export type NearbyQuery = {
@@ -147,25 +147,34 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
 }> {
   await ensureNearbySchema();
 
-  // Mevcut ilanları şehir metninden koordinatla (istek öncesi, en yeni 500)
-  try {
-    await backfillListingCoordinates(500);
-  } catch (e) {
-    logger.warn({ err: e }, "nearby: backfill failed");
-  }
+  // İsteği yavaşlatmasın — arka planda doldur
+  void backfillListingCoordinates(80).catch(() => undefined);
 
   const radiusKm = q.radiusKm;
   const lat = q.lat;
   const lng = q.lng;
-  const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+  const latDelta = radiusKm / 111;
+  const lngDelta = radiusKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  // 30 gün — aktif ilan havuzu daha geniş
+  const activeCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  // Mesafe = saf Haversine. İl adı (cityHint) ASLA AND edilmez —
-  // Gebze (Kocaeli) ↔ Tuzla (İstanbul) gibi komşu ilçe sonuçları gelsin.
+  // Bbox içindeki koordinatlı + henüz koordinatsız (city'den çözülecek)
+  const inBoxOrMissingCoords = or(
+    and(
+      isNotNull(listingsTable.latitude),
+      isNotNull(listingsTable.longitude),
+      sql`${listingsTable.latitude}::float BETWEEN ${lat - latDelta} AND ${lat + latDelta}`,
+      sql`${listingsTable.longitude}::float BETWEEN ${lng - lngDelta} AND ${lng + lngDelta}`,
+    )!,
+    or(isNull(listingsTable.latitude), isNull(listingsTable.longitude))!,
+  )!;
+
   const conditions = [
     eq(listingsTable.status, "active"),
     eq(listingsTable.isActive, true),
     realListingFilter(),
     sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`,
+    inBoxOrMissingCoords,
     ...buildChipConditions(q),
   ];
 
@@ -174,18 +183,18 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
     .from(listingsTable)
     .where(and(...conditions))
     .orderBy(desc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
-    .limit(1000);
+    .limit(1500);
 
   const scored: NearbyRow[] = [];
   const persistCoords: { id: number; lat: number; lng: number; accuracy: string }[] = [];
 
   for (const listing of candidates) {
-    let la = Number(listing.latitude);
-    let lo = Number(listing.longitude);
+    let la = parseListingCoord(listing.latitude);
+    let lo = parseListingCoord(listing.longitude);
     let accuracy = listing.locationAccuracy ?? "district";
     let resolvedNow = false;
 
-    if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+    if (la == null || lo == null) {
       const geo = resolveGeoFromCityText(listing.city);
       if (!geo) continue;
       la = geo.lat;
@@ -215,10 +224,9 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
     });
   }
 
-  // Çözülen koordinatları arka planda yaz (sonraki aramalar hızlı olsun)
   if (persistCoords.length > 0) {
     void (async () => {
-      for (const row of persistCoords.slice(0, 200)) {
+      for (const row of persistCoords.slice(0, 300)) {
         try {
           await db
             .update(listingsTable)
@@ -236,7 +244,6 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
     })();
   }
 
-  // Aynı ilçe metin eşleşmesi (koordinatsız / mesafesi hesaplanamayan)
   if (q.districtHint) {
     const sameDistrictRows = await db
       .select()

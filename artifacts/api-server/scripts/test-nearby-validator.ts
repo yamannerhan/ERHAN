@@ -4,6 +4,7 @@
  */
 import {
   parseCoord,
+  parseListingCoord,
   parseNearbyRadius,
   parseNearbySort,
 } from "../src/lib/nearby-validator";
@@ -22,6 +23,11 @@ assert(parseCoord(181, "lng") === null, "lng 181 rejected");
 assert(parseCoord(41.0082, "lat") !== null, "lat valid");
 assert(parseNearbySort("foo") === "distance", "sort default");
 assert(parseNearbySort("newest") === "newest", "sort newest");
+
+assert(parseListingCoord(null) === null, "null coord");
+assert(parseListingCoord("") === null, "empty coord");
+assert(parseListingCoord(0) === null, "zero coord rejected");
+assert(parseListingCoord("40.8028") === 40.8028, "string coord");
 
 const near = haversineKm(40.9819, 29.0578, 40.99, 29.06);
 const far = haversineKm(40.9819, 29.0578, 41.05, 28.95);

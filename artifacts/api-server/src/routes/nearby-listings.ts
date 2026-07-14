@@ -107,7 +107,7 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
     });
     return;
   }
-  const radiusKm = radiusParsed ?? 25;
+  const radiusKm = radiusParsed ?? 50;
   const sort = parseNearbySort(req.query["sort"]);
   const page = Math.max(1, parseInt(String(req.query["page"] ?? "1"), 10) || 1);
   const limit = Math.min(24, Math.max(1, parseInt(String(req.query["limit"] ?? "24"), 10) || 24));
