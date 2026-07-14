@@ -54,3 +54,6 @@ uploads/
 
 # Geofabrik / location import cache
 .data/
+
+.tmp-rp/
+
