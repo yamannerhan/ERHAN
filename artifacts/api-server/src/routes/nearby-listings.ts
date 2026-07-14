@@ -107,7 +107,7 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
     });
     return;
   }
-  const radiusKm = radiusParsed ?? 10;
+  const radiusKm = radiusParsed ?? 25;
   const sort = parseNearbySort(req.query["sort"]);
   const page = Math.max(1, parseInt(String(req.query["page"] ?? "1"), 10) || 1);
   const limit = Math.min(24, Math.max(1, parseInt(String(req.query["limit"] ?? "24"), 10) || 24));
@@ -115,7 +115,7 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
   const city = String(req.query["city"] ?? "").trim() || undefined;
   const district = String(req.query["district"] ?? "").trim() || undefined;
 
-  // Manuel il/ilçe → merkez koordinat
+  // Manuel il/ilçe → merkez koordinat (mesafe hesabı buradan; il adı ile SQL filtresi yok)
   if ((lat == null || lng == null) && city) {
     const { resolveGeoFromCityText } = await import("../lib/geo-centers");
     const fromText = resolveGeoFromCityText(district ? `${city} / ${district}` : city);
@@ -157,7 +157,6 @@ router.get("/listings/nearby", optionalAuthMiddleware, async (req, res): Promise
     service: service || undefined,
     date,
     salarySpecified: salarySpecified || undefined,
-    cityHint: city,
     districtHint: district,
   };
 

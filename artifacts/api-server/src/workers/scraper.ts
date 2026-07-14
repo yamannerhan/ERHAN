@@ -553,6 +553,8 @@ async function processMessage(
   const phone = extractPhone(text);
   const gender = extractGender(text);
   const workType = extractWorkType(text);
+  const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+  const coords = assignCoordsFromCity(city);
   const listingMeta = {
     sourceId: source.id,
     messageId,
@@ -599,6 +601,7 @@ async function processMessage(
     applyUrl: phone ? `tel:${phone}` : null,
     expiresAt: listingExpiryFrom(postedAt),
     ...listingMeta,
+    ...(coords ?? {}),
   }).returning();
   if (!newListing) return "skipped";
 
@@ -1328,6 +1331,8 @@ async function publishElemanJob(
   const cleanDescription = finalizeElemanListingText(job.description || job.rawText, job.phone);
 
   const postedAt = job.postedAt ?? now;
+  const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+  const coords = assignCoordsFromCity(city);
   const [newListing] = await db.insert(listingsTable).values({
     title: job.title || "Güvenlik Personeli Aranıyor",
     company: job.companyName ?? "Belirtilmemiş",
@@ -1349,6 +1354,7 @@ async function publishElemanJob(
     lastSeenAt: now,
     rawText: job.rawText,
     expiresAt: listingExpiryFrom(postedAt),
+    ...(coords ?? {}),
   }).returning();
   if (!newListing) return "skipped";
 

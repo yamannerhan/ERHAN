@@ -1731,6 +1731,8 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
   if (!perm.allowed) { res.status(403).json({ error: "İlan paylaşım yetkiniz bulunmuyor" }); return; }
   const { title, company, city, workType, salary, description, requirements, applyUrl, isFeatured, expiresAt, cardTheme, autoDeleteOnExpiry } = req.body as Record<string, unknown>;
   if (!title || !company || !city || !workType) { res.status(400).json({ error: "Başlık, şirket, şehir ve çalışma şekli zorunludur" }); return; }
+  const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+  const coords = assignCoordsFromCity(String(city));
   const [listing] = await db.insert(listingsTable).values({
     title: String(title), company: String(company), city: String(city), workType: String(workType),
     salary: salary ? String(salary) : null, description: description ? String(description) : null,
@@ -1740,6 +1742,7 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
     expiresAt: expiresAt ? new Date(String(expiresAt)) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
     authorId: req.user.id,
+    ...(coords ?? {}),
   }).returning();
   if (perm.shouldDecrement && perm.grantId) {
     await db.update(listingPublishGrantsTable)

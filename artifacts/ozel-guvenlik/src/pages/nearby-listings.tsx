@@ -22,7 +22,7 @@ export default function NearbyListingsPage() {
   const { toast } = useToast();
   const params = useMemo(() => new URLSearchParams(search.startsWith("?") ? search.slice(1) : search), [search]);
 
-  const radius = Number(params.get("radius") || 10);
+  const radius = Number(params.get("radius") || 25);
   const sort = params.get("sort") || "distance";
   const [page, setPage] = useState(1);
   const [data, setData] = useState<NearbyResponse | null>(null);
@@ -43,7 +43,7 @@ export default function NearbyListingsPage() {
       const sp = new URLSearchParams(queryBase);
       sp.set("page", String(pageNum));
       sp.set("limit", "24");
-      if (!sp.get("radius")) sp.set("radius", "10");
+      if (!sp.get("radius")) sp.set("radius", "25");
       if (!sp.get("sort")) sp.set("sort", "distance");
       const res = await fetch(`/api/listings/nearby?${sp.toString()}`);
       const json = (await res.json()) as NearbyResponse;
@@ -79,7 +79,7 @@ export default function NearbyListingsPage() {
   };
 
   const total = data?.pagination?.total ?? 0;
-  const radiusKm = data?.location?.radiusKm ?? (RADII.includes(radius as (typeof RADII)[number]) ? radius : 10);
+  const radiusKm = data?.location?.radiusKm ?? (RADII.includes(radius as (typeof RADII)[number]) ? radius : 25);
   const label = data?.location?.label ?? "Konumunuz civarı";
   const listings = data?.listings ?? [];
 

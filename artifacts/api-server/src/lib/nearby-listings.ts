@@ -1,5 +1,5 @@
 import { db, listingsTable } from "@workspace/db";
-import { and, eq, sql, isNotNull, ne, or, ilike, gte, isNull } from "drizzle-orm";
+import { and, eq, sql, isNotNull, ne, or, ilike, gte, isNull, desc } from "drizzle-orm";
 import { haversineKm, resolveGeoFromCityText } from "./geo-centers";
 import { logger } from "./logger";
 import { NEARBY_RADII_KM, type NearbyRadiusKm, type NearbySort } from "./nearby-types";
@@ -21,7 +21,7 @@ export type NearbyQuery = {
   service?: boolean;
   date?: "today";
   salarySpecified?: boolean;
-  cityHint?: string;
+  /** Yalnızca "aynı ilçe" yumuşak bölümü için — mesafe sorgusuna AND edilmez */
   districtHint?: string;
 };
 
@@ -45,7 +45,7 @@ function realListingFilter() {
   return or(isNull(listingsTable.sourceTag), ne(listingsTable.sourceTag, "demo"))!;
 }
 
-/** Eksik koordinatları city metninden doldur (batch, idle) */
+/** Eksik koordinatları city metninden doldur (batch) */
 export async function backfillListingCoordinates(limit = 200): Promise<number> {
   await ensureNearbySchema();
   const rows = await db
@@ -61,6 +61,7 @@ export async function backfillListingCoordinates(limit = 200): Promise<number> {
         or(isNull(listingsTable.latitude), isNull(listingsTable.longitude))!,
       ),
     )
+    .orderBy(desc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
     .limit(limit);
 
   let updated = 0;
@@ -88,35 +89,9 @@ type NearbyRow = {
   approximate: boolean;
 };
 
-export async function findNearbyListings(q: NearbyQuery): Promise<{
-  total: number;
-  rows: NearbyRow[];
-}> {
-  await ensureNearbySchema();
-
-  // Arka planda seyrek backfill — isteği bloklamadan
-  void backfillListingCoordinates(40).catch(() => undefined);
-
-  const radiusKm = q.radiusKm;
-  const lat = q.lat;
-  const lng = q.lng;
-  // Bounding box kaba filtre (~111km per degree)
-  const latDelta = radiusKm / 111;
-  const lngDelta = radiusKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
-
-  const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
-  const conditions = [
-    eq(listingsTable.status, "active"),
-    eq(listingsTable.isActive, true),
-    realListingFilter(),
-    sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`,
-    isNotNull(listingsTable.latitude),
-    isNotNull(listingsTable.longitude),
-    sql`${listingsTable.latitude}::float BETWEEN ${lat - latDelta} AND ${lat + latDelta}`,
-    sql`${listingsTable.longitude}::float BETWEEN ${lng - lngDelta} AND ${lng + lngDelta}`,
-  ];
-
-  if (q.employmentType) {
+function buildChipConditions(q: NearbyQuery) {
+  const conditions = [];
+  if (q.employmentType && q.employmentType !== "parttime" && q.employmentType !== "part-time") {
     conditions.push(ilike(listingsTable.workType, `%${q.employmentType}%`));
   }
   if (q.date === "today") {
@@ -163,36 +138,105 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       )!,
     );
   }
-  if (q.cityHint) {
-    conditions.push(ilike(listingsTable.city, `%${q.cityHint}%`));
+  return conditions;
+}
+
+export async function findNearbyListings(q: NearbyQuery): Promise<{
+  total: number;
+  rows: NearbyRow[];
+}> {
+  await ensureNearbySchema();
+
+  // Mevcut ilanları şehir metninden koordinatla (istek öncesi, en yeni 500)
+  try {
+    await backfillListingCoordinates(500);
+  } catch (e) {
+    logger.warn({ err: e }, "nearby: backfill failed");
   }
-  if (q.districtHint) {
-    conditions.push(ilike(listingsTable.city, `%${q.districtHint}%`));
-  }
+
+  const radiusKm = q.radiusKm;
+  const lat = q.lat;
+  const lng = q.lng;
+  const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+
+  // Mesafe = saf Haversine. İl adı (cityHint) ASLA AND edilmez —
+  // Gebze (Kocaeli) ↔ Tuzla (İstanbul) gibi komşu ilçe sonuçları gelsin.
+  const conditions = [
+    eq(listingsTable.status, "active"),
+    eq(listingsTable.isActive, true),
+    realListingFilter(),
+    sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`,
+    ...buildChipConditions(q),
+  ];
 
   const candidates = await db
     .select()
     .from(listingsTable)
     .where(and(...conditions))
-    .limit(500);
+    .orderBy(desc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+    .limit(1000);
 
   const scored: NearbyRow[] = [];
+  const persistCoords: { id: number; lat: number; lng: number; accuracy: string }[] = [];
+
   for (const listing of candidates) {
-    const la = Number(listing.latitude);
-    const lo = Number(listing.longitude);
-    if (!Number.isFinite(la) || !Number.isFinite(lo)) continue;
+    let la = Number(listing.latitude);
+    let lo = Number(listing.longitude);
+    let accuracy = listing.locationAccuracy ?? "district";
+    let resolvedNow = false;
+
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+      const geo = resolveGeoFromCityText(listing.city);
+      if (!geo) continue;
+      la = geo.lat;
+      lo = geo.lng;
+      accuracy = geo.accuracy;
+      resolvedNow = true;
+    }
+
     const dist = haversineKm(lat, lng, la, lo);
     if (dist > radiusKm + 0.05) continue;
-    const approx = listing.locationAccuracy === "city" || listing.locationAccuracy === "estimated";
+
+    if (resolvedNow) {
+      persistCoords.push({ id: listing.id, lat: la, lng: lo, accuracy });
+    }
+
+    const approx = accuracy === "city" || accuracy === "estimated";
     scored.push({
-      listing,
+      listing: {
+        ...listing,
+        latitude: String(la),
+        longitude: String(lo),
+        locationAccuracy: accuracy,
+      },
       distanceKm: Math.round(dist * 10) / 10,
       sameDistrict: false,
       approximate: approx,
     });
   }
 
-  // Aynı ilçe / city-hint eşleşmesi, koordinatsız veya bbox dışı — "Aynı ilçede"
+  // Çözülen koordinatları arka planda yaz (sonraki aramalar hızlı olsun)
+  if (persistCoords.length > 0) {
+    void (async () => {
+      for (const row of persistCoords.slice(0, 200)) {
+        try {
+          await db
+            .update(listingsTable)
+            .set({
+              latitude: String(row.lat),
+              longitude: String(row.lng),
+              locationAccuracy: row.accuracy,
+              locationSource: "district_center",
+            })
+            .where(eq(listingsTable.id, row.id));
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+  }
+
+  // Aynı ilçe metin eşleşmesi (koordinatsız / mesafesi hesaplanamayan)
   if (q.districtHint) {
     const sameDistrictRows = await db
       .select()
@@ -232,7 +276,6 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       const sb = Number(b.listing.salaryMin ?? b.listing.salaryMax ?? 0);
       return sb - sa;
     }
-    // distance: km first, same-district last
     if (a.distanceKm == null && b.distanceKm == null) return 0;
     if (a.distanceKm == null) return 1;
     if (b.distanceKm == null) return -1;

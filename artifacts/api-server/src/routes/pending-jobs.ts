@@ -91,10 +91,13 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
   const benefits = extractBenefits(job.rawText);
   const projectType = extractProjectType(job.rawText);
   const title = job.title ?? "Güvenlik Personeli Aranıyor";
+  const city = location.display ?? location.city ?? job.city ?? "Türkiye";
+  const { assignCoordsFromCity } = await import("../lib/nearby-listings");
+  const coords = assignCoordsFromCity(city);
   const [listing] = await db.insert(listingsTable).values({
     title,
     company: job.company ?? "Belirtilmemiş",
-    city: location.display ?? location.city ?? job.city ?? "Türkiye",
+    city,
     salary: job.salary ?? undefined,
     workType: extractWorkType(job.rawText),
     description: job.description ?? job.rawText,
@@ -110,6 +113,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     publishedAt: job.createdAt ?? new Date(),
     lastSeenAt: new Date(),
     firstSeenAt: new Date(),
+    ...(coords ?? {}),
   }).returning();
   if (listing) {
     await announceNewListing(listing);

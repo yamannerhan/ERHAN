@@ -162,6 +162,14 @@ const DISTRICT_CENTERS: Record<string, { lat: number; lng: number; city: string 
   "kocaeli|golcuk": { lat: 40.703, lng: 29.818, city: "Kocaeli" },
   "kocaeli|basiskele": { lat: 40.715, lng: 29.92, city: "Kocaeli" },
   "kocaeli|kartepe": { lat: 40.735, lng: 30.02, city: "Kocaeli" },
+  "kocaeli|karamursel": { lat: 40.691, lng: 29.616, city: "Kocaeli" },
+  // Sakarya / Yalova (Gebze çevresi)
+  "sakarya|adapazari": { lat: 40.7833, lng: 30.4, city: "Sakarya" },
+  "sakarya|serdivan": { lat: 40.766, lng: 30.36, city: "Sakarya" },
+  "sakarya|hendek": { lat: 40.799, lng: 30.73, city: "Sakarya" },
+  "yalova|yalova": { lat: 40.655, lng: 29.2769, city: "Yalova" },
+  "yalova|cinarcik": { lat: 40.645, lng: 29.12, city: "Yalova" },
+  "yalova|altinova": { lat: 40.695, lng: 29.51, city: "Yalova" },
   // Ankara
   "ankara|cankaya": { lat: 39.907, lng: 32.86, city: "Ankara" },
   "ankara|kecioren": { lat: 39.977, lng: 32.86, city: "Ankara" },
@@ -183,7 +191,8 @@ const DISTRICT_CENTERS: Record<string, { lat: number; lng: number; city: string 
 
 export function resolveGeoFromCityText(cityText: string | null | undefined): GeoPoint | null {
   if (!cityText?.trim()) return null;
-  const parts = cityText.split(/[\/|,]/).map((p) => n(p.trim())).filter(Boolean);
+  // "İstanbul / Tuzla", "Gebze - Kocaeli", "Tuzla, İstanbul"
+  const parts = cityText.split(/[\/|,–—\-]+/).map((p) => n(p.trim())).filter(Boolean);
   if (parts.length === 0) return null;
 
   const head = parts[0]!;
@@ -197,8 +206,18 @@ export function resolveGeoFromCityText(cityText: string | null | undefined): Geo
       const d = DISTRICT_CENTERS[dk]!;
       return { lat: d.lat, lng: d.lng, accuracy: "district" };
     }
+    // Ters sıra: "Gebze / Kocaeli" veya "Tuzla / İstanbul"
+    const reverse = `${second}|${head}`;
+    if (DISTRICT_CENTERS[reverse]) {
+      const d = DISTRICT_CENTERS[reverse]!;
+      return { lat: d.lat, lng: d.lng, accuracy: "district" };
+    }
     // Semt olarak second (İstanbul / Samandıra)
-    const alone = DISTRICT_CENTERS[`istanbul|${second}`] || DISTRICT_CENTERS[`kocaeli|${second}`];
+    const alone =
+      DISTRICT_CENTERS[`istanbul|${second}`] ||
+      DISTRICT_CENTERS[`kocaeli|${second}`] ||
+      DISTRICT_CENTERS[`sakarya|${second}`] ||
+      DISTRICT_CENTERS[`yalova|${second}`];
     if (alone) return { lat: alone.lat, lng: alone.lng, accuracy: "district" };
   }
   if (third) {
@@ -209,14 +228,23 @@ export function resolveGeoFromCityText(cityText: string | null | undefined): Geo
     }
   }
 
-  // Sadece semt adı
+  // Metinde bilinen ilçe adı geçiyorsa (öncelik: ilçe merkezi)
+  for (const part of parts) {
+    for (const [key, val] of Object.entries(DISTRICT_CENTERS)) {
+      if (key.endsWith(`|${part}`)) {
+        return { lat: val.lat, lng: val.lng, accuracy: "district" };
+      }
+    }
+  }
+
+  // Tek parça semt/ilçe
   for (const [key, val] of Object.entries(DISTRICT_CENTERS)) {
-    if (key.endsWith(`|${head}`) || parts.some((p) => key.endsWith(`|${p}`))) {
+    if (key.endsWith(`|${head}`)) {
       return { lat: val.lat, lng: val.lng, accuracy: "district" };
     }
   }
 
-  const city = CITY_CENTERS[head];
+  const city = CITY_CENTERS[head] ?? (second ? CITY_CENTERS[second] : undefined);
   if (city) return { lat: city.lat, lng: city.lng, accuracy: "city" };
 
   return null;

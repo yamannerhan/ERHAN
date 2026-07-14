@@ -31,4 +31,16 @@ assert(near < 5, "kadikoy local < 5km");
 const geo = resolveGeoFromCityText("İstanbul / Sancaktepe / Samandıra");
 assert(geo && geo.accuracy === "district", "samandira district");
 
+const gebze = resolveGeoFromCityText("Kocaeli / Gebze");
+const tuzla = resolveGeoFromCityText("İstanbul / Tuzla");
+assert(gebze && tuzla, "gebze/tuzla resolve");
+const gt = haversineKm(gebze!.lat, gebze!.lng, tuzla!.lat, tuzla!.lng);
+assert(gt < 25, `gebze-tuzla should be <25km, got ${gt}`);
+assert(gt > 5, `gebze-tuzla should be >5km, got ${gt}`);
+
+const reverse = resolveGeoFromCityText("Gebze / Kocaeli");
+assert(reverse && reverse.accuracy === "district", "gebze reverse order");
+const aloneTuzla = resolveGeoFromCityText("Tuzla");
+assert(aloneTuzla && aloneTuzla.accuracy === "district", "tuzla alone");
+
 console.log("OK nearby validator tests passed");

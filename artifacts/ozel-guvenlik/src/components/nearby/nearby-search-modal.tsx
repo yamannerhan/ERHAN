@@ -34,15 +34,15 @@ type Prefs = {
 function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return { radius: 10, sort: "distance", filters: [] };
+    if (!raw) return { radius: 25, sort: "distance", filters: [] };
     const p = JSON.parse(raw) as Prefs;
     return {
-      radius: RADII.includes(p.radius as (typeof RADII)[number]) ? p.radius : 10,
+      radius: RADII.includes(p.radius as (typeof RADII)[number]) ? p.radius : 25,
       sort: SORTS.some((s) => s.id === p.sort) ? p.sort : "distance",
       filters: Array.isArray(p.filters) ? p.filters : [],
     };
   } catch {
-    return { radius: 10, sort: "distance", filters: [] };
+    return { radius: 25, sort: "distance", filters: [] };
   }
 }
 
