@@ -1,5 +1,15 @@
 import { Router } from "express";
-import { db, listingsTable, usersTable, companyProfilesTable, chatMessagesTable, notificationsTable, ipBansTable } from "@workspace/db";
+import {
+  db,
+  listingsTable,
+  usersTable,
+  companyProfilesTable,
+  chatMessagesTable,
+  notificationsTable,
+  ipBansTable,
+  supportTicketsTable,
+  supportMessagesTable,
+} from "@workspace/db";
 import {
   moderationReportsTable,
   moderationActionsTable,
@@ -26,10 +36,76 @@ import {
 } from "../../middlewares/moderation";
 import { writeAuditLog } from "../../lib/moderation/audit";
 import { moderationRateLimit } from "../../lib/moderation/rate-limit";
+import { emitRealtimeToRoom, emitRealtimeToUser } from "../../lib/realtime";
 
 const router = Router();
 
 router.use(authMiddleware, requireModeratorPanel, moderationRateLimit({ windowMs: 60_000, max: 60 }));
+
+async function notifyReportOutcome(opts: {
+  report: typeof moderationReportsTable.$inferSelect;
+  actorUserId: number;
+  status: "resolved" | "rejected";
+  message: string;
+}): Promise<void> {
+  if (!opts.report.reporterUserId) return;
+  const title = opts.status === "resolved" ? "İlan Şikâyetiniz Sonuçlandı" : "İlan Şikâyetiniz İncelendi";
+  await db.insert(notificationsTable).values({
+    userId: opts.report.reporterUserId,
+    type: "listing_report_result",
+    title,
+    message: opts.message,
+    relatedId: opts.report.id,
+    linkUrl: "/destek",
+    isRead: false,
+  });
+  emitRealtimeToUser(opts.report.reporterUserId, "notification:new", {
+    type: "listing_report_result",
+    title,
+    message: opts.message,
+    relatedId: opts.report.id,
+    linkUrl: "/destek",
+  });
+
+  const [ticket] = await db.select().from(supportTicketsTable)
+    .where(and(
+      eq(supportTicketsTable.userId, opts.report.reporterUserId),
+      ilike(supportTicketsTable.subject, `%Rapor #${opts.report.id}%`),
+    ))
+    .orderBy(desc(supportTicketsTable.id))
+    .limit(1);
+  if (!ticket) return;
+
+  const now = new Date();
+  const [supportMessage] = await db.insert(supportMessagesTable).values({
+    ticketId: ticket.id,
+    userId: opts.actorUserId,
+    message: opts.message,
+    messageType: "text",
+    isStaff: true,
+    isInternalNote: false,
+  }).returning();
+  await db.update(supportTicketsTable).set({
+    status: "resolved",
+    resolvedAt: now,
+    lastMessageAt: now,
+    updatedAt: now,
+  }).where(eq(supportTicketsTable.id, ticket.id));
+
+  const payload = {
+    id: supportMessage!.id,
+    ticketId: ticket.id,
+    userId: opts.actorUserId,
+    message: opts.message,
+    messageType: "text",
+    isStaff: true,
+    isInternalNote: false,
+    createdAt: supportMessage!.createdAt.toISOString(),
+    status: "resolved",
+  };
+  emitRealtimeToRoom(`support:ticket:${ticket.id}`, "support:message", payload);
+  emitRealtimeToUser(opts.report.reporterUserId, "support:message", payload);
+}
 
 function maskIp(ip: string | null | undefined, full: boolean): string {
   if (!ip) return "—";
@@ -439,10 +515,14 @@ router.post("/reports", requirePermission("reports.view"), async (req, res) => {
 
 router.post("/reports/:id/resolve", requirePermission("reports.resolve"), async (req, res) => {
   const id = Number(req.params.id);
-  const note = String((req.body as { note?: string })?.note ?? "");
+  const body = req.body as { note?: string; userMessage?: string };
+  const note = String(body.note ?? "").trim();
+  const userMessage = String(body.userMessage ?? note).trim();
+  if (!userMessage) { res.status(400).json({ error: "Kullanıcıya gönderilecek sonuç mesajı zorunlu" }); return; }
   const [row] = await db.update(moderationReportsTable).set({
     status: "resolved", resolvedById: req.user!.id, resolutionNote: note, resolvedAt: new Date(),
   }).where(eq(moderationReportsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Rapor yok" }); return; }
   await db.insert(moderationActionsTable).values({
     reportId: id, actorUserId: req.user!.id, action: "resolve", targetType: "report", targetId: id, reason: note || null,
   });
@@ -452,20 +532,26 @@ router.post("/reports/:id/resolve", requirePermission("reports.resolve"), async 
     });
   }
   await writeAuditLog({ req, action: "reports.resolve", targetType: "report", targetId: id, reason: note });
+  await notifyReportOutcome({ report: row, actorUserId: req.user!.id, status: "resolved", message: userMessage });
   res.json(row);
 });
 
 router.post("/reports/:id/reject", requirePermission("reports.reject"), async (req, res) => {
   const id = Number(req.params.id);
-  const reason = String((req.body as { reason?: string })?.reason ?? "").trim();
+  const body = req.body as { reason?: string; userMessage?: string };
+  const reason = String(body.reason ?? "").trim();
+  const userMessage = String(body.userMessage ?? reason).trim();
   if (!reason) { res.status(400).json({ error: "Sebep zorunlu" }); return; }
+  if (!userMessage) { res.status(400).json({ error: "Kullanıcıya gönderilecek sonuç mesajı zorunlu" }); return; }
   const [row] = await db.update(moderationReportsTable).set({
     status: "rejected", resolvedById: req.user!.id, resolutionNote: reason, resolvedAt: new Date(),
   }).where(eq(moderationReportsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Rapor yok" }); return; }
   await db.insert(moderationActionsTable).values({
     reportId: id, actorUserId: req.user!.id, action: "reject", targetType: "report", targetId: id, reason,
   });
   await writeAuditLog({ req, action: "reports.reject", targetType: "report", targetId: id, reason });
+  await notifyReportOutcome({ report: row, actorUserId: req.user!.id, status: "rejected", message: userMessage });
   res.json(row);
 });
 

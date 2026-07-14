@@ -1,3 +1,4 @@
+import React from "react";
 import { Link, useLocation } from "wouter";
 import { Bookmark, LayoutGrid, List } from "lucide-react";
 import { displayCompany } from "@/lib/utils";
@@ -5,6 +6,24 @@ import { markListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import type { JobCardListing } from "@/components/job-listing-card";
+
+function NewListingLabel({ createdAt }: { createdAt: string }) {
+  const calculate = () => {
+    const createdAtMs = new Date(createdAt).getTime();
+    const ageMs = Date.now() - createdAtMs;
+    return Number.isFinite(createdAtMs) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
+  };
+  const [visible, setVisible] = React.useState(calculate);
+  React.useEffect(() => {
+    const createdAtMs = new Date(createdAt).getTime();
+    const remaining = createdAtMs + 24 * 60 * 60 * 1000 - Date.now();
+    setVisible(Number.isFinite(createdAtMs) && remaining > 0 && createdAtMs <= Date.now());
+    if (!Number.isFinite(remaining) || remaining <= 0) return;
+    const timer = window.setTimeout(() => setVisible(false), Math.min(remaining + 250, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [createdAt]);
+  return visible ? <span className="desktop-listings-table__new-label">YENİ</span> : null;
+}
 
 function formatSalary(raw?: string | null): string {
   const s = (raw || "").trim();
@@ -129,13 +148,16 @@ export function DesktopListingsTable({
                         onNavigate?.();
                       }}
                     >
-                      <img
-                        src={logo}
-                        alt=""
-                        className={`desktop-listings-table__logo${hasOwnLogo ? "" : " is-brand"}`}
-                        loading="lazy"
-                        onError={(event) => useBrandLogoFallback(event.currentTarget)}
-                      />
+                      <span className="desktop-listings-table__logo-wrap">
+                        <img
+                          src={logo}
+                          alt=""
+                          className={`desktop-listings-table__logo${hasOwnLogo ? "" : " is-brand"}`}
+                          loading="lazy"
+                          onError={(event) => useBrandLogoFallback(event.currentTarget)}
+                        />
+                        <NewListingLabel createdAt={listing.createdAt} />
+                      </span>
                       <span className="desktop-listings-table__title-text">{listing.title}</span>
                     </Link>
                   </td>

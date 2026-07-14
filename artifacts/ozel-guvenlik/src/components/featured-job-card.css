@@ -93,8 +93,12 @@
   min-width: 0;
 }
 
-.featured-rail-wrap .og-job--compact .og-job__logo {
+.featured-rail-wrap .og-job--compact .og-job__logo-wrap {
   grid-area: logo;
+  width: clamp(32px, 18cqw, 44px);
+}
+
+.featured-rail-wrap .og-job--compact .og-job__logo {
   width: clamp(32px, 18cqw, 44px);
   height: clamp(32px, 18cqw, 44px);
   border-radius: 50%;

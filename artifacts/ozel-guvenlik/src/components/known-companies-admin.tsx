@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Building2, Loader2, Plus, RefreshCw, Trash2, Upload, Image as ImageIcon } from "lucide-react";
+import { LogoCropDialog } from "@/components/logo-crop-dialog";
 
 type KnownCompany = {
   id: number;
@@ -31,6 +32,11 @@ export function KnownCompaniesAdminSection({
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [defaultLogoUrl, setDefaultLogoUrl] = useState("/brand-logo.png");
   const [defaultLogoUploading, setDefaultLogoUploading] = useState(false);
+  const [cropTarget, setCropTarget] = useState<{
+    file: File;
+    type: "default" | "company";
+    companyId?: number;
+  } | null>(null);
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const defaultLogoRef = useRef<HTMLInputElement>(null);
 
@@ -137,6 +143,7 @@ export function KnownCompaniesAdminSection({
       toast({ title: "Logo yüklenemedi", description: e?.message, variant: "destructive" });
     } finally {
       setUploadingId(null);
+      if (fileRefs.current[id]) fileRefs.current[id]!.value = "";
     }
   };
 
@@ -184,8 +191,8 @@ export function KnownCompaniesAdminSection({
 
       <div className="rounded-lg border border-amber-500/30 p-3 bg-amber-500/5">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="h-16 w-16 rounded-full bg-white border border-amber-500/30 overflow-hidden shrink-0 flex items-center justify-center">
-            <img src={defaultLogoUrl} alt="Varsayılan firma" className="w-full h-full object-contain box-border p-1" />
+          <div className="h-16 w-16 rounded-full bg-slate-900 border border-amber-500/30 overflow-hidden shrink-0 flex items-center justify-center">
+            <img src={defaultLogoUrl} alt="Varsayılan firma" className="w-full h-full object-cover rounded-full" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="font-semibold">Firması belirtilmeyen ilanların logosu</div>
@@ -201,7 +208,10 @@ export function KnownCompaniesAdminSection({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(event) => void uploadDefaultLogo(event.target.files?.[0] ?? null)}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) setCropTarget({ file, type: "default" });
+            }}
           />
           <Button
             type="button"
@@ -234,12 +244,12 @@ export function KnownCompaniesAdminSection({
           {items.map((c) => (
             <div key={c.id} className="rounded-lg border p-3 space-y-2">
               <div className="flex items-start gap-3">
-                <div className="h-14 w-14 rounded-full bg-white border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                <div className="h-14 w-14 rounded-full bg-slate-900 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
                   {c.logoUrl ? (
                     <img
                       src={`${c.logoUrl}?t=${c.id}`}
                       alt=""
-                      className="w-full h-full max-h-full max-w-full rounded-full object-contain box-border p-1"
+                      className="w-full h-full max-h-full max-w-full rounded-full object-cover"
                     />
                   ) : (
                     <ImageIcon className="h-6 w-6 text-muted-foreground" />
@@ -255,7 +265,10 @@ export function KnownCompaniesAdminSection({
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => void uploadLogo(c.id, e.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) setCropTarget({ file, type: "company", companyId: c.id });
+                }}
               />
               <div className="flex flex-wrap gap-1">
                 <Button
@@ -279,6 +292,28 @@ export function KnownCompaniesAdminSection({
             </div>
           ))}
         </div>
+      )}
+      {cropTarget && (
+        <LogoCropDialog
+          file={cropTarget.file}
+          onCancel={() => {
+            if (cropTarget.type === "default" && defaultLogoRef.current) {
+              defaultLogoRef.current.value = "";
+            }
+            if (cropTarget.companyId && fileRefs.current[cropTarget.companyId]) {
+              fileRefs.current[cropTarget.companyId]!.value = "";
+            }
+            setCropTarget(null);
+          }}
+          onConfirm={async (file) => {
+            if (cropTarget.type === "default") {
+              await uploadDefaultLogo(file);
+            } else if (cropTarget.companyId) {
+              await uploadLogo(cropTarget.companyId, file);
+            }
+            setCropTarget(null);
+          }}
+        />
       )}
     </div>
   );

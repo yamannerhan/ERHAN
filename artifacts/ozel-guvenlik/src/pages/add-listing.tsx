@@ -14,6 +14,7 @@ import {
 import "@/components/add-listing-page.css";
 import { formatSalaryInput } from "@/lib/salary-format";
 import { formatTelApplyUrl, normalizeContactNames, normalizePhoneList } from "@/lib/apply-url";
+import { LogoCropDialog } from "@/components/logo-crop-dialog";
 
 const POSITIONS = [
   "Özel Güvenlik Görevlisi",
@@ -117,6 +118,7 @@ export default function AddListing() {
   const [smartLoading, setSmartLoading] = useState(false);
   const [extractStatus, setExtractStatus] = useState<ExtractStatus | null>(null);
   const [imagePreview, setImagePreview] = useState("");
+  const [logoCropFile, setLogoCropFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [shift, setShift] = useState<string>("8 Saat");
   const [gender, setGender] = useState<string>("Bay / Bayan");
@@ -704,7 +706,10 @@ export default function AddListing() {
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) void handlePhotoUpload(f); }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) setLogoCropFile(file);
+              }}
             />
             <button
               type="button"
@@ -792,6 +797,20 @@ export default function AddListing() {
               </div>
             </div>
           </div>
+        )}
+        {logoCropFile && (
+          <LogoCropDialog
+            file={logoCropFile}
+            onCancel={() => {
+              setLogoCropFile(null);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+            onConfirm={async (file) => {
+              await handlePhotoUpload(file);
+              setLogoCropFile(null);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+          />
         )}
       </div>
     </Layout>

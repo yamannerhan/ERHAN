@@ -198,9 +198,8 @@ router.post(
     const filepath = path.join(COMPANY_LOGO_DIR, filename);
     const processedLogo = await sharp(req.file.buffer)
       .resize(512, 512, {
-        fit: "contain",
+        fit: "cover",
         position: "centre",
-        background: { r: 255, g: 255, b: 255, alpha: 1 },
       })
       .webp({ quality: 82 })
       .toBuffer();

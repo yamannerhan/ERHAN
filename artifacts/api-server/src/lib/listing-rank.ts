@@ -158,7 +158,15 @@ export function rankListingsRecommended(
     if (!pushed.has(l.id)) out.push(l);
   }
 
-  return out;
+  // Doğrudan ilanların dengeli konumlarını korurken bot ilanlarının kendi
+  // aralarındaki sırasını gerçek kaynak yayın tarihine göre yeniden → eski yap.
+  const botNewest = out
+    .filter((listing) => listing.sourceType === "bot_imported")
+    .sort((a, b) => publishOrderDate(b).getTime() - publishOrderDate(a).getTime());
+  let botIndex = 0;
+  return out.map((listing) =>
+    listing.sourceType === "bot_imported" ? botNewest[botIndex++]! : listing
+  );
 }
 
 export function publishOrderDate(l: RankableListing): Date {

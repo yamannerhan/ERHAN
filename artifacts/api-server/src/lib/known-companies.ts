@@ -311,7 +311,11 @@ export async function applyKnownLogoToListings(companyId: number): Promise<numbe
 }
 
 export async function saveKnownCompanyLogoBuffer(companyId: number, buf: Buffer): Promise<string> {
-  const cropped = await trimLogoWhitespace(buf);
+  const metadata = await sharp(buf).metadata();
+  // Arayüzde yuvarlak kırpılmış 512×512 çıktı hazırdır; konumu tekrar trimleyip bozma.
+  const cropped = metadata.width === 512 && metadata.height === 512
+    ? await sharp(buf).resize(512, 512, { fit: "cover", position: "centre" }).webp({ quality: 90 }).toBuffer()
+    : await trimLogoWhitespace(buf);
   const filename = `kc_${companyId}_${crypto.randomBytes(6).toString("hex")}.webp`;
   const filepath = path.join(LOGO_DIR, filename);
   try {

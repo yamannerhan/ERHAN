@@ -4,6 +4,7 @@ import { Redirect, Link } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, CheckCircle2, Loader2, Upload } from "lucide-react";
+import { LogoCropDialog } from "@/components/logo-crop-dialog";
 
 /**
  * Firma Başvurusu — logo + unvan gönder; moderasyon sonrası doğrulanmış görünür.
@@ -18,6 +19,7 @@ export default function FirmaBasvurusuPage() {
   const [done, setDone] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -149,8 +151,7 @@ export default function FirmaBasvurusuPage() {
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
-                  setPendingFile(f);
-                  setLogoPreview(URL.createObjectURL(f));
+                  setCropFile(f);
                 }}
               />
               <button
@@ -159,7 +160,7 @@ export default function FirmaBasvurusuPage() {
                 onClick={() => fileRef.current?.click()}
               >
                 {logoPreview ? (
-                  <img src={logoPreview} alt="" className="h-16 w-16 max-w-full max-h-full rounded-full object-contain box-border p-1 bg-white" />
+                  <img src={logoPreview} alt="" className="h-16 w-16 max-w-full max-h-full rounded-full object-cover" />
                 ) : (
                   <>
                     <Upload className="h-4 w-4" /> Logo yükle
@@ -176,6 +177,21 @@ export default function FirmaBasvurusuPage() {
               {saving ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Başvuruyu Gönder"}
             </button>
           </div>
+        )}
+        {cropFile && (
+          <LogoCropDialog
+            file={cropFile}
+            onCancel={() => {
+              setCropFile(null);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+            onConfirm={(file) => {
+              setPendingFile(file);
+              setLogoPreview(URL.createObjectURL(file));
+              setCropFile(null);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+          />
         )}
       </div>
     </Layout>

@@ -727,17 +727,37 @@
     color: inherit;
   }
 
+  .desktop-listings-table__logo-wrap {
+    width: 40px;
+    flex: 0 0 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .desktop-listings-table__new-label {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: #f5c518;
+    color: #111827;
+    font-size: 7px;
+    font-weight: 900;
+    line-height: 1.2;
+    letter-spacing: 0.06em;
+  }
+
   .desktop-listings-table__logo {
     width: 34px;
     height: 34px;
     max-width: 34px;
     max-height: 34px;
     border-radius: 50%;
-    object-fit: contain;
+    object-fit: cover;
     box-sizing: border-box;
-    padding: 2px;
+    padding: 0;
     flex-shrink: 0;
-    background: #fff;
+    background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 

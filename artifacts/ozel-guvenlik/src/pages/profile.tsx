@@ -21,6 +21,7 @@ import { resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ProfileBadgesRow } from "@/components/chat-user-identity";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
+import { LogoCropDialog } from "@/components/logo-crop-dialog";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
@@ -91,6 +92,7 @@ export default function Profile() {
   const [companyVerified, setCompanyVerified] = useState(false);
   const [companyLoading, setCompanyLoading] = useState(false);
   const [companyLogoUploading, setCompanyLogoUploading] = useState(false);
+  const [companyLogoCropFile, setCompanyLogoCropFile] = useState<File | null>(null);
   const companyLogoRef = useRef<HTMLInputElement>(null);
 
   const [showPwChange, setShowPwChange] = useState(false);
@@ -444,9 +446,7 @@ export default function Profile() {
     }
   };
 
-  const uploadCompanyLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const uploadCompanyLogo = async (file: File) => {
     if (!companyForm.companyName.trim()) {
       toast({ title: "Önce şirket adını kaydedin", variant: "destructive" });
       return;
@@ -803,11 +803,11 @@ export default function Profile() {
                     </p>
                     <div className="flex items-center gap-3">
                       {companyLogo ? (
-                        <div className="w-16 h-16 rounded-full border border-white/10 bg-white/95 overflow-hidden flex-shrink-0">
+                        <div className="w-16 h-16 rounded-full border border-white/10 bg-slate-900 overflow-hidden flex-shrink-0">
                           <img
                             src={companyLogo}
                             alt=""
-                            className="w-full h-full max-w-full max-h-full object-contain box-border p-1 rounded-full"
+                            className="w-full h-full max-w-full max-h-full object-cover rounded-full"
                             onError={(event) => useBrandLogoFallback(event.currentTarget)}
                           />
                         </div>
@@ -818,7 +818,16 @@ export default function Profile() {
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
                           className="hidden"
-                          onChange={uploadCompanyLogo}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (!file) return;
+                            if (!companyForm.companyName.trim()) {
+                              toast({ title: "Önce şirket adını kaydedin", variant: "destructive" });
+                              event.target.value = "";
+                              return;
+                            }
+                            setCompanyLogoCropFile(file);
+                          }}
                         />
                         <Button
                           type="button"
@@ -1049,7 +1058,7 @@ export default function Profile() {
                         <img
                           src={img}
                           alt={company}
-                          className="w-full h-full max-w-full max-h-full object-contain box-border p-1 rounded-full"
+                          className="w-full h-full max-w-full max-h-full object-cover rounded-full"
                           onError={(event) => useBrandLogoFallback(event.currentTarget)}
                         />
                       </div>
@@ -1211,6 +1220,19 @@ export default function Profile() {
             )}
           </div>
         </section>
+        {companyLogoCropFile && (
+          <LogoCropDialog
+            file={companyLogoCropFile}
+            onCancel={() => {
+              setCompanyLogoCropFile(null);
+              if (companyLogoRef.current) companyLogoRef.current.value = "";
+            }}
+            onConfirm={async (file) => {
+              await uploadCompanyLogo(file);
+              setCompanyLogoCropFile(null);
+            }}
+          />
+        )}
       </div>
     </Layout>
   );

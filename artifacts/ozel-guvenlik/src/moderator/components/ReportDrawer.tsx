@@ -30,7 +30,7 @@ export function ReportDrawer({ report, onClose, onAction }: ReportDrawerProps) {
   const { hasPermission } = useModerator();
   const [detail, setDetail] = useState<{ report: ReportItem; actions: unknown[] } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [reasonModal, setReasonModal] = useState<"reject" | null>(null);
+  const [reasonModal, setReasonModal] = useState<"resolve" | "reject" | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
@@ -46,10 +46,11 @@ export function ReportDrawer({ report, onClose, onAction }: ReportDrawerProps) {
 
   const r = detail?.report ?? report;
 
-  const handleResolve = async () => {
+  const handleResolve = async (message: string) => {
     setActionLoading(true);
     try {
-      await modPost(`/reports/${r.id}/resolve`, { note: "" });
+      await modPost(`/reports/${r.id}/resolve`, { note: message, userMessage: message });
+      setReasonModal(null);
       onAction();
       onClose();
     } finally { setActionLoading(false); }
@@ -58,7 +59,7 @@ export function ReportDrawer({ report, onClose, onAction }: ReportDrawerProps) {
   const handleReject = async (reason: string) => {
     setActionLoading(true);
     try {
-      await modPost(`/reports/${r.id}/reject`, { reason });
+      await modPost(`/reports/${r.id}/reject`, { reason, userMessage: reason });
       setReasonModal(null);
       onAction();
       onClose();
@@ -131,7 +132,7 @@ export function ReportDrawer({ report, onClose, onAction }: ReportDrawerProps) {
               </button>
             )}
             {hasPermission("reports.resolve") && (
-              <button type="button" className="mod-btn mod-btn-success mod-btn-sm" onClick={handleResolve} disabled={actionLoading}>
+              <button type="button" className="mod-btn mod-btn-success mod-btn-sm" onClick={() => setReasonModal("resolve")} disabled={actionLoading}>
                 <CheckCircle size={14} /> Çöz
               </button>
             )}
@@ -150,11 +151,11 @@ export function ReportDrawer({ report, onClose, onAction }: ReportDrawerProps) {
       </div>
 
       <ReasonModal
-        open={reasonModal === "reject"}
-        title="Raporu Reddet"
-        confirmLabel="Reddet"
+        open={reasonModal !== null}
+        title={reasonModal === "resolve" ? "Raporu Çöz ve Kullanıcıya Bildir" : "Raporu Reddet ve Kullanıcıya Bildir"}
+        confirmLabel={reasonModal === "resolve" ? "Çöz ve Bildir" : "Reddet ve Bildir"}
         loading={actionLoading}
-        onConfirm={handleReject}
+        onConfirm={(message) => reasonModal === "resolve" ? handleResolve(message) : handleReject(message)}
         onCancel={() => setReasonModal(null)}
       />
     </>

@@ -107,6 +107,24 @@ type Props = {
   compact?: boolean;
 };
 
+function useIsNewListing(createdAt: string): boolean {
+  const calculate = () => {
+    const createdAtMs = new Date(createdAt).getTime();
+    const ageMs = Date.now() - createdAtMs;
+    return Number.isFinite(createdAtMs) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
+  };
+  const [isNew, setIsNew] = React.useState(calculate);
+  React.useEffect(() => {
+    const createdAtMs = new Date(createdAt).getTime();
+    const remaining = createdAtMs + 24 * 60 * 60 * 1000 - Date.now();
+    setIsNew(Number.isFinite(createdAtMs) && remaining > 0 && createdAtMs <= Date.now());
+    if (!Number.isFinite(remaining) || remaining <= 0) return;
+    const timer = window.setTimeout(() => setIsNew(false), Math.min(remaining + 250, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [createdAt]);
+  return isNew;
+}
+
 /** Referans düzen — hafif (az ikon, kısa metin taraması) */
 export function JobListingCard({
   listing,
@@ -126,6 +144,7 @@ export function JobListingCard({
   const hasOwnLogo = isRealCompanyLogo(listing.companyLogoUrl);
   const salaryText = formatSalary(listing.salary);
   const posted = formatPostedAt(listing.createdAt);
+  const isNew = useIsNewListing(listing.createdAt);
   const isSaved = saved ?? !!listing.isFavoritedByMe;
   const detailHref = `/ilan/${listing.id}`;
 
@@ -159,11 +178,6 @@ export function JobListingCard({
   const gender = detectGender(blob);
   if (gender) chips.push({ key: "gender", label: gender, Icon: User });
   if (listing.hasService) chips.push({ key: "svc", label: "Servis Var", Icon: BadgeCheck, tone: "shift" });
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  if (new Date(listing.createdAt).getTime() >= dayStart.getTime()) {
-    chips.push({ key: "today", label: "Bugün Eklendi", Icon: Clock, tone: "shift" });
-  }
   const visibleChips = chips.slice(0, compact ? 3 : 5);
 
   const markReadAndNavigate = () => {
@@ -178,15 +192,18 @@ export function JobListingCard({
 
       <div className="og-job__inner">
         <div className="og-job__head">
-          <div className="og-job__logo">
-            <img
-              src={logo}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              className={hasOwnLogo ? "" : "og-job__logo-brand"}
-              onError={(event) => useBrandLogoFallback(event.currentTarget)}
-            />
+          <div className="og-job__logo-wrap">
+            <div className="og-job__logo">
+              <img
+                src={logo}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className={hasOwnLogo ? "" : "og-job__logo-brand"}
+                onError={(event) => useBrandLogoFallback(event.currentTarget)}
+              />
+            </div>
+            {isNew && <span className="og-job__new-label">YENİ</span>}
           </div>
 
           <div className="og-job__main">

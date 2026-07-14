@@ -193,7 +193,7 @@
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  background: #fff;
+  background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
   align-items: center;
@@ -209,9 +209,9 @@
   height: 100%;
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   box-sizing: border-box;
-  padding: 4px;
+  padding: 0;
   border-radius: 50%;
   display: block;
 }
@@ -356,7 +356,7 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #fff;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -371,9 +371,9 @@
   height: 100%;
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   box-sizing: border-box;
-  padding: 3px;
+  padding: 0;
   border-radius: 50%;
   display: block;
 }

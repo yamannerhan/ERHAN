@@ -1,5 +1,20 @@
 import { Router } from "express";
-import { db, listingsTable, listingLikesTable, listingFavoritesTable, usersTable, adminSettingsTable, chatMessagesTable, notificationsTable, locationFilterTermsTable, companyProfilesTable } from "@workspace/db";
+import {
+  db,
+  listingsTable,
+  listingLikesTable,
+  listingFavoritesTable,
+  usersTable,
+  adminSettingsTable,
+  chatMessagesTable,
+  notificationsTable,
+  locationFilterTermsTable,
+  companyProfilesTable,
+  moderationReportsTable,
+  supportTicketsTable,
+  supportMessagesTable,
+  supportTicketEventsTable,
+} from "@workspace/db";
 import { eq, desc, and, sql, ilike, inArray, or, isNull, ne } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin } from "../middlewares/auth";
 import { ensureCompanySchema, rememberEmployerBasics } from "../lib/company-profiles";
@@ -25,6 +40,7 @@ import {
   resolveIstanbulSideFromQuery,
   sideLiteralPatterns,
 } from "../lib/istanbul-side";
+import { emitRealtime, emitRealtimeToUser } from "../lib/realtime";
 
 // ── Listing image upload setup ──────────────────────────────────────────────
 const LISTING_IMAGES_DIR = path.join(process.cwd(), "uploads", "listing-images");
@@ -696,9 +712,8 @@ router.post("/listings/image-upload", authMiddleware, listingImageUpload.single(
   if (!req.file) { res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" }); return; }
   const logo = await sharp(req.file.buffer)
     .resize(512, 512, {
-      fit: "contain",
+      fit: "cover",
       position: "centre",
-      background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
     .webp({ quality: 82 })
     .toBuffer();
@@ -1081,6 +1096,150 @@ router.get("/listings/:id", optionalAuthMiddleware, async (req, res): Promise<vo
       companyMap.get(listing.id) ?? null,
       { includeSourceMeta: isAdmin },
     ),
+  });
+});
+
+/** Kullanıcı: ilan şikâyeti — moderasyon kaydı + canlı destek + bildirim */
+router.post("/listings/:id/report", authMiddleware, async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+  const id = Number(rawId);
+  const reason = String((req.body as { reason?: string })?.reason ?? "").trim();
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Geçersiz ilan" }); return;
+  }
+  if (reason.length < 10 || reason.length > 1000) {
+    res.status(400).json({ error: "Şikâyet açıklaması 10-1000 karakter olmalı" }); return;
+  }
+
+  const [listing] = await db.select().from(listingsTable).where(eq(listingsTable.id, id)).limit(1);
+  if (!listing) { res.status(404).json({ error: "İlan bulunamadı" }); return; }
+
+  const [duplicate] = await db.select({ id: moderationReportsTable.id })
+    .from(moderationReportsTable)
+    .where(and(
+      eq(moderationReportsTable.targetType, "listing"),
+      eq(moderationReportsTable.targetId, id),
+      eq(moderationReportsTable.reporterUserId, req.user!.id),
+      inArray(moderationReportsTable.status, ["pending", "investigating", "escalated"]),
+    ))
+    .limit(1);
+  if (duplicate) {
+    res.status(409).json({ error: "Bu ilan için açık bir şikâyetiniz zaten bulunuyor" }); return;
+  }
+
+  const now = new Date();
+  const result = await db.transaction(async (tx) => {
+    const [report] = await tx.insert(moderationReportsTable).values({
+      targetType: "listing",
+      targetId: id,
+      reporterUserId: req.user!.id,
+      reason,
+      reasonCode: "listing_complaint",
+      status: "pending",
+      priority: "high",
+      titleSnapshot: listing.title,
+      contentSnapshot: `${listing.company ?? "Firma"} · ${listing.city ?? ""}\n${listing.description ?? ""}`.slice(0, 2000),
+    }).returning();
+
+    const [ticket] = await tx.insert(supportTicketsTable).values({
+      userId: req.user!.id,
+      category: "Şikâyet",
+      subject: `İlan şikâyeti · Rapor #${report!.id} · İlan #OG${id}`,
+      status: "waiting",
+      priority: "high",
+      lastMessageAt: now,
+    }).returning();
+
+    const [message] = await tx.insert(supportMessagesTable).values({
+      ticketId: ticket!.id,
+      userId: req.user!.id,
+      message: `İlan #OG${id} şikâyeti:\n${reason}`,
+      messageType: "text",
+      isStaff: false,
+      isInternalNote: false,
+    }).returning();
+
+    await tx.insert(supportTicketEventsTable).values({
+      ticketId: ticket!.id,
+      actorId: req.user!.id,
+      eventType: "created_from_listing_report",
+      newValue: String(report!.id),
+    });
+
+    return { report: report!, ticket: ticket!, message: message! };
+  });
+
+  const staff = await db.select({ id: usersTable.id })
+    .from(usersTable)
+    .where(inArray(usersTable.role, ["admin", "moderator", "senior_moderator"]));
+  const staffTitle = "Yeni İlan Şikâyeti";
+  const staffMessage = `@${req.user!.username}, #OG${id} ilanını şikâyet etti: ${reason.slice(0, 180)}`;
+  if (staff.length > 0) {
+    await db.insert(notificationsTable).values(staff.map((member) => ({
+      userId: member.id,
+      type: "listing_report",
+      title: staffTitle,
+      message: staffMessage,
+      relatedId: result.report.id,
+      linkUrl: "/admin",
+      isRead: false,
+    })));
+    for (const member of staff) {
+      emitRealtimeToUser(member.id, "notification:new", {
+        type: "listing_report",
+        title: staffTitle,
+        message: staffMessage,
+        relatedId: result.report.id,
+        linkUrl: "/admin",
+      });
+    }
+  }
+
+  const thanksTitle = "Bildiriminiz Alındı";
+  const thanksMessage = "İlanı bildirdiğiniz için teşekkür ederiz. Moderasyon ekibimiz ilanı inceleyip sonuçlandığında size bildirim gönderecektir.";
+  await db.insert(notificationsTable).values({
+    userId: req.user!.id,
+    type: "listing_report_received",
+    title: thanksTitle,
+    message: thanksMessage,
+    relatedId: result.report.id,
+    linkUrl: "/destek",
+    isRead: false,
+  });
+  emitRealtimeToUser(req.user!.id, "notification:new", {
+    type: "listing_report_received",
+    title: thanksTitle,
+    message: thanksMessage,
+    relatedId: result.report.id,
+    linkUrl: "/destek",
+  });
+
+  const supportPayload = {
+    id: result.message.id,
+    ticketId: result.ticket.id,
+    userId: req.user!.id,
+    message: result.message.message,
+    messageType: result.message.messageType,
+    isStaff: false,
+    isInternalNote: false,
+    createdAt: result.message.createdAt.toISOString(),
+    status: result.ticket.status,
+  };
+  emitRealtime("support:message", supportPayload);
+  emitRealtime("support:ticket-update", {
+    ticketId: result.ticket.id,
+    status: result.ticket.status,
+    lastMessageAt: now.toISOString(),
+    preview: result.message.message.slice(0, 120),
+    fromUserId: req.user!.id,
+    isStaff: false,
+  });
+
+  res.status(201).json({
+    success: true,
+    reportId: result.report.id,
+    ticketId: result.ticket.id,
+    message: thanksMessage,
   });
 });
 

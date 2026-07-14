@@ -135,6 +135,9 @@ export default function ListingDetail() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
   const [editing, setEditing] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportSending, setReportSending] = useState(false);
   const [editForm, setEditForm] = useState({
     title: "", company: "", city: "", workType: "", salary: "",
     description: "", requirements: "", applyUrl: "",
@@ -332,6 +335,33 @@ export default function ListingDetail() {
   const copyLink = async () => {
     await navigator.clipboard.writeText(window.location.href);
     toast({ title: "Link kopyalandı" });
+  };
+
+  const submitReport = async () => {
+    const reason = reportReason.trim();
+    if (reason.length < 10) {
+      toast({ title: "Açıklama çok kısa", description: "Lütfen en az 10 karakter yazın.", variant: "destructive" });
+      return;
+    }
+    setReportSending(true);
+    try {
+      const token = localStorage.getItem("auth_token") ?? "";
+      const response = await fetch(`/api/listings/${listingId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; message?: string };
+      if (!response.ok) {
+        toast({ title: "Şikâyet gönderilemedi", description: data.error ?? "Lütfen tekrar deneyin.", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Bildiriminiz alındı", description: data.message });
+      setReportReason("");
+      setReportOpen(false);
+    } finally {
+      setReportSending(false);
+    }
   };
 
   if (isLoading) {
@@ -692,13 +722,36 @@ export default function ListingDetail() {
                   <Copy size={14} />
                 </button>
               </div>
-              <Link href="/destek" className="og-ld-report">
+              <button type="button" className="og-ld-report" onClick={() => setReportOpen(true)}>
                 <Flag size={14} /> İlanı Şikayet Et
-              </Link>
+              </button>
             </div>
           </aside>
         </div>
       </div>
+
+      {reportOpen && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="İlanı şikâyet et">
+          <button type="button" className="absolute inset-0 cursor-default" aria-label="Kapat" onClick={() => !reportSending && setReportOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-amber-400/25 bg-slate-950 p-5 shadow-2xl">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-white"><Flag className="h-5 w-5 text-amber-400" /> İlanı Şikâyet Et</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-400">Şikâyetiniz canlı olarak moderasyon ekibine iletilir. İnceleme sonucu size bildirim ve destek mesajı olarak gönderilir.</p>
+            <Textarea
+              value={reportReason}
+              onChange={(event) => setReportReason(event.target.value.slice(0, 1000))}
+              placeholder="İlanla ilgili sorunu ayrıntılı şekilde yazın..."
+              className="mt-4 min-h-32 border-white/10 bg-slate-900 text-white"
+              disabled={reportSending}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setReportOpen(false)} disabled={reportSending}>Vazgeç</Button>
+              <Button type="button" onClick={() => void submitReport()} disabled={reportSending || reportReason.trim().length < 10}>
+                {reportSending ? "Gönderiliyor..." : "Şikâyeti Gönder"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
