@@ -101,7 +101,7 @@
     overflow-x: hidden;
     overflow-x: clip;
     overscroll-behavior-x: none;
-    overscroll-behavior-y: none;
+    overscroll-behavior-y: auto;
   }
   body {
     width: 100%;
@@ -109,7 +109,7 @@
     overflow-x: hidden;
     overflow-x: clip;
     overscroll-behavior-x: none;
-    overscroll-behavior-y: none;
+    overscroll-behavior-y: auto;
     min-height: 100dvh;
     min-height: 100vh;
     @apply bg-background text-foreground font-sans antialiased;

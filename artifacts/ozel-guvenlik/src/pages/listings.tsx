@@ -169,7 +169,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     page: 1,
     limit: 20,
     featured: true,
-    sort: "recommended",
+    sort: sortMode,
   } as Parameters<typeof useGetListings>[0]);
 
   const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";

@@ -464,13 +464,13 @@ export default function ListingDetail() {
                     <img src={logoUrl} alt={companyName} onError={(event) => useBrandLogoFallback(event.currentTarget)} />
                   </div>
                   <div className="og-ld-company-name">{companyName}</div>
-                  {ext?.companyVerified && (
-                    <span className="og-ld-verified"><BadgeCheck size={10} /> Doğrulanmış Firma</span>
+                  {ext?.verifiedPublisher && (
+                    <span className="og-ld-verified"><BadgeCheck size={10} /> Doğrulanmış Hesap</span>
                   )}
                 </div>
               </div>
 
-              {isAdminOnly && (
+              {ext?.sourceType && (
                 <ListingSourceInfoCard listing={{
                   sourceType: ext?.sourceType,
                   sourceName: ext?.sourceName,

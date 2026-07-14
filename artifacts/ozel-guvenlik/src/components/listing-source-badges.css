@@ -62,16 +62,23 @@
 .lsb-card {
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid rgba(245, 197, 24, 0.22);
   border-radius: 8px;
-  background: rgba(248, 250, 252, 0.6);
+  background: rgba(7, 18, 33, 0.72);
 }
 
 .lsb-card__title {
   font-size: 12px;
   font-weight: 700;
   margin: 0 0 8px;
-  color: #334155;
+  color: #f8fafc;
+}
+
+.lsb-card__description {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .lsb-card__link {
@@ -79,7 +86,7 @@
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #0369a1;
+  color: #f5c518;
   text-decoration: underline;
 }
 

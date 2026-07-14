@@ -5,6 +5,7 @@ export type ChatExtMsg = {
   userId: number;
   content: string;
   username: string;
+  createdAt?: string;
   isBot?: boolean;
   isFake?: boolean;
   userRole?: string | null;
@@ -74,7 +75,21 @@ export async function fetchChatSyncPayload(opts: {
   for (const m of [...mixedOrInc, ...humans]) {
     if (isDbMessageId(m.id)) byId.set(m.id, m);
   }
-  return [...byId.values()].sort((a, b) => a.id - b.id);
+  const ordered = [...byId.values()].sort((a, b) => a.id - b.id);
+  const lastJoinByText = new Map<string, number>();
+  return ordered.filter((message) => {
+    if (!isChatJoinNotice(message.content)) return true;
+    const key = message.content.toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+    const at = message.createdAt ? new Date(message.createdAt).getTime() : Number.NaN;
+    const previousAt = lastJoinByText.get(key);
+    if (Number.isFinite(at)) {
+      lastJoinByText.set(key, at);
+      return previousAt == null || at - previousAt >= 20 * 60 * 1000;
+    }
+    if (previousAt != null) return false;
+    lastJoinByText.set(key, Date.now());
+    return true;
+  });
 }
 
 export function loadCachedHumans<T extends ChatExtMsg>(): T[] {

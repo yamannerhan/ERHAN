@@ -525,7 +525,7 @@ async function processMessage(
     const existingId = await findListingBySourceMessage(source.id, messageId);
     if (existingId && postedAt) {
       await db.update(listingsTable)
-        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .set({ sourcePublishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
         .where(eq(listingsTable.id, existingId));
     }
     return "duplicate";
@@ -544,7 +544,7 @@ async function processMessage(
   if (existingByMessage) {
     if (postedAt) {
       await db.update(listingsTable)
-        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .set({ sourcePublishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
         .where(eq(listingsTable.id, existingByMessage));
     }
     return "duplicate";
@@ -1370,7 +1370,7 @@ async function publishElemanJob(
           city: structuredCity,
           lastSeenAt: now,
           lastCheckedAt: now,
-          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt } : {}),
           ...(assignCoordsFromCity(structuredCity) ?? {}),
         })
         .where(eq(listingsTable.id, existingBySource));
@@ -1379,7 +1379,7 @@ async function publishElemanJob(
         .set({
           lastSeenAt: now,
           lastCheckedAt: now,
-          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt } : {}),
         })
         .where(eq(listingsTable.id, existingBySource));
     }

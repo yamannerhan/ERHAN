@@ -8,6 +8,7 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
+import { ListingSourceBadges } from "@/components/listing-source-badges";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -123,7 +124,6 @@ export function JobListingCard({
   const location = district ? `${city} / ${district}` : city;
   const logo = resolveCompanyLogo(listing.companyLogoUrl);
   const hasOwnLogo = isRealCompanyLogo(listing.companyLogoUrl);
-  const verified = !!listing.companyVerified || hasOwnLogo;
   const salaryText = formatSalary(listing.salary);
   const posted = formatPostedAt(listing.createdAt);
   const isSaved = saved ?? !!listing.isFavoritedByMe;
@@ -193,12 +193,6 @@ export function JobListingCard({
             <h3 className="og-job__title" title={listing.title}>{listing.title}</h3>
             <div className="og-job__company-row">
               <span className="og-job__company-name" title={company}>{company}</span>
-              {verified && (
-                <span className="og-job__verified">
-                  <BadgeCheck className="og-job__verify" aria-hidden />
-                  {!compact && <span>Doğrulanmış</span>}
-                </span>
-              )}
             </div>
           </div>
 
@@ -222,6 +216,8 @@ export function JobListingCard({
             </div>
           </div>
         </div>
+
+        <ListingSourceBadges listing={listing} compact />
 
         {visibleChips.length > 0 && (
           <div className="og-job__tags">

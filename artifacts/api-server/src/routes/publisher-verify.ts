@@ -6,6 +6,7 @@ import {
   companyProfilesTable,
   listingMergeQueueTable,
   listingsTable,
+  notificationsTable,
 } from "@workspace/db";
 import { and, desc, eq, sql, or, ilike } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
@@ -43,11 +44,22 @@ router.patch("/admin/users/:id/verify-publisher", authMiddleware, requireAdmin, 
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
 
-  const { verificationType, note, syncCompanyProfile } = req.body as {
+  const { verificationType, note, syncCompanyProfile, confirmed } = req.body as {
     verificationType?: string;
     note?: string;
     syncCompanyProfile?: boolean;
+    confirmed?: boolean;
   };
+  const allowedTypes = new Set(["individual", "company", "authorized_representative"]);
+  if (!verificationType || !allowedTypes.has(verificationType)) {
+    res.status(400).json({ error: "Geçerli doğrulama türü gerekli" }); return;
+  }
+  if (!note?.trim()) {
+    res.status(400).json({ error: "Doğrulama notu gerekli" }); return;
+  }
+  if (confirmed !== true) {
+    res.status(400).json({ error: "İnceleme onayı gerekli" }); return;
+  }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
   if (!user) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
@@ -55,7 +67,7 @@ router.patch("/admin/users/:id/verify-publisher", authMiddleware, requireAdmin, 
     res.status(400).json({ error: "Bot veya sistem hesapları doğrulanamaz" }); return;
   }
 
-  const vType = verificationType || "individual";
+  const vType = verificationType;
   const now = new Date();
   const prev = {
     isVerifiedPublisher: user.isVerifiedPublisher,
@@ -68,7 +80,7 @@ router.patch("/admin/users/:id/verify-publisher", authMiddleware, requireAdmin, 
     verifiedAt: now,
     verifiedBy: req.user!.id,
     verificationType: vType,
-    verificationNote: note ?? null,
+    verificationNote: note.trim(),
     verificationStatus: "verified",
     updatedAt: now,
   }).where(eq(usersTable.id, id));
@@ -85,7 +97,7 @@ router.patch("/admin/users/:id/verify-publisher", authMiddleware, requireAdmin, 
     userId: id,
     status: "verified",
     verificationType: vType,
-    note: note ?? null,
+    note: note.trim(),
     verifiedBy: req.user!.id,
   });
 
@@ -96,7 +108,16 @@ router.patch("/admin/users/:id/verify-publisher", authMiddleware, requireAdmin, 
     targetId: id,
     previousData: prev,
     newData: { isVerifiedPublisher: true, verificationStatus: "verified", verificationType: vType },
-    reason: note ?? null,
+    reason: note.trim(),
+  });
+
+  await db.insert(notificationsTable).values({
+    userId: id,
+    type: "verification",
+    title: "Hesabınız Doğrulandı",
+    message: "Hesap bilgileriniz yönetim tarafından incelendi. Bundan sonra yayınlayacağınız ilanlar Doğrulanmış Hesap rozeti alacaktır.",
+    linkUrl: `/profil/${user.username}`,
+    isRead: false,
   });
 
   res.json({ success: true, isVerifiedPublisher: true, verificationStatus: "verified" });
@@ -107,6 +128,7 @@ router.patch("/admin/users/:id/remove-verification", authMiddleware, requireAdmi
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { note, stripActiveListingBadges } = req.body as { note?: string; stripActiveListingBadges?: boolean };
+  if (!note?.trim()) { res.status(400).json({ error: "İşlem nedeni gerekli" }); return; }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
   if (!user) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
@@ -115,7 +137,7 @@ router.patch("/admin/users/:id/remove-verification", authMiddleware, requireAdmi
   await db.update(usersTable).set({
     isVerifiedPublisher: false,
     verificationStatus: "unverified",
-    verificationNote: note ?? user.verificationNote,
+    verificationNote: note.trim(),
     updatedAt: now,
   }).where(eq(usersTable.id, id));
 
@@ -135,7 +157,7 @@ router.patch("/admin/users/:id/remove-verification", authMiddleware, requireAdmi
   await writeVerifyHistory({
     userId: id,
     status: "unverified",
-    note: note ?? null,
+    note: note.trim(),
     verifiedBy: req.user!.id,
   });
   await writeAuditLog({
@@ -143,7 +165,7 @@ router.patch("/admin/users/:id/remove-verification", authMiddleware, requireAdmi
     action: "publisher.remove_verification",
     targetType: "user",
     targetId: id,
-    reason: note ?? null,
+    reason: note.trim(),
   });
 
   res.json({ success: true, isVerifiedPublisher: false });
@@ -154,6 +176,7 @@ router.patch("/admin/users/:id/suspend-verification", authMiddleware, requireAdm
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { note } = req.body as { note?: string };
+  if (!note?.trim()) { res.status(400).json({ error: "İşlem nedeni gerekli" }); return; }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
   if (!user) { res.status(404).json({ error: "Kullanıcı bulunamadı" }); return; }
@@ -161,14 +184,14 @@ router.patch("/admin/users/:id/suspend-verification", authMiddleware, requireAdm
   await db.update(usersTable).set({
     isVerifiedPublisher: false,
     verificationStatus: "suspended",
-    verificationNote: note ?? user.verificationNote,
+    verificationNote: note.trim(),
     updatedAt: new Date(),
   }).where(eq(usersTable.id, id));
 
   await writeVerifyHistory({
     userId: id,
     status: "suspended",
-    note: note ?? null,
+    note: note.trim(),
     verifiedBy: req.user!.id,
   });
   await writeAuditLog({
@@ -176,7 +199,7 @@ router.patch("/admin/users/:id/suspend-verification", authMiddleware, requireAdm
     action: "publisher.suspend_verification",
     targetType: "user",
     targetId: id,
-    reason: note ?? null,
+    reason: note.trim(),
   });
 
   res.json({ success: true, verificationStatus: "suspended" });
@@ -219,13 +242,6 @@ router.get("/admin/verified-publishers", authMiddleware, requireAdminOrModerator
     conditions.push(eq(usersTable.isVerifiedPublisher, true));
   } else if (status) {
     conditions.push(eq(usersTable.verificationStatus, status));
-  } else {
-    conditions.push(or(
-      eq(usersTable.isVerifiedPublisher, true),
-      eq(usersTable.verificationStatus, "pending"),
-      eq(usersTable.verificationStatus, "suspended"),
-      eq(usersTable.verificationStatus, "rejected"),
-    )!);
   }
   if (search) {
     conditions.push(or(
@@ -235,7 +251,7 @@ router.get("/admin/verified-publishers", authMiddleware, requireAdminOrModerator
     )!);
   }
 
-  const where = and(...conditions);
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
   const [rows, countResult] = await Promise.all([
     db.select({
       id: usersTable.id,

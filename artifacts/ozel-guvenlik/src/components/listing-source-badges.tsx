@@ -55,14 +55,29 @@ export function ListingSourceBadges({
   return (
     <div className={`lsb${compact ? " lsb--compact" : ""}`} aria-label="İlan kaynağı">
       {showDirect && (
-        <span className="lsb__badge lsb__badge--direct">DOĞRUDAN YAYINLANDI</span>
+        <span
+          className="lsb__badge lsb__badge--direct"
+          title="Bu ilan, ilan sahibi tarafından ozelguvenlik.online üzerinden doğrudan yayınlanmıştır."
+        >
+          DOĞRUDAN YAYINLANDI
+        </span>
       )}
       {showVerified && (
-        <span className="lsb__badge lsb__badge--verified">DOĞRULANMIŞ HESAP</span>
+        <span
+          className="lsb__badge lsb__badge--verified"
+          title="Bu ilanı yayınlayan hesabın bilgileri platform yönetimi tarafından incelenmiştir."
+        >
+          DOĞRULANMIŞ HESAP
+        </span>
       )}
       {showCompiled && (
         <>
-          <span className="lsb__badge lsb__badge--compiled">KAYNAĞINDAN DERLENDİ</span>
+          <span
+            className="lsb__badge lsb__badge--compiled"
+            title="Bu ilan açık bir iş ilanı kaynağından derlenmiştir. Başvuru öncesinde ilan detaylarını kontrol ediniz."
+          >
+            KAYNAĞINDAN DERLENDİ
+          </span>
           {!compact && (
             <span className="lsb__meta">
               Kaynak: {sourceName}
@@ -85,6 +100,13 @@ export function ListingSourceInfoCard({ listing }: { listing: ListingSourceBadge
     <section className="lsb-card">
       <h3 className="lsb-card__title">İlan Kaynağı</h3>
       <ListingSourceBadges listing={listing} />
+      <p className="lsb-card__description">
+        {st === "bot_imported"
+          ? "Bu ilan açık bir iş ilanı kaynağından derlenmiştir."
+          : st === "admin_created"
+            ? "Bu ilan ozelguvenlik.online yönetimi tarafından yayınlanmıştır."
+            : "Bu ilan ozelguvenlik.online üzerinden doğrudan yayınlandı."}
+      </p>
       {st === "bot_imported" && listing.sourceUrl && (
         <a
           className="lsb-card__link"

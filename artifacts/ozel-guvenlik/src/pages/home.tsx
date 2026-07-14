@@ -356,7 +356,7 @@ export default function Home() {
     page: 1,
     limit: 20,
     featured: true,
-    sort: "recommended",
+    sort: sortMode,
   } as Parameters<typeof useGetListings>[0]);
 
   useEffect(() => {

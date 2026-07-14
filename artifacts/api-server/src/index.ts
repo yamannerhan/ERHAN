@@ -790,6 +790,7 @@ io.on("connection", (socket) => {
     if (data?.userId) {
       const userId = data.userId;
       const entry = onlineSockets.get(socketId);
+      const alreadyAuthenticatedOnSocket = entry?.userId === userId;
       if (entry) { entry.userId = userId; onlineSockets.set(socketId, entry); }
       void socket.join(`user:${userId}`);
       const { setPresence } = await import("./lib/presence");
@@ -801,7 +802,7 @@ io.on("connection", (socket) => {
         const [user] = await db.select({ username: usersTable.username, displayName: usersTable.displayName, isVip: usersTable.isVip, vipUntil: usersTable.vipUntil })
           .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
         if (user) {
-          if (alreadyConnected <= 1) {
+          if (!alreadyAuthenticatedOnSocket && alreadyConnected <= 1) {
             const lastDisconnect = userLastDisconnect.get(userId);
             const awayLong = !lastDisconnect || (Date.now() - lastDisconnect) >= JOIN_THRESHOLD_MS;
             if (awayLong) {

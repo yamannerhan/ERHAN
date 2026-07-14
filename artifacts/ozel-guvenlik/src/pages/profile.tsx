@@ -648,6 +648,17 @@ export default function Profile() {
               level={(profile as { level?: number }).level}
               badges={(profile as { badges?: Array<{ id: number; name: string; slug: string; emoji: string; color: string; description?: string | null }> }).badges}
             />
+            {(profile as { isVerifiedPublisher?: boolean }).isVerifiedPublisher && (
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold text-emerald-300">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Doğrulanmış Hesap
+              </div>
+            )}
+            {(profile as { isVerifiedPublisher?: boolean }).isVerifiedPublisher && (
+              <p className="mx-auto mt-1 max-w-sm text-[10px] text-muted-foreground">
+                Hesap bilgileri ozelguvenlik.online yönetimi tarafından incelenmiştir.
+              </p>
+            )}
 
             {(profile as { xpProgress?: { current: number; next: number; pct: number }; xp?: number }).xp != null && (
               <div className="mt-3 mx-auto max-w-[220px]">

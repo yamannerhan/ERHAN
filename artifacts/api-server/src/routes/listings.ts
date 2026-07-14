@@ -438,8 +438,8 @@ function formatListing(
     || ["telegram", "whatsapp", "eleman", "demo"].includes(listing.sourceTag ?? "")
   ) {
     companyVerified = false;
-  } else if (listing.authorId) {
-    companyVerified = true;
+  } else {
+    companyVerified = !!listing.verifiedPublisher;
   }
 
   return {
@@ -467,22 +467,22 @@ function formatListing(
     companyVerified,
     authorId: listing.authorId,
     authorUsername: authorUsername ?? null,
+    sourceType: listing.sourceType ?? null,
+    sourceName: listing.sourceName ?? null,
+    verifiedPublisher: !!listing.verifiedPublisher,
+    lastCheckedAt: listing.lastCheckedAt
+      ? listing.lastCheckedAt.toISOString()
+      : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
+    badges: listingBadgeMeta(listing),
+    sourceUrl: listing.sourceUrl ?? null,
     ...(opts?.includeSourceMeta
       ? {
           sourceTag: listing.sourceTag ?? null,
-          sourceType: listing.sourceType ?? null,
-          sourceName: listing.sourceName ?? null,
-          verifiedPublisher: !!listing.verifiedPublisher,
           directPriorityUntil: listing.directPriorityUntil ? listing.directPriorityUntil.toISOString() : null,
           freshnessConfirmedAt: listing.freshnessConfirmedAt ? listing.freshnessConfirmedAt.toISOString() : null,
-          lastCheckedAt: listing.lastCheckedAt
-            ? listing.lastCheckedAt.toISOString()
-            : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
           sourcePublishedAt: listing.sourcePublishedAt
             ? listing.sourcePublishedAt.toISOString()
             : null,
-          badges: listingBadgeMeta(listing),
-          sourceUrl: listing.sourceUrl ?? null,
           messageId: listing.messageId ?? null,
         }
       : {}),
@@ -827,7 +827,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     authorId: req.user!.id,
     status: "active",
     isActive: true,
-    expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
     autoDeleteOnExpiry: autoDeleteOnExpiry !== false,
     publishedAt: new Date(),
     ...listingSourceInsertFields(sourceResolved),
@@ -925,6 +925,22 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     }
   } catch { /* don't fail the listing creation */ }
 
+  try {
+    await db.insert(notificationsTable).values({
+      userId: req.user!.id,
+      type: "listing_published",
+      title: sourceResolved.verifiedPublisher
+        ? "İlanınız Öncelikli Olarak Yayınlandı"
+        : "İlanınız Yayınlandı",
+      message: sourceResolved.verifiedPublisher
+        ? "İlanınız başarıyla yayınlandı. Doğrulanmış hesabınız sayesinde ilanınız ilk 72 saat boyunca Doğrudan Yayınlandı ve Doğrulanmış Hesap rozetleriyle öncelikli olarak gösterilecektir."
+        : "İlanınız başarıyla yayınlandı. Doğrudan paylaştığınız ilan ilk 48 saat boyunca öncelikli olarak gösterilecektir. İlanınız 7 gün sonra güncellik kontrolüne alınacaktır.",
+      relatedId: listing!.id,
+      linkUrl: `/ilan/${listing!.id}`,
+      isRead: false,
+    });
+  } catch { /* don't fail the listing creation */ }
+
   // Tüm kullanıcılara bildirim gönder (fire-and-forget)
   setImmediate(async () => {
     try {
@@ -932,7 +948,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
         db
           .select({ id: usersTable.id })
           .from(usersTable)
-          .where(eq(usersTable.isBanned, false)),
+          .where(and(eq(usersTable.isBanned, false), ne(usersTable.id, req.user!.id))),
         db
           .select({ id: usersTable.id })
           .from(usersTable)

@@ -5,7 +5,7 @@ import { db, usersTable, listingsTable, listingFavoritesTable } from "@workspace
 import { eq, sql, or, desc, ilike } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
 import { loadListingCompanyOverlays } from "../lib/listing-company-overlays";
-import { listingDisplayDate } from "../lib/listing-source";
+import { listingBadgeMeta, listingDisplayDate } from "../lib/listing-source";
 
 const router = Router();
 
@@ -160,6 +160,9 @@ router.get("/users/profile/:username", async (req, res): Promise<void> => {
       if (user.chatBubbleExpiresAt && user.chatBubbleExpiresAt < new Date()) return "default";
       return user.chatBubble ?? "default";
     })(),
+    isVerifiedPublisher: !!user.isVerifiedPublisher && user.verificationStatus === "verified",
+    verificationStatus: user.verificationStatus,
+    verificationType: user.verificationType,
     listingCount: countResult?.count ?? 0,
     createdAt: user.createdAt.toISOString(),
   });
@@ -235,7 +238,12 @@ router.get("/users/favorites", authMiddleware, async (req, res): Promise<void> =
     companyVerified: l.sourceType === "bot_imported"
       || ["telegram", "whatsapp", "eleman", "demo"].includes(l.sourceTag ?? "")
       ? false
-      : !!l.authorId || (companyOverlays.get(l.id)?.isVerified ?? false),
+      : !!l.verifiedPublisher,
+    sourceType: l.sourceType ?? null,
+    sourceName: l.sourceName ?? null,
+    verifiedPublisher: !!l.verifiedPublisher,
+    lastCheckedAt: l.lastCheckedAt?.toISOString() ?? l.lastSeenAt?.toISOString() ?? null,
+    badges: listingBadgeMeta(l),
     authorId: l.authorId,
     authorUsername: null,
     isLikedByMe: false,

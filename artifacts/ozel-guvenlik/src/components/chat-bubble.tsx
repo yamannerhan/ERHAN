@@ -870,7 +870,7 @@ export function ChatBubble() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.08 }}
             className="og-chat-backdrop"
             aria-label="Sohbeti kapat"
             onClick={() => { setExpanded(false); setOpen(false); }}
@@ -880,7 +880,7 @@ export function ChatBubble() {
             initial={{ opacity: 0, y: 28, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 28, scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 320, damping: 28 }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
             className={`og-chat-win fixed z-[10050] flex flex-col ${expanded ? "og-chat-win-expanded" : ""}${keyboardInset > 0 ? " og-chat-win--kb" : ""}`}
             style={{
               right: keyboardInset > 0 || expanded

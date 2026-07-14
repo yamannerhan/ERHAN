@@ -18,7 +18,7 @@ import {
   loadListingCompanyOverlays,
   type ListingCompanyOverlay,
 } from "../lib/listing-company-overlays";
-import { listingDisplayDate } from "../lib/listing-source";
+import { listingBadgeMeta, listingDisplayDate } from "../lib/listing-source";
 
 const router = Router();
 
@@ -79,8 +79,8 @@ function formatNearbyListing(
     || ["telegram", "whatsapp", "eleman", "demo"].includes(listing.sourceTag ?? "")
   ) {
     companyVerified = false;
-  } else if (listing.authorId) {
-    companyVerified = true;
+  } else {
+    companyVerified = !!listing.verifiedPublisher;
   }
 
   return {
@@ -101,6 +101,11 @@ function formatNearbyListing(
     applyUrl,
     companyLogoUrl,
     companyVerified,
+    sourceType: listing.sourceType ?? null,
+    sourceName: listing.sourceName ?? null,
+    verifiedPublisher: !!listing.verifiedPublisher,
+    lastCheckedAt: listing.lastCheckedAt?.toISOString() ?? listing.lastSeenAt?.toISOString() ?? null,
+    badges: listingBadgeMeta(listing),
     isFeatured: listing.isFeatured,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     viewCount: listing.viewCount,

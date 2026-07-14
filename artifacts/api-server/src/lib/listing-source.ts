@@ -8,12 +8,13 @@ export function listingDisplayDate(listing: {
   sourceType?: string | null;
   sourceTag?: string | null;
   sourcePublishedAt?: Date | null;
+  firstSeenAt?: Date | null;
   createdAt: Date;
 }): Date {
   const imported = listing.sourceType === "bot_imported"
     || (BOT_PLATFORMS as readonly string[]).includes(listing.sourceTag ?? "");
-  return imported && listing.sourcePublishedAt
-    ? listing.sourcePublishedAt
+  return imported
+    ? listing.sourcePublishedAt ?? listing.firstSeenAt ?? listing.createdAt
     : listing.createdAt;
 }
 
