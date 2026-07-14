@@ -521,7 +521,15 @@ async function processMessage(
       eq(importedPostsTable.externalId, externalId),
     ))
     .limit(1);
-  if (seenExt) return "duplicate";
+  if (seenExt) {
+    const existingId = await findListingBySourceMessage(source.id, messageId);
+    if (existingId && postedAt) {
+      await db.update(listingsTable)
+        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .where(eq(listingsTable.id, existingId));
+    }
+    return "duplicate";
+  }
 
   const hash = createDuplicateHash(text);
   if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
@@ -533,7 +541,14 @@ async function processMessage(
   }
 
   const existingByMessage = await findListingBySourceMessage(source.id, messageId);
-  if (existingByMessage) return "duplicate";
+  if (existingByMessage) {
+    if (postedAt) {
+      await db.update(listingsTable)
+        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .where(eq(listingsTable.id, existingByMessage));
+    }
+    return "duplicate";
+  }
 
   const [imported] = await db.insert(importedPostsTable).values({
     sourceId: source.id,
@@ -1355,11 +1370,18 @@ async function publishElemanJob(
           city: structuredCity,
           lastSeenAt: now,
           lastCheckedAt: now,
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
           ...(assignCoordsFromCity(structuredCity) ?? {}),
         })
         .where(eq(listingsTable.id, existingBySource));
     } else {
-      await touchListingSeen(existingBySource);
+      await db.update(listingsTable)
+        .set({
+          lastSeenAt: now,
+          lastCheckedAt: now,
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
+        })
+        .where(eq(listingsTable.id, existingBySource));
     }
     return "duplicate";
   }

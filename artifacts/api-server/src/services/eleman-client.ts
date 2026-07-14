@@ -68,6 +68,48 @@ function absoluteUrl(url: string): string {
   return new URL(url, BASE).toString();
 }
 
+const TR_MONTHS: Record<string, number> = {
+  ocak: 0, subat: 1, şubat: 1, mart: 2, nisan: 3, mayis: 4, mayıs: 4,
+  haziran: 5, temmuz: 6, agustos: 7, ağustos: 7, eylul: 8, eylül: 8,
+  ekim: 9, kasim: 10, kasım: 10, aralik: 11, aralık: 11,
+};
+
+function parseElemanDateValue(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const text = decodeHtml(value).trim();
+  if (!text) return null;
+  const numeric = text.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
+  if (numeric) {
+    const date = new Date(Date.UTC(Number(numeric[3]), Number(numeric[2]) - 1, Number(numeric[1]), 9));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const native = new Date(text);
+  if (!Number.isNaN(native.getTime()) && /\d{4}/.test(text)) return native;
+  const named = text.toLocaleLowerCase("tr-TR").match(/\b(\d{1,2})\s+([a-zçğıöşü]+)\s+(\d{4})\b/i);
+  if (named) {
+    const month = TR_MONTHS[named[2]!];
+    if (month != null) return new Date(Date.UTC(Number(named[3]), month, Number(named[1]), 9));
+  }
+  return null;
+}
+
+function parseElemanPostedAt(html: string, job: Record<string, unknown> | null): Date | null {
+  const structured = parseElemanDateValue(job?.datePosted ?? job?.datePublished);
+  if (structured) return structured;
+  const candidates = [
+    html.match(/itemprop=["']date(?:Posted|Published)["'][^>]*content=["']([^"']+)["']/i)?.[1],
+    html.match(/content=["']([^"']+)["'][^>]*itemprop=["']date(?:Posted|Published)["']/i)?.[1],
+    html.match(/property=["']article:published_time["'][^>]*content=["']([^"']+)["']/i)?.[1],
+    html.match(/<time\b[^>]*datetime=["']([^"']+)["']/i)?.[1],
+    html.match(/(?:İlan|Yayın(?:lanma)?)\s*Tarihi\s*[:\-]?\s*([^<\n]{6,40})/i)?.[1],
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseElemanDateValue(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 export function buildElemanListUrl(citySlug: string | null, page: number): string {
   const path = citySlug ? `/is-ilanlari/${citySlug}` : "/is-ilanlari";
   const url = new URL(path, BASE);
@@ -274,12 +316,7 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
     return null;
   }
 
-  let postedAt: Date | null = null;
-  const dateRaw = job?.datePosted ?? job?.datePublished;
-  if (typeof dateRaw === "string") {
-    const d = new Date(dateRaw);
-    if (!Number.isNaN(d.getTime())) postedAt = d;
-  }
+  const postedAt = parseElemanPostedAt(html, job);
 
   const rawText = [
     title,

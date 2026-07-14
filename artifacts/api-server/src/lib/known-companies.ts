@@ -61,6 +61,35 @@ export function normalizeCompanyKey(input: string | null | undefined): string {
     .trim();
 }
 
+const COMPANY_GENERIC_SUFFIXES = new Set([
+  "guvenlik", "hizmet", "hizmetleri", "hizmetler", "grup", "group",
+  "limited", "sirketi", "sirket", "sanayi", "ticaret", "ltd", "sti", "as", "a", "s",
+]);
+
+/** Firma özünü koruyup “Güvenlik Hizmetleri Ltd. Şti.” gibi değişken sonları atar. */
+function normalizeCompanyCore(input: string): string {
+  const tokens = input.split(" ").filter(Boolean);
+  while (tokens.length > 1 && COMPANY_GENERIC_SUFFIXES.has(tokens[tokens.length - 1]!)) {
+    tokens.pop();
+  }
+  return tokens.join(" ");
+}
+
+/** Kısa/uzun ad varyasyonlarını kelime sınırında puanlar; benzer kelimeleri karıştırmaz. */
+function companyVariantScore(input: string, known: string): number {
+  if (!input || !known) return 0;
+  if (input === known) return 10_000 + known.length;
+  const inputCore = normalizeCompanyCore(input);
+  const knownCore = normalizeCompanyCore(known);
+  if (inputCore === knownCore) return 9_000 + knownCore.length;
+  const shorter = inputCore.length <= knownCore.length ? inputCore : knownCore;
+  const longer = inputCore.length <= knownCore.length ? knownCore : inputCore;
+  if (shorter.length >= 3 && (longer === shorter || longer.startsWith(`${shorter} `))) {
+    return 5_000 + shorter.split(" ").length * 100 + shorter.length;
+  }
+  return 0;
+}
+
 export function slugifyCompany(name: string): string {
   return normalizeCompanyKey(name).replace(/\s+/g, "-") || `co-${Date.now()}`;
 }
@@ -189,21 +218,17 @@ export function matchKnownCompanySync(companyText: string | null | undefined): K
     }
   }
 
-  const tokens = key.split(" ").filter(Boolean);
+  let best: { company: NonNullable<typeof cache>[number]; score: number } | null = null;
   for (const c of cache) {
     for (const norm of c.norms) {
       if (!norm || !c.logoUrl) continue;
-      if (norm.length >= 3 && (key === norm || key.startsWith(norm + " ") || key.endsWith(" " + norm) || key.includes(" " + norm + " "))) {
-        return { companyId: c.companyId, name: c.name, logoUrl: c.logoUrl };
-      }
-      const short = norm.split(" ")[0]!;
-      if (short.length >= 3 && (key === short || tokens[0] === short)) {
-        return { companyId: c.companyId, name: c.name, logoUrl: c.logoUrl };
-      }
+      const score = companyVariantScore(key, norm);
+      if (score > 0 && (!best || score > best.score)) best = { company: c, score };
     }
   }
-
-  return null;
+  return best?.company.logoUrl
+    ? { companyId: best.company.companyId, name: best.company.name, logoUrl: best.company.logoUrl }
+    : null;
 }
 
 /** Metin içinde marka adı ara (bot ilanları / Belirtilmemiş) */
@@ -222,9 +247,12 @@ export function matchKnownCompanyInBlob(blob: string | null | undefined): KnownC
     if (!c.logoUrl) continue;
     for (const norm of c.norms) {
       if (!norm || norm.length < 2) continue;
-      if (hay.includes(` ${norm} `)) {
-        if (!best || norm.length > best.len) {
-          best = { match: { companyId: c.companyId, name: c.name, logoUrl: c.logoUrl }, len: norm.length };
+      const variants = [...new Set([norm, normalizeCompanyCore(norm)])];
+      for (const variant of variants) {
+        if (variant.length >= 2 && hay.includes(` ${variant} `)) {
+          if (!best || variant.length > best.len) {
+            best = { match: { companyId: c.companyId, name: c.name, logoUrl: c.logoUrl }, len: variant.length };
+          }
         }
       }
     }
@@ -268,7 +296,7 @@ export async function applyKnownLogoToListings(companyId: number): Promise<numbe
     let hit = keys.has(k);
     if (!hit) {
       for (const key of keys) {
-        if (key.length >= 3 && (k === key || k.startsWith(key + " ") || k.split(" ")[0] === key.split(" ")[0])) {
+        if (companyVariantScore(k, key) > 0) {
           hit = true;
           break;
         }

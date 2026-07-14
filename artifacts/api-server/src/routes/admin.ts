@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { listingDisplayDate } from "../lib/listing-source";
 import { db, usersTable, listingsTable, listingLikesTable, listingFavoritesTable, chatMessagesTable, announcementsTable, adminSettingsTable, bannedWordsTable, bannersTable, supportTicketsTable, chatRulesTable, listingPublishGrantsTable, ipBansTable, deviceBansTable, locationFilterTermsTable, badgesTable, userBadgesTable, companyProfilesTable, userPermissionsTable } from "@workspace/db";
 import { eq, desc, ilike, and, sql, asc, or, isNull, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
@@ -1824,7 +1825,7 @@ router.get("/admin/listings", authMiddleware, requireAdminOrModerator, async (re
         companyPhone: profile?.phone ?? null,
         contactName: author?.fullName || author?.displayName || null,
         isUserListing,
-        expiresAt: l.expiresAt?.toISOString() ?? null, createdAt: l.createdAt.toISOString(),
+        expiresAt: l.expiresAt?.toISOString() ?? null, createdAt: listingDisplayDate(l).toISOString(),
         autoDeleteOnExpiry: l.autoDeleteOnExpiry ?? true,
       };
     }),

@@ -5,6 +5,7 @@ import { db, usersTable, listingsTable, listingFavoritesTable } from "@workspace
 import { eq, sql, or, desc, ilike } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
 import { loadListingCompanyOverlays } from "../lib/listing-company-overlays";
+import { listingDisplayDate } from "../lib/listing-source";
 
 const router = Router();
 
@@ -239,7 +240,7 @@ router.get("/users/favorites", authMiddleware, async (req, res): Promise<void> =
     authorUsername: null,
     isLikedByMe: false,
     isFavoritedByMe: true,
-    createdAt: l.createdAt.toISOString(),
+    createdAt: listingDisplayDate(l).toISOString(),
   })));
 });
 

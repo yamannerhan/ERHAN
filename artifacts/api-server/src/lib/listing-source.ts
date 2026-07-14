@@ -4,6 +4,19 @@ export type ListingSourceType = "direct_user" | "direct_company" | "bot_imported
 
 export const BOT_PLATFORMS = ["telegram", "whatsapp", "eleman", "demo"] as const;
 
+export function listingDisplayDate(listing: {
+  sourceType?: string | null;
+  sourceTag?: string | null;
+  sourcePublishedAt?: Date | null;
+  createdAt: Date;
+}): Date {
+  const imported = listing.sourceType === "bot_imported"
+    || (BOT_PLATFORMS as readonly string[]).includes(listing.sourceTag ?? "");
+  return imported && listing.sourcePublishedAt
+    ? listing.sourcePublishedAt
+    : listing.createdAt;
+}
+
 export function platformSourceName(platform: string | null | undefined): string {
   switch ((platform || "").toLowerCase()) {
     case "telegram": return "Telegram";

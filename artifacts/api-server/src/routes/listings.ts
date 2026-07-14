@@ -4,7 +4,7 @@ import { eq, desc, and, sql, ilike, inArray, or, isNull, ne } from "drizzle-orm"
 import { authMiddleware, optionalAuthMiddleware, requireAdmin } from "../middlewares/auth";
 import { ensureCompanySchema, rememberEmployerBasics } from "../lib/company-profiles";
 import { matchKnownCompanySync, isPlaceholderListingLogo, matchKnownCompanyInBlob } from "../lib/known-companies";
-import { resolveListingSourceOnCreate, listingBadgeMeta, computeRenewPriorityUntil } from "../lib/listing-source";
+import { resolveListingSourceOnCreate, listingBadgeMeta, computeRenewPriorityUntil, listingDisplayDate } from "../lib/listing-source";
 import {
   listingSourceInsertFields,
   logListingSourceHistory,
@@ -490,7 +490,7 @@ function formatListing(
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     expiresAt: listing.expiresAt ? listing.expiresAt.toISOString() : null,
     autoDeleteOnExpiry: listing.autoDeleteOnExpiry ?? true,
-    createdAt: listing.createdAt.toISOString(),
+    createdAt: listingDisplayDate(listing).toISOString(),
   };
 }
 

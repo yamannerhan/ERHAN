@@ -18,6 +18,7 @@ import {
   loadListingCompanyOverlays,
   type ListingCompanyOverlay,
 } from "../lib/listing-company-overlays";
+import { listingDisplayDate } from "../lib/listing-source";
 
 const router = Router();
 
@@ -103,7 +104,7 @@ function formatNearbyListing(
     isFeatured: listing.isFeatured,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     viewCount: listing.viewCount,
-    createdAt: listing.createdAt.toISOString(),
+    createdAt: listingDisplayDate(listing).toISOString(),
     distanceKm,
     sameDistrict,
     approximate,
