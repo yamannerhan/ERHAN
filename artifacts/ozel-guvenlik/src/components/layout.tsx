@@ -163,6 +163,14 @@ export function Layout({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  /* Sayfa değişince en üste; detaydan anasayfa dönüş scroll'unu bozma */
+  useEffect(() => {
+    if (location === "/" && sessionStorage.getItem("home_scroll_y")) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [location]);
+
   const { data: onlineData } = useGetOnlineCount({
     query: {
       queryKey: getGetOnlineCountQueryKey(),
@@ -419,8 +427,11 @@ export function Layout({
                   key={item.path}
                   href={item.path}
                   className={`og-desktop-nav__link px-3 py-1.5 text-sm font-semibold transition-colors ${
-                    active ? "is-active og-gold-gradient" : "text-muted-foreground hover:text-foreground"
+                    active ? "is-active" : "text-muted-foreground hover:text-foreground"
                   }`}
+                  onClick={() => {
+                    if (item.path === "/") sessionStorage.removeItem("home_scroll_y");
+                  }}
                 >
                   {item.label}
                 </Link>
