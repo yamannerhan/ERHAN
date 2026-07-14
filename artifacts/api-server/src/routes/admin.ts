@@ -1957,10 +1957,42 @@ router.delete("/admin/banners/:id", authMiddleware, requireAdmin, async (req, re
   res.sendStatus(204);
 });
 
+function resolveBannerImageUrl(imageUrl: string | null, index: number): string {
+  const fallback = `/banners/banner-${(index % 3) + 1}.jpg`;
+  if (!imageUrl || !imageUrl.trim()) return fallback;
+
+  // Yüklenen dosya diskte yoksa (Railway ephemeral) public yedek kullan
+  const uploaded = imageUrl.match(/\/api\/banner-images\/([^/?#]+)/);
+  if (uploaded?.[1]) {
+    const filepath = path.join(BANNER_IMAGES_DIR, path.basename(uploaded[1]));
+    if (!fs.existsSync(filepath)) return fallback;
+    return imageUrl;
+  }
+
+  // Eski /banners/*.png veya kırık path → jpg yedek
+  if (imageUrl.includes("unsplash.com")) return fallback;
+  if (imageUrl.startsWith("/banners/") && imageUrl.endsWith(".png")) return fallback;
+
+  return imageUrl;
+}
+
 router.get("/banners", async (_req, res): Promise<void> => {
   await ensureDefaultBanners();
-  const banners = await db.select().from(bannersTable).where(eq(bannersTable.isActive, true)).orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
-  res.json(banners.map(b => ({ id: b.id, title: b.title, imageUrl: b.imageUrl, linkUrl: null })));
+  const banners = await db
+    .select()
+    .from(bannersTable)
+    .where(eq(bannersTable.isActive, true))
+    .orderBy(asc(bannersTable.sortOrder), desc(bannersTable.createdAt));
+
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.json(
+    banners.map((b, i) => ({
+      id: b.id,
+      title: b.title,
+      imageUrl: resolveBannerImageUrl(b.imageUrl, i),
+      linkUrl: null,
+    })),
+  );
 });
 
 // ─── Akıllı İlan Yayınlama Yetkileri (Grant) ─────────────────────

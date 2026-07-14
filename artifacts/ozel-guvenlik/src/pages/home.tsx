@@ -83,6 +83,7 @@ const bannerFallbacks = [
 function BannerCarousel({ banners }: { banners: Banner[] }) {
   const [current, setCurrent] = useState(0);
   const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
+  const [srcOverrides, setSrcOverrides] = useState<Record<number, string>>({});
   const { isLite } = useDisplayMode();
   const gpuSafeMode = useGpuSafeMode();
   const reduceMotion = isLite || gpuSafeMode;
@@ -97,11 +98,32 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
     return () => clearInterval(id);
   }, [next, banners.length, isLite]);
 
+  // iOS/Safari: lazy + absolute slide = yüklenmeme; bannerı önceden çek
+  useEffect(() => {
+    for (const b of banners) {
+      const url = b.imageUrl;
+      if (!url) continue;
+      const img = new Image();
+      img.decoding = "async";
+      img.src = url;
+    }
+  }, [banners]);
+
   if (banners.length === 0) return null;
 
   const slideIndex = isLite ? 0 : current;
   const banner = banners[slideIndex]!;
   const imageFailed = failedImages.has(banner.id);
+  const imgSrc = srcOverrides[banner.id] ?? banner.imageUrl;
+
+  const handleImgError = () => {
+    const fallback = `/banners/banner-${(slideIndex % 3) + 1}.jpg`;
+    if (imgSrc !== fallback && !srcOverrides[banner.id]) {
+      setSrcOverrides((prev) => ({ ...prev, [banner.id]: fallback }));
+      return;
+    }
+    setFailedImages((prev) => new Set(prev).add(banner.id));
+  };
 
   const slideContent = (
     <div className="og-banner-carousel__media pointer-events-none select-none">
@@ -112,11 +134,12 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
         />
       ) : (
         <img
-          src={banner.imageUrl}
+          src={imgSrc}
           alt={banner.title ?? "Banner"}
           decoding="async"
-          loading={isLite ? "eager" : "lazy"}
-          onError={() => setFailedImages(prev => new Set(prev).add(banner.id))}
+          loading="eager"
+          fetchPriority="high"
+          onError={handleImgError}
         />
       )}
       {banner.title && (
@@ -130,10 +153,29 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
     </div>
   );
 
-  if (isLite) {
+  // Mobil / Lite: AnimatePresence remount iOS'ta img'yi düşürebiliyor — sabit slide kullan
+  if (isLite || reduceMotion) {
     return (
       <div className="og-banner-carousel">
         <div className="og-banner-carousel__slide">{slideContent}</div>
+        {!isLite && banners.length > 1 && (
+          <>
+            <div className="og-banner-carousel__dots absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+              {banners.map((_, i) => (
+                <button key={i} type="button" onClick={() => setCurrent(i)}
+                  className={`h-1.5 rounded-full transition-all ${i === current ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
+              ))}
+            </div>
+            <button type="button" onClick={() => setCurrent(c => (c - 1 + banners.length) % banners.length)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
+              ‹
+            </button>
+            <button type="button" onClick={next}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
+              ›
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -143,9 +185,9 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={current}
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 36 }}
-          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, x: 0 }}
-          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -36 }}
+          initial={{ opacity: 0, x: 36 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -36 }}
           transition={{ duration: 0.45, ease: "easeInOut" }}
           className="og-banner-carousel__slide"
         >
@@ -157,15 +199,15 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
         <>
           <div className="og-banner-carousel__dots absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
             {banners.map((_, i) => (
-              <button key={i} onClick={() => setCurrent(i)}
+              <button key={i} type="button" onClick={() => setCurrent(i)}
                 className={`h-1.5 rounded-full transition-all ${i === current ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
             ))}
           </div>
-          <button onClick={() => setCurrent(c => (c - 1 + banners.length) % banners.length)}
+          <button type="button" onClick={() => setCurrent(c => (c - 1 + banners.length) % banners.length)}
             className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
             ‹
           </button>
-          <button onClick={next}
+          <button type="button" onClick={next}
             className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
             ›
           </button>
