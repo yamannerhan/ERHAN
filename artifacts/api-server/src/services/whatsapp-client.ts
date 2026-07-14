@@ -170,19 +170,16 @@ function clearPairingCode(reason: string): void {
 async function requestPairingCodeNow(c: any, phone: string): Promise<string | null> {
   if (!c || typeof c.requestPairingCode !== "function") return null;
   try {
-    // wwebjs: requestPairingCode(phoneNumber, showNotification?) — 3. argüman yok
-    let code: unknown;
-    try {
-      code = await c.requestPairingCode(phone, true);
-    } catch {
-      code = await c.requestPairingCode(phone);
-    }
+    // wwebjs 1.34: (phone, showNotification, intervalMs)
+    const code = await c.requestPairingCode(phone, true, 180_000);
     if (code) {
       setPairingCode(String(code));
       return pairingCode;
     }
   } catch (e) {
-    logger.warn({ err: e }, "wa: requestPairingCode failed");
+    const msg = e instanceof Error ? e.message : String(e);
+    lastError = `Onay kodu isteği başarısız: ${msg.slice(0, 220)}`;
+    logger.warn({ err: e, phone }, "wa: requestPairingCode failed");
   }
   return null;
 }
@@ -205,23 +202,15 @@ function scheduleWhatsAppPairingReconnect(phone: string, reason: string): void {
 
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
-    // Onay kodu modunda QR'ı ASLA gösterme — kod iste
+    // Onay kodu modunda QR gösterme — pairWithPhoneNumber zaten kod üretir;
+    // QR handler'dan requestPairingCode çağırmak kodu düşürür / hata verir.
     if (pairingIntent && pendingPhone) {
-      logger.info("wa: QR yoksayıldı (onay kodu modu)");
+      logger.info("wa: QR yoksayıldı (onay kodu modu — pairWithPhoneNumber)");
       qrDataUrl = null;
-      // Kod zaten varsa tekrar isteme (eski kodu düşürür)
-      if (pairingCode && Date.now() - pairingCodeAt < 150_000) {
+      if (pairingCode) {
         lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
-        return;
-      }
-      if (!pairingCodeRequested) {
-        pairingCodeRequested = true;
-        void requestPairingCodeNow(c, pendingPhone).then((code) => {
-          if (!code) {
-            pairingCodeRequested = false;
-            lastError = "Onay kodu alınamadı. Numarayı 905… formatında kontrol edip tekrar deneyin.";
-          }
-        });
+      } else {
+        lastError = "Onay kodu hazırlanıyor… QR kullanılmayacak.";
       }
       return;
     }
@@ -494,33 +483,45 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
       authTimeoutMs: 120_000,
     };
 
-    // Onay kodu: sadece manuel requestPairingCode — pairWithPhoneNumber ile çift istek kodu düşürüyordu
+    // wwebjs 1.34: onay kodu SADECE constructor'daki pairWithPhoneNumber ile gelir.
+    // inject() içinde requestPairingCode çağrılır ve `code` event yayınlanır.
+    // Manuel + constructor çift istek kodu düşürür; QR handler'dan da istemeyin.
+    if (pairingMode && pendingPhone) {
+      clientOpts.pairWithPhoneNumber = {
+        phoneNumber: pendingPhone,
+        showNotification: true,
+        intervalMs: 180_000,
+      };
+      pairingCodeRequested = true;
+    }
+
     client = new ClientCtor(clientOpts);
     attachHandlers(client);
 
     await client.initialize();
 
     if (pairingMode && pendingPhone && !isReady) {
-      // initialize sonrası code event gelmesini kısa bekle, yoksa iste
-      for (let i = 0; i < 8 && !pairingCode && !isReady; i++) {
+      // initialize sırasında code event genelde gelir; biraz bekle
+      for (let i = 0; i < 20 && !pairingCode && !isReady; i++) {
         await new Promise((r) => setTimeout(r, 500));
       }
+      // Nadir: event kaçtıysa tek seferlik yedek istek (constructor path zaten kayıtlı)
       if (!pairingCode && !isReady) {
-        lastError = "Onay kodu isteniyor…";
-        pairingCodeRequested = true;
-        const code = await requestPairingCodeNow(client, pendingPhone);
-        if (!code) {
-          for (let i = 0; i < 25 && !pairingCode && !isReady; i++) {
-            await new Promise((r) => setTimeout(r, 1000));
-          }
+        lastError = "Onay kodu isteniyor (yedek)…";
+        logger.warn({ phone: pendingPhone }, "wa: code event gelmedi, yedek requestPairingCode");
+        await requestPairingCodeNow(client, pendingPhone);
+        for (let i = 0; i < 15 && !pairingCode && !isReady; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
         }
       }
       if (!pairingCode && !isReady) {
-        lastError = "Onay kodu gelmedi. 905xxxxxxxxx formatında tekrar deneyin (QR kapalı).";
+        lastError =
+          lastError && lastError.startsWith("Onay kodu isteği başarısız")
+            ? lastError
+            : `Onay kodu gelmedi (${pendingPhone}). Birkaç saniye sonra «Onay Kodu ile Bağlan»a tekrar basın.`;
         logger.warn({ phone: pendingPhone }, "wa: pairing code gelmedi");
       } else if (pairingCode && !isReady) {
         lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
-        // ready asenkron gelir; HTTP isteğini bloklama
       }
     }
   } catch (e) {

@@ -291,7 +291,7 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
     res.json({
       success: true,
       message: phoneNumber
-        ? "WhatsApp başlatıldı. Telefona gelen onay kodunu bekleyin (905… formatı)."
+        ? "WhatsApp başlatıldı. Onay kodu hazırlanıyor — birkaç saniye bekleyin."
         : "WhatsApp başlatıldı. QR kod bekleniyor...",
     });
   } catch (e) {

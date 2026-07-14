@@ -3603,7 +3603,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                     : pairingCode}
                 </div>
                 <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra bu ekranda «Bağlı» olana kadar bekleyin. Kod kaybolsa bile tekrar basmayın.</p>
-                <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Bağlanmazsa 905… formatıyla bir kez daha deneyin.</p>
+                <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Gelmezse birkaç saniye bekleyip bir kez daha «Onay Kodu ile Bağlan»a basın.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
