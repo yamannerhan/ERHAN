@@ -730,10 +730,14 @@
   .desktop-listings-table__logo {
     width: 34px;
     height: 34px;
-    border-radius: 8px;
-    object-fit: cover;
+    max-width: 34px;
+    max-height: 34px;
+    border-radius: 50%;
+    object-fit: contain;
+    box-sizing: border-box;
+    padding: 2px;
     flex-shrink: 0;
-    background: var(--card-bg-dark, #0b1220);
+    background: #fff;
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 

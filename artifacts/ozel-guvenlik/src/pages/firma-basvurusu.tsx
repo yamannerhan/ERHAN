@@ -159,7 +159,7 @@ export default function FirmaBasvurusuPage() {
                 onClick={() => fileRef.current?.click()}
               >
                 {logoPreview ? (
-                  <img src={logoPreview} alt="" className="h-16 w-16 rounded-full object-cover" />
+                  <img src={logoPreview} alt="" className="h-16 w-16 max-w-full max-h-full rounded-full object-contain box-border p-1 bg-white" />
                 ) : (
                   <>
                     <Upload className="h-4 w-4" /> Logo yükle

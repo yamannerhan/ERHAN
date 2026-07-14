@@ -3,7 +3,7 @@ import { Bookmark, LayoutGrid, List } from "lucide-react";
 import { displayCompany } from "@/lib/utils";
 import { markListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
-import { isRealCompanyLogo, resolveCompanyLogo } from "@/lib/brand-logo";
+import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import type { JobCardListing } from "@/components/job-listing-card";
 
 function formatSalary(raw?: string | null): string {
@@ -134,6 +134,7 @@ export function DesktopListingsTable({
                         alt=""
                         className={`desktop-listings-table__logo${hasOwnLogo ? "" : " is-brand"}`}
                         loading="lazy"
+                        onError={(event) => useBrandLogoFallback(event.currentTarget)}
                       />
                       <span className="desktop-listings-table__title-text">{listing.title}</span>
                     </Link>

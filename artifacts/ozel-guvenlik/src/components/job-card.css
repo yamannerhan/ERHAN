@@ -104,7 +104,7 @@
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
+  background: #fff;
   border: 1px solid rgba(245, 197, 24, 0.28);
   display: flex;
   align-items: center;
@@ -116,13 +116,17 @@
 .og-job__logo img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-sizing: border-box;
+  padding: 3px;
   border-radius: 50%;
   display: block;
 }
 .og-job__logo-brand {
   object-fit: contain !important;
-  padding: 6px;
+  padding: 6px !important;
 }
 
 .og-job__main {

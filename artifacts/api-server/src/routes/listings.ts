@@ -687,7 +687,11 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
 router.post("/listings/image-upload", authMiddleware, listingImageUpload.single("image"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" }); return; }
   const logo = await sharp(req.file.buffer)
-    .resize(512, 512, { fit: "cover", position: "centre" })
+    .resize(512, 512, {
+      fit: "contain",
+      position: "centre",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
     .webp({ quality: 82 })
     .toBuffer();
   // İlan kaydedilince şirket profiline DB tabanlı kalıcı logo olarak aktarılır.

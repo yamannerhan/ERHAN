@@ -796,7 +796,7 @@ export default function Profile() {
                           <img
                             src={companyLogo}
                             alt=""
-                            className="w-full h-full object-cover rounded-full"
+                            className="w-full h-full max-w-full max-h-full object-contain box-border p-1 rounded-full"
                             onError={(event) => useBrandLogoFallback(event.currentTarget)}
                           />
                         </div>
@@ -1038,7 +1038,7 @@ export default function Profile() {
                         <img
                           src={img}
                           alt={company}
-                          className="w-full h-full object-cover rounded-full"
+                          className="w-full h-full max-w-full max-h-full object-contain box-border p-1 rounded-full"
                           onError={(event) => useBrandLogoFallback(event.currentTarget)}
                         />
                       </div>

@@ -197,7 +197,11 @@ router.post(
     const filename = `co_${existing.id}_${crypto.randomBytes(8).toString("hex")}.webp`;
     const filepath = path.join(COMPANY_LOGO_DIR, filename);
     const processedLogo = await sharp(req.file.buffer)
-      .resize(512, 512, { fit: "cover", position: "centre" })
+      .resize(512, 512, {
+        fit: "contain",
+        position: "centre",
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+      })
       .webp({ quality: 82 })
       .toBuffer();
     let wroteToDisk = false;

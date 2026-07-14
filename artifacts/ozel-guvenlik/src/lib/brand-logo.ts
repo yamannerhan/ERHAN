@@ -28,4 +28,7 @@ export function useBrandLogoFallback(image: HTMLImageElement): void {
   image.src = BRAND_LOGO_URL;
   image.style.objectFit = "contain";
   image.style.padding = "6px";
+  image.style.boxSizing = "border-box";
+  image.style.maxWidth = "100%";
+  image.style.maxHeight = "100%";
 }
