@@ -522,6 +522,7 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
   const byId = new Map<string, WhatsAppChannel>();
 
+  // 1) getChats ana kaynağı
   try {
     const chats = await client.getChats();
     for (const c of chats as any[]) {
@@ -541,7 +542,7 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     logger.warn({ err: e }, "wa: getChats failed");
   }
 
-  // Abone olunan kanallar — getChats bazen eksik bırakır
+  // 2) getChannels ile kanalları ekle
   try {
     if (typeof client.getChannels === "function") {
       const channels = await client.getChannels();
@@ -558,6 +559,72 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     }
   } catch (e) {
     logger.warn({ err: e }, "wa: getChannels failed");
+  }
+
+  // 3) getContacts ile kişi listesindeki grupları da ekle
+  try {
+    if (typeof client.getContacts === "function") {
+      const contacts = await client.getContacts();
+      for (const c of contacts as any[]) {
+        const id = String(c?.id?._serialized ?? "");
+        if (!id || byId.has(id)) continue;
+        const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
+        const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
+        if (!isGroup && !isChannel) continue;
+        byId.set(id, {
+          id,
+          name: String(c.name || c.formattedTitle || c.pushname || id),
+          participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
+          kind: isChannel ? "channel" : "group",
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getContacts (groups) failed");
+  }
+
+  // 4) WhatsApp Web Store yedeği — ekranda görünen ama istemcinin kaçırdığı kaynaklar
+  try {
+    const page = (client as any).pupPage;
+    if (page) {
+      const storeSources: Array<{
+        id: string;
+        name: string;
+        isGroup: boolean;
+        isChannel: boolean;
+        participants: number;
+      }> = await page.evaluate(() => {
+        const w = window as any;
+        const collect = (collection: any) => {
+          if (!collection) return [];
+          if (typeof collection.getModelsArray === "function") return collection.getModelsArray();
+          if (Array.isArray(collection.models)) return collection.models;
+          if (Array.isArray(collection)) return collection;
+          return [];
+        };
+        const chats = collect(w.Store?.Chat);
+        const newsletters = collect(w.Store?.Newsletter);
+        return [...chats, ...newsletters].map((item: any) => ({
+          id: item?.id?._serialized ?? item?.id ?? "",
+          name: item?.name ?? item?.formattedTitle ?? item?.title ?? "",
+          isGroup: Boolean(item?.isGroup || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
+          isChannel: Boolean(item?.isChannel || item?.isNewsletter || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@newsletter")),
+          participants: item?.participants?.length ?? item?.groupMetadata?.participants?.length ?? item?.subscribersCount ?? 0,
+        }));
+      });
+      for (const s of storeSources) {
+        if (!s.id || byId.has(s.id)) continue;
+        if (!s.isGroup && !s.isChannel) continue;
+        byId.set(s.id, {
+          id: s.id,
+          name: s.name || s.id,
+          participants: s.participants,
+          kind: s.isChannel ? "channel" : "group",
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: Store group/channel discovery failed");
   }
 
   return [...byId.values()].sort((a, b) => {
