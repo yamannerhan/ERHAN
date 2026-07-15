@@ -23,8 +23,10 @@ const useSsl =
 export const pool = new Pool({
   connectionString: databaseUrl,
   ssl: useSsl ? { rejectUnauthorized: false } : undefined,
-  max: 10,
-  connectionTimeoutMillis: 15_000,
+  max: Number(process.env["PG_POOL_MAX"] ?? 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+  maxLifetimeSeconds: 300,
 });
 
 pool.on("error", (err) => {

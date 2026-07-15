@@ -28,8 +28,30 @@ import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { LiteChatFab } from "./lite-chat-fab";
 import { countLiteUnread, findFirstLiteUnread } from "@/lib/lite-notifications";
 import { DisplayModeToggle } from "./display-mode-toggle";
+import { ChatFabIcon } from "./chat-fab-icon";
 
 const ChatBubble = lazy(() => import("./chat-bubble").then((m) => ({ default: m.ChatBubble })));
+
+function DeferredChatBubble() {
+  const [activated, setActivated] = useState(false);
+  const launcher = (
+    <button
+      type="button"
+      onClick={() => setActivated(true)}
+      className="og-chat-fab fixed right-4 z-50 flex items-center justify-center bg-transparent border-0 p-0"
+      aria-label="Topluluk sohbeti"
+    >
+      <ChatFabIcon unread={0} pulse={false} />
+    </button>
+  );
+
+  if (!activated) return launcher;
+  return (
+    <Suspense fallback={launcher}>
+      <ChatBubble initialOpen />
+    </Suspense>
+  );
+}
 
 type NotificationRow = {
   id: number;
@@ -644,11 +666,7 @@ export function Layout({
       </main>
 
       <MobileBottomNav />
-      {!isLite && (
-        <Suspense fallback={null}>
-          <ChatBubble />
-        </Suspense>
-      )}
+      {!isLite && <DeferredChatBubble />}
       {isLite && <LiteChatFab />}
       {!isLite && <PushPermissionBanner />}
     </div>

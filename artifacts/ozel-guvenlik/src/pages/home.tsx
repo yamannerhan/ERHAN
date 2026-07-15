@@ -147,12 +147,24 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
           {banner.mobileImageUrl && (
             <source media="(max-width: 767px)" srcSet={banner.mobileImageUrl} />
           )}
+          <source
+            type="image/avif"
+            srcSet="/banners/career-hero-512.avif 512w, /banners/career-hero-1024.avif 1024w"
+            sizes="100vw"
+          />
+          <source
+            type="image/webp"
+            srcSet="/banners/career-hero-512.webp 512w, /banners/career-hero-1024.webp 1024w"
+            sizes="100vw"
+          />
           <img
             src={imgSrc}
             alt={banner.altText || banner.title || "Özel Güvenlik duyurusu"}
             decoding="async"
             loading="eager"
             fetchPriority="high"
+            width={1024}
+            height={341}
             onError={handleImgError}
           />
         </picture>
@@ -311,6 +323,7 @@ export default function Home() {
     limit: 20,
     featured: true,
     sort: "newest",
+    includeTotal: false,
   } as Parameters<typeof useGetListings>[0]);
 
   useEffect(() => {
@@ -402,8 +415,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => { void refetch(); }, 30000);
-    return () => clearInterval(id);
+    const refreshVisibleListings = () => {
+      if (document.visibilityState === "visible") void refetch();
+    };
+    const id = window.setInterval(refreshVisibleListings, 120_000);
+    document.addEventListener("visibilitychange", refreshVisibleListings);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", refreshVisibleListings);
+    };
   }, [refetch]);
 
   /* Local filtering for pills that don't map to server-side city query */

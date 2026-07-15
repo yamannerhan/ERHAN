@@ -15,7 +15,7 @@ import {
   supportMessagesTable,
   supportTicketEventsTable,
 } from "@workspace/db";
-import { eq, desc, and, sql, ilike, inArray, or, isNull, ne } from "drizzle-orm";
+import { eq, desc, asc, and, sql, ilike, inArray, or, isNull, ne, getTableColumns } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin } from "../middlewares/auth";
 import { ensureCompanySchema, rememberEmployerBasics } from "../lib/company-profiles";
 import { matchKnownCompanySync, isPlaceholderListingLogo, matchKnownCompanyInBlob } from "../lib/known-companies";
@@ -25,7 +25,6 @@ import {
   logListingSourceHistory,
   logListingPriority,
   rankListingsRecommended,
-  publishOrderDate,
 } from "../lib/listing-rank";
 import { ensureListingSourceSchema, ensurePublisherVerifySchema } from "../lib/listing-source-schema";
 import { findAndQueueSimilarBots } from "../lib/listing-merge";
@@ -138,6 +137,24 @@ function parseHiddenListingCities(raw: string | null | undefined): string[] {
 function realListingFilter() {
   return or(isNull(listingsTable.sourceTag), ne(listingsTable.sourceTag, "demo"));
 }
+
+const {
+  description: _description,
+  requirements: _requirements,
+  rawText: _rawText,
+  verificationSnapshot: _verificationSnapshot,
+  latitude: _latitude,
+  longitude: _longitude,
+  locationAccuracy: _locationAccuracy,
+  locationSource: _locationSource,
+  ...listingListColumns
+} = getTableColumns(listingsTable);
+
+const listingListSelection = {
+  ...listingListColumns,
+  description: sql<string | null>`left(${listingsTable.description}, 700)`,
+  requirements: sql<string | null>`left(${listingsTable.requirements}, 400)`,
+};
 
 function normalizeCityText(value: string) {
   return value.toLocaleLowerCase("tr-TR")
@@ -528,7 +545,13 @@ async function loadCompanyOverlays(
 
   if (profileIds.length > 0) {
     const rows = await db
-      .select()
+      .select({
+        id: companyProfilesTable.id,
+        userId: companyProfilesTable.userId,
+        companyName: companyProfilesTable.companyName,
+        logoPath: companyProfilesTable.logoPath,
+        isVerified: companyProfilesTable.isVerified,
+      })
       .from(companyProfilesTable)
       .where(and(inArray(companyProfilesTable.id, profileIds), isNull(companyProfilesTable.deletedAt), eq(companyProfilesTable.isActive, true)));
     for (const p of rows) {
@@ -546,7 +569,13 @@ async function loadCompanyOverlays(
   const missingAuthors = authorIds.filter((id) => ![...profilesByUser.keys()].includes(id));
   if (missingAuthors.length > 0) {
     const rows = await db
-      .select()
+      .select({
+        id: companyProfilesTable.id,
+        userId: companyProfilesTable.userId,
+        companyName: companyProfilesTable.companyName,
+        logoPath: companyProfilesTable.logoPath,
+        isVerified: companyProfilesTable.isVerified,
+      })
       .from(companyProfilesTable)
       .where(and(inArray(companyProfilesTable.userId, missingAuthors), isNull(companyProfilesTable.deletedAt), eq(companyProfilesTable.isActive, true)));
     for (const p of rows) {
@@ -577,6 +606,7 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   const city = req.query["city"] as string | undefined;
   const search = req.query["search"] as string | undefined;
   const featured = req.query["featured"] === "true";
+  const includeTotal = req.query["includeTotal"] !== "false";
   const sortRaw = String(req.query["sort"] ?? "recommended").toLowerCase();
   const sort = sortRaw === "newest" || sortRaw === "oldest" || sortRaw === "recommended"
     ? sortRaw
@@ -613,7 +643,9 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const countResult = await db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(whereClause);
+  const countResult = includeTotal
+    ? await db.select({ count: sql<number>`count(*)::int` }).from(listingsTable).where(whereClause)
+    : [];
   const total = countResult[0]?.count ?? 0;
 
   let listings: (typeof listingsTable.$inferSelect)[];
@@ -622,22 +654,30 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
     // Skor + soft interleave için sayfa penceresinden daha geniş çek
     const fetchLimit = Math.min(500, Math.max(limit * 5, offset + limit + 80));
     const pool = await db
-      .select()
+      .select(listingListSelection)
       .from(listingsTable)
       .where(whereClause)
       .orderBy(desc(listingsTable.isFeatured), desc(listingsTable.createdAt))
-      .limit(fetchLimit);
+      .limit(fetchLimit) as unknown as (typeof listingsTable.$inferSelect)[];
     const ranked = rankListingsRecommended(pool, { featured });
     listings = ranked.slice(offset, offset + limit);
   } else if (sort === "oldest") {
-    const pool = await db.select().from(listingsTable).where(whereClause).limit(Math.min(800, offset + limit + 50));
-    pool.sort((a, b) => publishOrderDate(a).getTime() - publishOrderDate(b).getTime());
-    listings = pool.slice(offset, offset + limit);
+    listings = await db
+      .select(listingListSelection)
+      .from(listingsTable)
+      .where(whereClause)
+      .orderBy(asc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .limit(limit)
+      .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   } else {
     // newest — gerçek yayın tarihi, bonus yok
-    const pool = await db.select().from(listingsTable).where(whereClause).limit(Math.min(800, offset + limit + 50));
-    pool.sort((a, b) => publishOrderDate(b).getTime() - publishOrderDate(a).getTime());
-    listings = pool.slice(offset, offset + limit);
+    listings = await db
+      .select(listingListSelection)
+      .from(listingsTable)
+      .where(whereClause)
+      .orderBy(desc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .limit(limit)
+      .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   }
 
   const userId = req.user?.id;
@@ -646,9 +686,16 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   let favIds = new Set<number>();
 
   if (userId) {
+    const listingIds = listings.map((listing) => listing.id);
     const [likes, favs] = await Promise.all([
-      db.select({ listingId: listingLikesTable.listingId }).from(listingLikesTable).where(eq(listingLikesTable.userId, userId)),
-      db.select({ listingId: listingFavoritesTable.listingId }).from(listingFavoritesTable).where(eq(listingFavoritesTable.userId, userId)),
+      listingIds.length > 0
+        ? db.select({ listingId: listingLikesTable.listingId }).from(listingLikesTable)
+          .where(and(eq(listingLikesTable.userId, userId), inArray(listingLikesTable.listingId, listingIds)))
+        : Promise.resolve([]),
+      listingIds.length > 0
+        ? db.select({ listingId: listingFavoritesTable.listingId }).from(listingFavoritesTable)
+          .where(and(eq(listingFavoritesTable.userId, userId), inArray(listingFavoritesTable.listingId, listingIds)))
+        : Promise.resolve([]),
     ]);
     likedIds = new Set(likes.map(l => l.listingId));
     favIds = new Set(favs.map(f => f.listingId));
@@ -663,6 +710,8 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
 
   const companyMap = await loadCompanyOverlays(listings);
 
+  res.vary("Authorization");
+  res.set("Cache-Control", userId ? "private, no-store" : "private, max-age=15, stale-while-revalidate=30");
   res.json({
     listings: listings.map(l => formatListing(
       l,
