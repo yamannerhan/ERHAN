@@ -21,9 +21,14 @@ services:
       PORT: "8080"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_SKIP_DOWNLOAD: "true"
+      WWEBJS_AUTH_PATH: /app/.wwebjs_auth
+      WA_AUTO_CONNECT: "1"
     depends_on:
       - postgres
     shm_size: "256mb"
+    volumes:
+      - wa_auth:/app/.wwebjs_auth
 
 volumes:
   pgdata:
+  wa_auth:

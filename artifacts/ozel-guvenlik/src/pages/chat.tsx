@@ -13,6 +13,7 @@ import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
 import { SwipeableMessage } from "@/components/swipeable-message";
+import { RoleBadge } from "@/moderator/components/StatusBadge";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useStaffChatPerms } from "@/hooks/use-staff-chat-perms";
 import {
@@ -41,6 +42,7 @@ type PollData = {
   totalVotes: number; myVote: number | null; isClosed: boolean;
 };
 type ExtMsg = ChatMessage & {
+  [key: string]: unknown;
   displayName?: string | null; isFake?: boolean; isBot?: boolean;
   reactions?: Reaction[]; poll?: PollData | null;
   level?: number; xp?: number;
@@ -201,7 +203,7 @@ export default function Chat() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
+      const headers: HeadersInit = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
       const incoming = await fetchChatSyncPayload({ after, headers }) as ExtMsg[];
       if (incoming.length === 0) return;
       setMessages(prev => {

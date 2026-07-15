@@ -409,7 +409,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                   setPage(1);
                 }}
               >
-                {p.icon && <MapPin />}
+                {"icon" in p && p.icon && <MapPin />}
                 {p.label}
               </button>
             ))}

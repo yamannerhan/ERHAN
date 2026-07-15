@@ -36,6 +36,7 @@ type PollData = {
   totalVotes: number; myVote: number | null; isClosed: boolean;
 };
 type ExtMsg = ChatMessage & {
+  [key: string]: unknown;
   isBot?: boolean;
   isFake?: boolean;
   displayName?: string | null;
@@ -316,7 +317,7 @@ export function ChatBubble() {
     syncInFlightRef.current = true;
     try {
       const after = lastSeenMessageIdRef.current;
-      const headers = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
+      const headers: HeadersInit = getToken() ? { Authorization: `Bearer ${getToken()}` } : {};
       const incoming = await fetchChatSyncPayload({ after, headers }) as ExtMsg[];
       if (incoming.length === 0) return;
       setMessages(prev => {
@@ -854,7 +855,7 @@ export function ChatBubble() {
               <X className="w-5 h-5 text-blue-600" />
             </motion.div>
           ) : (
-            <motion.div key="chat" initial={gpuSafeMode ? false : { rotate: 90, opacity: 0 }} animate={gpuSafeMode ? false : { rotate: 0, opacity: 1 }} exit={gpuSafeMode ? false : { rotate: -90, opacity: 0 }}>
+            <motion.div key="chat" initial={gpuSafeMode ? false : { rotate: 90, opacity: 0 }} animate={gpuSafeMode ? undefined : { rotate: 0, opacity: 1 }} exit={gpuSafeMode ? undefined : { rotate: -90, opacity: 0 }}>
               <ChatFabIcon unread={unread} pulse={gpuSafeMode ? false : pulse} />
             </motion.div>
           )}
@@ -1158,7 +1159,7 @@ export function ChatBubble() {
                   </div>
                 )}
 
-                {user && pendingWelcome && canGreetUser(pendingWelcome.username, user.username) && feedMode !== "support" && (
+                {user && pendingWelcome && canGreetUser(pendingWelcome.username, user.username) && (
                   <div className="og-chat-welcome-bar">
                     <div className="og-chat-welcome-meta">
                       <span className="og-chat-welcome-dot" />
@@ -1184,7 +1185,7 @@ export function ChatBubble() {
                   </div>
                 )}
 
-                {typingUsers.length > 0 && feedMode !== "support" && (
+                {typingUsers.length > 0 && (
                   <div className="og-chat-typing" aria-live="polite">
                     <strong>
                       {typingUsers.map((u) => u.name).join(", ")}

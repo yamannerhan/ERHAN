@@ -44,6 +44,16 @@ function asList<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
+type NotificationRow = {
+  id: number;
+  type: string;
+  title?: string | null;
+  message: string;
+  createdAt: string;
+  isRead: boolean;
+  linkUrl?: string | null;
+};
+
 function toAppPath(raw: unknown, fallback = "/"): string {
   if (typeof raw !== "string" || !raw.trim()) return fallback;
   const t = raw.trim();
@@ -742,7 +752,7 @@ function AdminNotificationsInbox() {
       refetchInterval: 15000,
     },
   });
-  const notifications = asList(notificationsData);
+  const notifications = asList<NotificationRow>(notificationsData);
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   useEffect(() => {
@@ -3313,8 +3323,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
   const [discoveryDiagnostics, setDiscoveryDiagnostics] = useState<{
     ready: boolean; chatCount: number; groupCount: number; channelCount: number;
-    contactGroupCount: number | null;
-    storeChatCount: number | null; storeGroupMetadataCount: number | null;
+    state: string | null; wwebVersion: string | null;
     errors: string[]; steps: string[];
   } | null>(null);
   const [errorLog, setErrorLog] = useState<string>("");
@@ -3381,6 +3390,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           totals?: typeof totals;
         };
         setSavedSources(src.sources ?? []);
+        const persisted = new Set((src.sources ?? []).filter((source) => source.active).map((source) => source.url));
+        setGroups(prev => prev.map(group => ({ ...group, selected: persisted.has(group.id) || !!group.selected })));
         if (src.totals) setTotals(src.totals);
       } catch { /* ignore */ }
     } catch (error) {
@@ -4350,7 +4361,7 @@ function AdminTopBar({
       enabled: showNotifs && !!user,
     },
   });
-  const notifications = asList(notifData);
+  const notifications = asList<NotificationRow>(notifData);
 
   useGetOnlineCount({
     query: { queryKey: getGetOnlineCountQueryKey(), refetchInterval: 60000 },
@@ -4955,6 +4966,7 @@ export default function AdminDashboard() {
     chatLocked: boolean; fakeOnlineBonus: number; fakeOnlineMin: number; fakeOnlineMax: number;
     maintenanceMode: boolean; welcomeMessage: string | null; hasOpenaiKey: boolean;
     spamCooldown: number; chatAnnounceListings: boolean; hiddenListingCities: string[];
+    botGuvenlikEnabled?: boolean; botBilgiEnabled?: boolean; botFakeEnabled?: boolean;
   }>("/admin/settings");
 
   const { data: announcementsData, refetch: refetchAnnouncements } = useAdminApi<{
@@ -6054,7 +6066,20 @@ export default function AdminDashboard() {
         {(activeTab === "kaynaklar" || activeTab === "telegram") && <SourcesSection apiCall={apiCall} toast={toast} />}
 
         {activeTab === "konum-dogrulama" && (
-          <LocationReviewSection apiCall={apiCall} toast={toast} />
+          <LocationReviewSection
+            apiCall={async (path, opts) => {
+              const normalizedPath = path.startsWith("/api") ? path.slice(4) : path;
+              let body: unknown;
+              if (typeof opts?.body === "string") {
+                try { body = JSON.parse(opts.body); } catch { body = opts.body; }
+              }
+              return apiCall(normalizedPath, opts?.method ?? "GET", body);
+            }}
+            toast={(opts) => toast({
+              ...opts,
+              variant: opts.variant === "destructive" ? "destructive" : "default",
+            })}
+          />
         )}
 
         {activeTab === "ilanlar" && <PendingJobsSection apiCall={apiCall} toast={toast} />}

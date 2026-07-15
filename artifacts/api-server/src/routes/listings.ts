@@ -761,7 +761,20 @@ router.get("/listing-images/:filename", (req, res): void => {
 });
 
 router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
-  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme, autoDeleteOnExpiry, contactName } = req.body as Record<string, string | boolean | undefined>;
+  const { title, company, city, salary, workType, description, requirements, applyUrl, companyLogoUrl, cardTheme, autoDeleteOnExpiry, contactName } = req.body as {
+    title?: string;
+    company?: string;
+    city?: string;
+    salary?: string;
+    workType?: string;
+    description?: string;
+    requirements?: string;
+    applyUrl?: string;
+    companyLogoUrl?: string;
+    cardTheme?: string;
+    autoDeleteOnExpiry?: boolean;
+    contactName?: string;
+  };
 
   if (!title || !city) {
     res.status(400).json({ error: "Başlık ve şehir zorunludur" });

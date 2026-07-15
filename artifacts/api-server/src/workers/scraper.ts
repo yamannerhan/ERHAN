@@ -4,6 +4,7 @@ import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import type { BotUpdate, ChannelMessage } from "../services/telegram-client";
 import { fetchWhatsAppMessagesDetailed, isWhatsAppReady, hasWhatsAppLocalSession, ensureWhatsAppAutoConnect, isWhatsAppStarting } from "../services/whatsapp-client";
+import { selectedWhatsAppSources } from "../services/whatsapp-core";
 import { telegramSessionsTable } from "@workspace/db/schema";
 import {
   elemanCityCount,
@@ -1659,7 +1660,7 @@ async function runScraperCycleInner(force = false): Promise<void> {
     logger.info("scraper: Telegram tarama duraklatıldı (admin)");
   }
 
-  const whatsappSources = sources.filter(s => s.platform === "whatsapp");
+  const whatsappSources = selectedWhatsAppSources(sources);
   if (whatsappSources.length > 0) {
     await scanWhatsAppSources(whatsappSources, force);
   }

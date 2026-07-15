@@ -386,8 +386,8 @@ export function extractLocation(text: string): ParsedLocation {
   let best = candidates[0]!;
   // Metinde tek bir il açıkça yazıyorsa, başka ile ait çıplak ilçe/servis adının
   // daha yüksek taban puanla bu ili ezmesine izin verme.
-  if (mentioned.size === 1 && !mentioned.has(best.city)) {
-    const sameProvince = candidates.find((candidate) => mentioned.has(candidate.city));
+  if (mentioned.size === 1 && !mentioned.has(best.city!)) {
+    const sameProvince = candidates.find((candidate) => mentioned.has(candidate.city!));
     if (sameProvince) best = sameProvince;
   }
   return {

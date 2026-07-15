@@ -229,7 +229,7 @@ export default function ListingDetail() {
     if (!listing) return;
     setEditForm({
       title: listing.title, company: listing.company, city: listing.city,
-      workType: listing.workType, salary: listing.salary ?? "",
+      workType: listing.workType ?? "", salary: listing.salary ?? "",
       description: listing.description ?? "", requirements: listing.requirements ?? "",
       applyUrl: listing.applyUrl ?? "",
     });

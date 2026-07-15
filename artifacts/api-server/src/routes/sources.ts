@@ -323,11 +323,16 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     return;
   }
 
-  const existing = await db.select({ id: sourcesTable.id })
+  const existing = await db.select({ id: sourcesTable.id, active: sourcesTable.active })
     .from(sourcesTable)
     .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.url, groupId)))
     .limit(1);
   if (existing[0]) {
+    if (!existing[0].active) {
+      await db.update(sourcesTable)
+        .set({ active: true, status: "active", lastError: null })
+        .where(eq(sourcesTable.id, existing[0].id));
+    }
     res.json({ success: true, source: existing[0], message: "Bu grup zaten kayıtlı." });
     return;
   }

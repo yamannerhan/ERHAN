@@ -82,7 +82,10 @@ try {
   (window as Window & { __ogDeferredInstall?: Event | null }).__ogDeferredInstall = null;
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
-    (window as Window & { __ogDeferredInstall?: Event | null }).__ogDeferredInstall = e;
+    window.__ogDeferredInstall = e as Event & {
+      prompt: () => Promise<void>;
+      userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+    };
   });
 } catch { /* ignore */ }
 

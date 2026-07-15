@@ -4,6 +4,8 @@
   "license": "MIT",
   "scripts": {
     "build": "pnpm -r --if-present run build",
+    "test": "pnpm --filter @workspace/api-server run test",
+    "test:whatsapp": "pnpm --filter @workspace/api-server run test:whatsapp",
     "start": "node scripts/start.mjs",
     "typecheck": "echo 'Type check skipped'",
     "locations:sync": "pnpm --filter @workspace/api-server run locations:sync",

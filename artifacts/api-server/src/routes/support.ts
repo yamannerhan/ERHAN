@@ -15,7 +15,7 @@ import { emitRealtime, emitRealtimeToRoom, emitRealtimeToUser } from "../lib/rea
 
 const router = Router();
 
-const ACTIVE = [...SUPPORT_ACTIVE_STATUSES];
+const ACTIVE: readonly string[] = [...SUPPORT_ACTIVE_STATUSES];
 const ALL_STATUSES = [
   "waiting", "reviewing", "answered", "awaiting_user", "resolved", "closed", "cancelled",
 ];

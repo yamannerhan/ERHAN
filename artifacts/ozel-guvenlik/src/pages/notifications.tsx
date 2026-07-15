@@ -17,6 +17,16 @@ import { useDisplayMode } from "@/contexts/DisplayModeContext";
 
 function getToken() { return localStorage.getItem("auth_token") ?? ""; }
 
+type NotificationRow = {
+  id: number;
+  type: string;
+  title?: string | null;
+  message: string;
+  createdAt: string;
+  isRead: boolean;
+  linkUrl?: string | null;
+};
+
 export default function Notifications() {
   const { user, isLoading: isAuthLoading } = useAuth();
   const { isLite } = useDisplayMode();
@@ -31,7 +41,7 @@ export default function Notifications() {
     }
   });
 
-  const notifications = asArray(notificationsData);
+  const notifications = asArray<NotificationRow>(notificationsData);
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const invalidate = () => {

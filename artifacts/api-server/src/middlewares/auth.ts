@@ -21,6 +21,7 @@ declare global {
       user?: {
         id: number;
         username: string;
+        displayName?: string | null;
         email: string;
         role: string;
         avatarUrl: string | null;

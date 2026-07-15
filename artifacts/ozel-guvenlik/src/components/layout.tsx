@@ -31,6 +31,16 @@ import { DisplayModeToggle } from "./display-mode-toggle";
 
 const ChatBubble = lazy(() => import("./chat-bubble").then((m) => ({ default: m.ChatBubble })));
 
+type NotificationRow = {
+  id: number;
+  type: string;
+  title?: string | null;
+  message: string;
+  createdAt: string;
+  isRead: boolean;
+  linkUrl?: string | null;
+};
+
 /* ── Theme hook ───────────────────────────────────────────── */
 function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
@@ -210,7 +220,7 @@ export function Layout({
       refetchInterval: isLite && user ? 60000 : undefined,
     }
   });
-  const notifications = asArray(notifData);
+  const notifications = asArray<NotificationRow>(notifData);
   const liteUnreadCount = useMemo(() => countLiteUnread(notifications), [notifications]);
   const unreadCount = user ? (isLite ? liteUnreadCount : (unreadData?.count ?? 0)) : 0;
 
@@ -313,7 +323,7 @@ export function Layout({
     if (!user) { navigate("/giris"); return; }
     if (isLite) {
       const result = await refetchNotifs();
-      const list = asArray(result.data);
+      const list = asArray<NotificationRow>(result.data);
       const target = findFirstLiteUnread(list);
       if (target?.linkUrl) {
         if (target.id != null) await markNotificationRead(target.id);

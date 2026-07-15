@@ -8,6 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run test:whatsapp",
+    "test:whatsapp": "tsx --test src/services/whatsapp-core.test.ts",
     "locations:sync": "pnpm exec tsx --tsconfig ./tsconfig.json ./src/commands/locationsSync.ts",
     "jobs:reclassify-locations": "pnpm exec tsx --tsconfig ./tsconfig.json ./src/commands/jobsReclassifyLocations.ts",
     "test:location-classifier-v2": "pnpm exec tsx --tsconfig ./tsconfig.json ./scripts/test-location-classifier-v2.ts",
