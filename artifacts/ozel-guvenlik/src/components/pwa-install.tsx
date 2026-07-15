@@ -115,7 +115,7 @@ export function PwaInstall() {
           type="button"
           onClick={() => void install()}
           disabled={busy}
-          className="shrink-0 h-8 px-2 rounded-full bg-primary/15 border border-primary/25 text-primary hover:bg-primary/25 transition-colors flex items-center gap-1 text-[10px] font-extrabold whitespace-nowrap max-w-[76px] disabled:opacity-60"
+          className="og-pwa-install-btn shrink-0 min-h-11 px-3 rounded-full bg-primary/15 border border-primary/25 text-primary hover:bg-primary/25 transition-colors flex items-center justify-center gap-1 text-[10px] font-extrabold whitespace-nowrap max-w-[76px] disabled:opacity-60"
           aria-label="Uygulamayı yükle"
         >
           <Download className="w-3.5 h-3.5 shrink-0" />

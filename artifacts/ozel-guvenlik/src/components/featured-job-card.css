@@ -1,7 +1,7 @@
 /* Öne çıkan şerit — kart genişliğine göre otomatik sığdır */
 :root {
   --featured-gap: 10px;
-  --featured-gold: #f5c518;
+  --featured-gold: #0878e8;
 }
 
 .featured-rail-wrap {
@@ -41,19 +41,19 @@
 
 @container featured-wrap (min-width: 0) {
   .featured-rail__track > .og-job {
-    flex: 0 0 calc((100cqw - var(--featured-gap)) / 2);
-    width: calc((100cqw - var(--featured-gap)) / 2);
-    max-width: calc((100cqw - var(--featured-gap)) / 2);
+    flex: 0 0 calc((100cqw - 2 * var(--featured-gap)) / 3);
+    width: calc((100cqw - 2 * var(--featured-gap)) / 3);
+    max-width: calc((100cqw - 2 * var(--featured-gap)) / 3);
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }
 }
 
-/* Lite: 2 kart (3'lüde yazı sığmıyordu) */
+/* Lite ve mobil: 3 küçük kart yan yana */
 .featured-rail--lite .featured-rail__track > .og-job {
-  flex: 0 0 calc((100cqw - var(--featured-gap)) / 2);
-  width: calc((100cqw - var(--featured-gap)) / 2);
-  max-width: calc((100cqw - var(--featured-gap)) / 2);
+  flex: 0 0 calc((100cqw - 2 * var(--featured-gap)) / 3);
+  width: calc((100cqw - 2 * var(--featured-gap)) / 3);
+  max-width: calc((100cqw - 2 * var(--featured-gap)) / 3);
 }
 
 .featured-rail--lite {
@@ -66,7 +66,7 @@
   flex-shrink: 0;
   margin: 0;
   border-radius: 14px;
-  border-color: rgba(245, 197, 24, 0.38);
+  border-color: rgba(8, 120, 232, 0.24);
   min-width: 0;
   overflow: hidden;
   container-type: inline-size;
@@ -265,7 +265,7 @@
   width: 7px;
   height: 7px;
   background: var(--featured-gold);
-  box-shadow: 0 0 6px rgba(245, 197, 24, 0.5);
+  box-shadow: 0 0 6px rgba(8, 120, 232, 0.30);
 }
 
 .featured-section-head {
@@ -304,7 +304,7 @@
   }
 }
 
-/* ── Masaüstü: 3 kart görünür + sola kayar, içerik taşmaz ── */
+/* ── Masaüstü: 3 küçük kart yan yana ── */
 @media (min-width: 1024px) {
   .featured-rail-wrap--desktop {
     --featured-gap: 16px;
@@ -322,8 +322,8 @@
     max-height: none;
     height: auto;
     border-radius: 12px;
-    border-color: rgba(226, 169, 17, 0.48);
-    background: #111a2b;
+    border-color: rgba(8, 120, 232, 0.22);
+    background: #ffffff;
   }
 
   /* Compakt düzen: butonlar kart içinde kalsın */
@@ -378,7 +378,7 @@
   .featured-rail-wrap--desktop .og-job--compact .og-job__salary-amount {
     font-size: 14px;
     font-weight: 800;
-    color: #ffbe0b;
+    color: #0878e8;
     -webkit-line-clamp: 2;
     white-space: normal;
   }
@@ -427,9 +427,9 @@
 
 @media (min-width: 1024px) and (max-width: 1199px) {
   .featured-rail-wrap--desktop .featured-rail__track > .og-job {
-    flex: 0 0 calc((100cqw - var(--featured-gap)) / 2);
-    width: calc((100cqw - var(--featured-gap)) / 2);
-    max-width: calc((100cqw - var(--featured-gap)) / 2);
+    flex: 0 0 calc((100cqw - 2 * var(--featured-gap)) / 3);
+    width: calc((100cqw - 2 * var(--featured-gap)) / 3);
+    max-width: calc((100cqw - 2 * var(--featured-gap)) / 3);
   }
 }
 

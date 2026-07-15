@@ -1,0 +1,755 @@
+:root {
+  --mobile-header-height: 64px;
+}
+
+html {
+  scroll-padding-bottom: calc(var(--app-bottom-pad) + 20px);
+}
+
+html:not(.dark) .og-app {
+  background:
+    radial-gradient(circle at 50% -8%, rgba(37, 168, 255, 0.10), transparent 30rem),
+    #f5f9ff;
+  color: #10233f;
+}
+
+html:not(.dark) .og-header {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(25, 94, 165, 0.12);
+  box-shadow: 0 5px 22px rgba(25, 94, 165, 0.08);
+}
+
+.og-header-inner,
+.og-header-inner > *,
+.og-header-brand-link,
+.og-header-actions {
+  min-width: 0;
+}
+
+html:not(.dark) .og-header .og-text,
+html:not(.dark) .og-logo-tld,
+html:not(.dark) .og-header-greet,
+html:not(.dark) .og-header--listings .font-extrabold {
+  color: #10233f !important;
+}
+
+html:not(.dark) .og-header-slogan,
+html:not(.dark) .og-header--listings .text-slate-400 {
+  color: #647b96 !important;
+}
+
+html:not(.dark) .og-logo-shield {
+  background: #f4f9ff;
+  border-color: rgba(8, 120, 232, 0.20);
+  box-shadow: 0 5px 15px rgba(8, 120, 232, 0.10);
+}
+
+.og-icon-btn,
+.og-header-user {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.og-header .og-pwa-install-btn {
+  display: none !important;
+}
+
+html:not(.dark) .og-icon-btn,
+html:not(.dark) .og-header-user > div {
+  color: #17324f;
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.12);
+  box-shadow: 0 4px 12px rgba(25, 94, 165, 0.08);
+}
+
+html:not(.dark) .og-icon-btn:hover,
+html:not(.dark) .og-header-user:hover > div {
+  color: #0878e8;
+  background: #edf6ff;
+}
+
+html:not(.dark) .og-notif-panel,
+html:not(.dark) .og-sheet {
+  color: #10233f;
+  background: #ffffff;
+  border: 1px solid rgba(25, 94, 165, 0.14);
+  box-shadow: 0 18px 50px rgba(25, 94, 165, 0.18);
+}
+
+html:not(.dark) .og-notif-panel .border-white\/10,
+html:not(.dark) .og-notif-panel .border-white\/5 {
+  border-color: rgba(25, 94, 165, 0.10);
+}
+
+html:not(.dark) .og-main {
+  background: transparent;
+}
+
+html:not(.dark) .og-home-body .og-pill,
+html:not(.dark) .og-home-body .og-sort-btn {
+  color: #263b55;
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.13);
+  box-shadow: 0 4px 13px rgba(25, 94, 165, 0.06);
+}
+
+.og-home-filter-pills,
+.og-home-sort-btn,
+.og-home-mode-row {
+  display: none !important;
+}
+
+html:not(.dark) .og-home-body .og-pill:hover,
+html:not(.dark) .og-home-body .og-sort-btn:hover {
+  color: #0878e8;
+  border-color: rgba(8, 120, 232, 0.40);
+}
+
+html:not(.dark) .og-home-body .og-pill-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #0878e8, #25a8ff);
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(8, 120, 232, 0.22);
+}
+
+html:not(.dark) .og-support-box {
+  color: #10233f;
+  background: #ffffff;
+  border-color: rgba(8, 120, 232, 0.30);
+  box-shadow: 0 8px 24px rgba(25, 94, 165, 0.09);
+}
+
+html:not(.dark) .og-support-box svg,
+html:not(.dark) .og-support-box a,
+html:not(.dark) .og-support-box button {
+  color: #0878e8;
+}
+
+html:not(.dark) .og-support-icon {
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.35);
+  box-shadow: none;
+}
+
+html:not(.dark) .og-support-title {
+  color: #10233f;
+}
+
+html:not(.dark) .og-support-description {
+  color: #60738d;
+}
+
+html:not(.dark) .og-support-cta {
+  color: #0878e8;
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.35);
+  box-shadow: none;
+}
+
+html:not(.dark) .og-section-title,
+html:not(.dark) .featured-section-head__link {
+  color: #10233f;
+}
+
+html:not(.dark) .og-empty {
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.16);
+  color: #60738d;
+  box-shadow: 0 8px 24px rgba(25, 94, 165, 0.06);
+}
+
+html:not(.dark) .og-empty button {
+  color: #0878e8 !important;
+}
+
+html:not(.dark) input,
+html:not(.dark) textarea,
+html:not(.dark) select {
+  color: #10233f;
+  background-color: #ffffff;
+  border-color: rgba(25, 94, 165, 0.20);
+}
+
+html:not(.dark) input:focus,
+html:not(.dark) textarea:focus,
+html:not(.dark) select:focus {
+  border-color: #0878e8;
+  box-shadow: 0 0 0 3px rgba(8, 120, 232, 0.12);
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #0878e8;
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .og-header-inner {
+    gap: 4px !important;
+    padding-inline: 8px !important;
+  }
+
+  .og-header-brand-link {
+    gap: 6px !important;
+    flex: 1 1 auto;
+  }
+
+  .og-header-brand-link .og-logo-shield {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .og-header-actions {
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+
+  .og-header-actions .og-icon-btn,
+  .og-header-user {
+    width: 44px;
+    padding-inline: 8px !important;
+  }
+
+  .og-pwa-install-btn {
+    width: 44px;
+    min-width: 44px;
+    padding-inline: 0 !important;
+  }
+
+  .og-pwa-install-btn span {
+    display: none;
+  }
+
+  .og-header-slogan {
+    display: none;
+  }
+}
+
+@media (max-width: 350px) {
+  .og-header-brand-link .og-logo-tld {
+    display: none;
+  }
+
+  .og-header-brand-link .font-extrabold {
+    font-size: 12px;
+  }
+}
+
+@media (display-mode: standalone) {
+  .og-header {
+    padding-top: max(env(safe-area-inset-top, 0px), 4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Kullanıcı sayfaları: eski koyu/altın yüzeyleri ortak beyaz-mavi sisteme bağla. */
+html:not(.dark) :is(
+  .og-listings-page,
+  .og-create-listing-page,
+  .og-ld-page,
+  .og-parttime-page,
+  .og-ls-page,
+  .og-cv-page
+) {
+  color: #10233f;
+  background: transparent;
+}
+
+html:not(.dark) :is(
+  .og-lp-search,
+  .og-lp-stat,
+  .og-lp-empty,
+  .og-lp-support,
+  .og-cl-smart,
+  .og-cl-input-wrap,
+  .og-cl-preview,
+  .og-cl-notice,
+  .og-cl-dup,
+  .og-ld-card,
+  .og-ld-side-card,
+  .og-ld-company-box,
+  .og-ld-quick-item,
+  .og-ld-stat,
+  .og-pt-search,
+  .og-pt-hero-card,
+  .og-pt-stat,
+  .og-pt-profile,
+  .og-pt-form-panel,
+  .og-pt-support,
+  .og-ls-hero,
+  .og-ls-tabs,
+  .og-ls-chat,
+  .og-ls-ticket-box,
+  .og-ls-faq-item,
+  .og-ls-gate,
+  .og-cv-stepper,
+  .og-cv-builder,
+  .og-cv-ai,
+  .og-cv-step-card,
+  .og-cv-block,
+  .og-cv-aside,
+  .og-cv-tpl
+) {
+  color: #10233f !important;
+  background: #ffffff !important;
+  border-color: rgba(25, 94, 165, 0.14) !important;
+  box-shadow: 0 8px 24px rgba(25, 94, 165, 0.08) !important;
+}
+
+html:not(.dark) :is(
+  .og-lp-search__input,
+  .og-lp-sort,
+  .og-cl-smart__textarea,
+  .og-cl-textarea,
+  .og-cl-select,
+  .og-pt-search__input,
+  .og-ls-composer__input,
+  .og-ls-textarea,
+  .og-cv-textarea,
+  .og-cv-select
+) {
+  color: #10233f !important;
+  background: #f8fbff !important;
+  border-color: rgba(25, 94, 165, 0.18) !important;
+}
+
+html:not(.dark) :is(
+  .og-lp-pill,
+  .og-cl-pill,
+  .og-cl-perk,
+  .og-pt-pill,
+  .og-pt-profile__tag,
+  .og-ls-tab,
+  .og-ls-pill,
+  .og-cv-tag,
+  .og-cv-trait
+) {
+  color: #35506e !important;
+  background: #edf6ff !important;
+  border-color: rgba(8, 120, 232, 0.16) !important;
+}
+
+html:not(.dark) :is(
+  .og-lp-pill--active,
+  .og-cl-pill--active,
+  .og-cl-perk--on,
+  .og-pt-pill--active,
+  .og-ls-tab--active,
+  .og-ls-tab.is-active,
+  .og-cv-trait--on,
+  .og-cv-tpl--active,
+  .og-cl-smart__btn--primary,
+  .og-cl-submit,
+  .og-cl-preview__apply,
+  .og-ld-apply-btn,
+  .og-pt-hero-btn--primary,
+  .og-pt-profile__btn--primary,
+  .og-ls-composer__send,
+  .og-ls-submit,
+  .og-ls-gate__btn,
+  .og-cv-btn--primary
+) {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0878e8, #0568ce) !important;
+  border-color: transparent !important;
+  box-shadow: 0 6px 16px rgba(8, 120, 232, 0.22) !important;
+}
+
+html:not(.dark) :is(
+  .og-lp-section-title,
+  .og-cl-smart__title,
+  .og-cl-preview__title,
+  .og-ld-title,
+  .og-ld-section-title,
+  .og-ld-side-title,
+  .og-pt-hero-title,
+  .og-pt-section-title,
+  .og-pt-profile__title,
+  .og-ls-hero__title,
+  .og-ls-chat__head-title,
+  .og-ls-ticket-box__title,
+  .og-ls-faq__title,
+  .og-cv-ai__title,
+  .og-cv-step-card__title,
+  .og-cv-section-title,
+  .og-cv-aside__title
+) {
+  color: #10233f !important;
+}
+
+html:not(.dark) :is(
+  .text-amber-300,
+  .text-amber-400,
+  .text-amber-500,
+  .text-yellow-300,
+  .text-yellow-400,
+  .text-yellow-500
+) {
+  color: #0878e8 !important;
+}
+
+/* Header marka yazısı: .online artık siyah, altın gradyan yok. */
+html:not(.dark) .og-logo-tld {
+  color: #111827 !important;
+  background: none !important;
+  -webkit-text-fill-color: #111827 !important;
+  opacity: 1;
+}
+
+html:not(.dark) .og-gold-gradient {
+  color: #0759aa !important;
+  background: none !important;
+  -webkit-text-fill-color: #0759aa !important;
+}
+
+/* Hamburger menü */
+html:not(.dark) .og-hd-drawer {
+  --drawer-bg: #f5f9ff;
+  --drawer-surface: #ffffff;
+  --drawer-gold: #0878e8;
+  --drawer-muted: #60738d;
+  color: #10233f;
+  background: #f5f9ff !important;
+  border-color: rgba(8, 120, 232, 0.18) !important;
+  box-shadow: 18px 0 48px rgba(25, 94, 165, 0.18) !important;
+}
+
+html:not(.dark) .og-hd-profile,
+html:not(.dark) .og-hd-item,
+html:not(.dark) .og-hd-team-row {
+  color: #17324f;
+  background: #ffffff !important;
+  border-color: rgba(25, 94, 165, 0.14) !important;
+  box-shadow: 0 5px 16px rgba(25, 94, 165, 0.06);
+}
+
+html:not(.dark) .og-hd-item:hover,
+html:not(.dark) .og-hd-item:focus-visible,
+html:not(.dark) .og-hd-team-row:hover {
+  color: #0878e8;
+  background: #edf6ff !important;
+  border-color: rgba(8, 120, 232, 0.30) !important;
+}
+
+html:not(.dark) :is(.og-hd-close, .og-hd-avatar-badge, .og-hd-team-avatar-fallback) {
+  color: #0878e8;
+  background: #ffffff !important;
+  border-color: rgba(8, 120, 232, 0.28) !important;
+}
+
+html:not(.dark) .og-hd-avatar-fallback {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0878e8, #25a8ff) !important;
+  border-color: rgba(8, 120, 232, 0.40) !important;
+  box-shadow: 0 5px 15px rgba(8, 120, 232, 0.20) !important;
+}
+
+html:not(.dark) :is(.og-hd-name, .og-hd-footer-text) {
+  color: #10233f !important;
+}
+
+html:not(.dark) :is(.og-hd-profile-link, .og-hd-ico, .og-hd-team-title, .og-hd-team-more) {
+  color: #0878e8 !important;
+}
+
+html:not(.dark) .og-hd-item-admin {
+  color: #0878e8 !important;
+  background: #edf6ff !important;
+  border-color: rgba(8, 120, 232, 0.35) !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .og-hd-team-line {
+  background: linear-gradient(90deg, rgba(8, 120, 232, 0.45), transparent);
+}
+
+html:not(.dark) .og-hd-team-badge {
+  background: #edf6ff !important;
+}
+
+/* Yakınımdaki ilanlar ve konum filtresi */
+html:not(.dark) :is(.og-nearby-page, .og-nearby-sheet) {
+  color: #10233f;
+}
+
+html:not(.dark) .og-nearby-sheet {
+  background: #ffffff !important;
+  border-color: rgba(8, 120, 232, 0.22) !important;
+  box-shadow: 0 -10px 36px rgba(25, 94, 165, 0.16) !important;
+}
+
+html:not(.dark) :is(
+  .og-nearby-sheet__title,
+  .og-nearby-page__title,
+  .og-nearby-empty h3
+) {
+  color: #10233f !important;
+}
+
+html:not(.dark) :is(
+  .og-nearby-sheet__desc,
+  .og-nearby-label,
+  .og-nearby-privacy,
+  .og-nearby-page__meta,
+  .og-nearby-page__loc,
+  .og-nearby-empty
+) {
+  color: #60738d !important;
+}
+
+html:not(.dark) :is(
+  .og-nearby-radius,
+  .og-nearby-chip,
+  .og-nearby-sort,
+  .og-nearby-secondary,
+  .og-nearby-manual select
+) {
+  color: #35506e !important;
+  background: #f8fbff !important;
+  border-color: rgba(25, 94, 165, 0.18) !important;
+}
+
+html:not(.dark) :is(
+  .og-nearby-radius.is-on,
+  .og-nearby-chip.is-on,
+  .og-nearby-sort.is-on,
+  .og-nearby-primary
+) {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0878e8, #0568ce) !important;
+  border-color: transparent !important;
+  box-shadow: 0 6px 16px rgba(8, 120, 232, 0.22) !important;
+}
+
+html:not(.dark) .og-nearby-sheet__handle {
+  background: rgba(8, 120, 232, 0.24);
+}
+
+/* Sohbet balonu, sohbet penceresi ve tam sayfa sohbet */
+html:not(.dark) .og-chat-win {
+  color: #10233f;
+  background: #ffffff !important;
+  border-color: rgba(8, 120, 232, 0.22) !important;
+  box-shadow: 0 24px 60px rgba(25, 94, 165, 0.22) !important;
+}
+
+html:not(.dark) :is(.og-chat-hdr, .og-chat-tabs, .og-chat-input-wrap, .og-chat-msgs) {
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.10) !important;
+}
+
+html:not(.dark) .og-chat-logo {
+  color: #ffffff;
+  background: linear-gradient(135deg, #0878e8, #25a8ff) !important;
+  box-shadow: 0 5px 14px rgba(8, 120, 232, 0.22);
+}
+
+html:not(.dark) .og-chat-title,
+html:not(.dark) .og-chat-empty-title {
+  color: #10233f !important;
+}
+
+html:not(.dark) .og-chat-online {
+  color: #111827 !important;
+}
+
+html:not(.dark) .og-chat-icon-btn,
+html:not(.dark) .og-chat-tab,
+html:not(.dark) .og-chat-day,
+html:not(.dark) .og-chat-input-shell {
+  color: #35506e !important;
+  background: #edf6ff !important;
+  border-color: rgba(8, 120, 232, 0.16) !important;
+}
+
+html:not(.dark) .og-chat-icon-btn svg {
+  color: #35506e !important;
+}
+
+html:not(.dark) .og-chat-tab.is-active,
+html:not(.dark) .og-chat-send,
+html:not(.dark) .og-chat-login-cta {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0878e8, #0568ce) !important;
+  border-color: transparent !important;
+  box-shadow: 0 5px 15px rgba(8, 120, 232, 0.22) !important;
+}
+
+html:not(.dark) :is(.og-chat-input, .og-chat-textarea) {
+  color: #10233f !important;
+  background: transparent !important;
+}
+
+html:not(.dark) .og-chat-input::placeholder {
+  color: #8192a8 !important;
+}
+
+html:not(.dark) .og-chat-empty-sub,
+html:not(.dark) .og-chat-typing {
+  color: #60738d !important;
+}
+
+html:not(.dark) .og-chat-typing strong {
+  color: #0878e8 !important;
+}
+
+html:not(.dark) .og-chat-typing-dots span {
+  background: #25a8ff !important;
+}
+
+html:not(.dark) .og-chat-empty-art {
+  filter: drop-shadow(0 0 10px rgba(8, 120, 232, 0.18));
+}
+
+html:not(.dark) .og-chat-empty-art :is(path, circle) {
+  stroke: #0878e8 !important;
+}
+
+html:not(.dark) .og-chat-empty-art circle {
+  fill: #0878e8 !important;
+}
+
+html:not(.dark) .cmc-bubble {
+  color: #10233f !important;
+  background: #f8fbff !important;
+  border-color: rgba(25, 94, 165, 0.16) !important;
+  box-shadow: 0 4px 14px rgba(25, 94, 165, 0.07) !important;
+}
+
+html:not(.dark) .cmc--own .cmc-bubble {
+  background: #e6f3ff !important;
+}
+
+html:not(.dark) :is(.cmc-name, .cmc-text, .cmc-time, .cmc-reply__text) {
+  color: #17324f !important;
+  text-shadow: none !important;
+}
+
+html:not(.dark) :is(.cmc--admin, .cmc--vip, .cmc--moderator) {
+  --cmc-accent: #0878e8;
+  --cmc-name: #0878e8;
+}
+
+html:not(.dark) .og-chat-page {
+  color: #10233f;
+  background: #f5f9ff !important;
+}
+
+html:not(.dark) .og-chat-page :is(.bg-black\/40, .glass-card) {
+  color: #10233f !important;
+  background: #ffffff !important;
+  border-color: rgba(25, 94, 165, 0.14) !important;
+}
+
+html:not(.dark) .og-chat-page :is(.text-white\/30, .text-white\/40, .text-white\/50, .text-white\/60, .text-white\/70, .text-white\/80) {
+  color: #60738d !important;
+}
+
+html:not(.dark) .og-chat-page :is(.bg-white\/5, .bg-white\/10) {
+  background: #edf6ff !important;
+}
+
+/* CV oluştur ekranındaki kalan koyu ve sarı alanlar */
+html:not(.dark) .og-cv-page {
+  --cv-gold: #0878e8;
+  --cv-border: rgba(8, 120, 232, 0.20);
+  --cv-card: #ffffff;
+  --cv-field: #f8fbff;
+}
+
+html:not(.dark) :is(
+  .og-cv-ai,
+  .og-cv-step-card,
+  .og-cv-block,
+  .og-cv-aside,
+  .og-cv-tpl,
+  .og-cv-fullscreen__bar
+) {
+  color: #10233f !important;
+  background: #ffffff !important;
+  border-color: rgba(25, 94, 165, 0.14) !important;
+  box-shadow: 0 7px 22px rgba(25, 94, 165, 0.07) !important;
+}
+
+html:not(.dark) :is(
+  .og-cv-ai__title,
+  .og-cv-step-card__title,
+  .og-cv-section-title,
+  .og-cv-aside__title,
+  .og-cv-tpl__name,
+  .og-cv-fullscreen__title
+) {
+  color: #10233f !important;
+}
+
+html:not(.dark) :is(
+  .og-cv-ai__desc,
+  .og-cv-label,
+  .og-cv-photo__hint,
+  .og-cv-check,
+  .og-cv-counter
+) {
+  color: #60738d !important;
+}
+
+html:not(.dark) :is(
+  .og-cv-input,
+  .og-cv-select,
+  .og-cv-textarea,
+  .og-cv-photo__box,
+  .og-cv-tag,
+  .og-cv-trait,
+  .og-cv-step__dot
+) {
+  color: #10233f !important;
+  background: #f8fbff !important;
+  border-color: rgba(25, 94, 165, 0.18) !important;
+}
+
+html:not(.dark) :is(
+  .og-cv-ai__btn,
+  .og-cv-photo__btn,
+  .og-cv-profile-btn,
+  .og-cv-add-btn,
+  .og-cv-btn--ghost,
+  .og-cv-trait--on,
+  .og-cv-tpl--active,
+  .og-cv-step--active .og-cv-step__dot
+) {
+  color: #0878e8 !important;
+  background: #edf6ff !important;
+  border-color: rgba(8, 120, 232, 0.30) !important;
+  box-shadow: none !important;
+}
+
+html:not(.dark) .og-cv-ai__ico {
+  color: #0878e8 !important;
+  background: #edf6ff !important;
+}
+
+html:not(.dark) :is(.og-cv-btn--primary, .og-cv-tpl__check) {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #0878e8, #0568ce) !important;
+  box-shadow: 0 5px 15px rgba(8, 120, 232, 0.22) !important;
+}

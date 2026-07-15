@@ -115,21 +115,21 @@ function renderMessageContent(content: string) {
 function ChatFabIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
   return (
     <div className="relative w-[58px] h-[58px] flex items-center justify-center">
-      {/* Dış altın halka + cam gövde */}
+      {/* Beyaz-mavi sohbet düğmesi */}
       <div
         className="absolute inset-0 rounded-[22px]"
         style={{
-          background: "linear-gradient(145deg, rgba(255,200,60,0.95) 0%, rgba(180,120,20,0.85) 40%, rgba(40,180,255,0.55) 100%)",
+          background: "linear-gradient(145deg, #65c7ff 0%, #0878e8 55%, #0568ce 100%)",
           padding: "2.5px",
           boxShadow: pulse
-            ? "0 0 28px rgba(255,193,7,0.75), 0 0 48px rgba(56,189,248,0.35)"
-            : "0 8px 28px rgba(0,0,0,0.55), 0 0 18px rgba(255,193,7,0.45), 0 0 10px rgba(56,189,248,0.25)",
+            ? "0 0 28px rgba(8,120,232,0.50), 0 0 42px rgba(37,168,255,0.25)"
+            : "0 8px 24px rgba(25,94,165,0.24), 0 0 14px rgba(8,120,232,0.18)",
         }}
       >
         <div
           className="w-full h-full rounded-[19px] relative overflow-hidden"
           style={{
-            background: "radial-gradient(circle at 30% 25%, #3a455c 0%, #151a24 55%, #0a0d14 100%)",
+            background: "radial-gradient(circle at 30% 25%, #ffffff 0%, #edf6ff 62%, #dceeff 100%)",
           }}
         >
           {/* Parlama */}
@@ -138,21 +138,21 @@ function ChatFabIcon({ unread, pulse }: { unread: number; pulse: boolean }) {
           <svg viewBox="0 0 48 48" className="absolute inset-0 m-auto w-7 h-7" fill="none">
             <path
               d="M10 14c0-3.3 2.7-6 6-6h16c3.3 0 6 2.7 6 6v10c0 3.3-2.7 6-6 6H22l-7 6v-6h-1c-3.3 0-6-2.7-6-6V14z"
-              stroke="#F5C518"
+              stroke="#0878E8"
               strokeWidth="2.4"
               strokeLinejoin="round"
-              style={{ filter: "drop-shadow(0 0 4px rgba(245,197,24,0.85))" }}
+              style={{ filter: "drop-shadow(0 0 4px rgba(8,120,232,0.40))" }}
             />
-            <circle cx="20" cy="19" r="1.7" fill="#F5C518" />
-            <circle cx="24" cy="19" r="1.7" fill="#F5C518" />
-            <circle cx="28" cy="19" r="1.7" fill="#F5C518" />
+            <circle cx="20" cy="19" r="1.7" fill="#0878E8" />
+            <circle cx="24" cy="19" r="1.7" fill="#0878E8" />
+            <circle cx="28" cy="19" r="1.7" fill="#0878E8" />
           </svg>
         </div>
       </div>
 
       {/* Yeşil online */}
       <span
-        className="absolute bottom-1 right-1 w-3 h-3 rounded-full bg-emerald-400 border-[2.5px] border-[#0a0d14] z-10"
+        className="absolute bottom-1 right-1 w-3 h-3 rounded-full bg-emerald-400 border-[2.5px] border-white z-10"
         style={{ boxShadow: "0 0 8px rgba(52,211,153,1)" }}
       />
 
@@ -849,9 +849,9 @@ export function ChatBubble() {
               animate={{ rotate: 0, opacity: 1 }}
               exit={{ rotate: 90, opacity: 0 }}
               className="w-14 h-14 rounded-2xl flex items-center justify-center"
-              style={{ background: "linear-gradient(135deg,#1E293B,#334155)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}
+              style={{ background: "linear-gradient(135deg,#ffffff,#edf6ff)", boxShadow: "0 8px 24px rgba(25,94,165,0.22)", border: "1px solid rgba(8,120,232,0.35)" }}
             >
-              <X className="w-5 h-5 text-white" />
+              <X className="w-5 h-5 text-blue-600" />
             </motion.div>
           ) : (
             <motion.div key="chat" initial={gpuSafeMode ? false : { rotate: 90, opacity: 0 }} animate={gpuSafeMode ? false : { rotate: 0, opacity: 1 }} exit={gpuSafeMode ? false : { rotate: -90, opacity: 0 }}>

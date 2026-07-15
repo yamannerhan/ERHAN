@@ -17,20 +17,19 @@ import { buildHomeTitle, buildHomeDescription, SEO_BASE_URL, SEO_OG_IMAGE, bread
 import { toSlug } from "@/lib/seo-cities";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { useQueryClient } from "@tanstack/react-query";
-import { JobListingCard } from "@/components/job-listing-card";
-import { FeaturedJobCarousel, rotateFeaturedListings, nextFeaturedRotation } from "@/components/featured-job-card";
+import type { JobCardListing } from "@/components/job-listing-card";
+import { FeaturedJobCarousel } from "@/components/featured-job-card";
 import { LiveSupportBar } from "@/components/live-support-bar";
 import { HomeQuickCards } from "@/components/home-quick-cards";
-import { HomeNewsTicker } from "@/components/home-news-ticker";
-import { getHomeTickerLines } from "@/lib/home-ticker";
+import { HomeNewsCards } from "@/components/home-news-cards";
 import { DisplayModeToggle } from "@/components/display-mode-toggle";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
-import { DesktopListingsTable } from "@/components/desktop-listings-table";
 import { NearbySearchModal } from "@/components/nearby/nearby-search-modal";
 import {
   matchesIstanbulSide,
   type IstanbulSide,
 } from "@/lib/istanbul-side";
+import { getHomeBannerSeeds } from "@/lib/banner-assets";
 import "@/styles/desktop-home.css";
 
 const BASE_URL = "https://ozelguvenlik.online";
@@ -76,16 +75,18 @@ function saveHomeScroll() {
 interface Banner {
   id: number;
   title: string | null;
+  subtitle?: string | null;
+  ctaLabel?: string | null;
+  altText?: string | null;
   imageUrl: string;
+  mobileImageUrl?: string | null;
   linkUrl: string | null;
 }
 
 const bannerFallbacks = [
-  "linear-gradient(135deg,#0f172a 0%,#1d4ed8 45%,#06b6d4 100%)",
-  "linear-gradient(135deg,#111827 0%,#7c2d12 45%,#f59e0b 100%)",
-  "linear-gradient(135deg,#020617 0%,#166534 45%,#22c55e 100%)",
-  "linear-gradient(135deg,#18181b 0%,#6d28d9 45%,#ec4899 100%)",
-  "linear-gradient(135deg,#0c0a09 0%,#be123c 45%,#f97316 100%)",
+  "linear-gradient(135deg,#0759aa 0%,#0878e8 55%,#25a8ff 100%)",
+  "linear-gradient(135deg,#0b467d 0%,#0878e8 55%,#65c7ff 100%)",
+  "linear-gradient(135deg,#102f58 0%,#0568ce 55%,#25a8ff 100%)",
 ];
 
 function BannerCarousel({ banners }: { banners: Banner[] }) {
@@ -109,11 +110,12 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
   // iOS/Safari: lazy + absolute slide = yüklenmeme; bannerı önceden çek
   useEffect(() => {
     for (const b of banners) {
-      const url = b.imageUrl;
-      if (!url) continue;
-      const img = new Image();
-      img.decoding = "async";
-      img.src = url;
+      for (const url of [b.imageUrl, b.mobileImageUrl]) {
+        if (!url) continue;
+        const img = new Image();
+        img.decoding = "async";
+        img.src = url;
+      }
     }
   }, [banners]);
 
@@ -133,63 +135,57 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
     setFailedImages((prev) => new Set(prev).add(banner.id));
   };
 
-  const slideContent = (
-    <div className="og-banner-carousel__media pointer-events-none select-none">
+  const media = (
+    <div className="og-banner-carousel__media select-none">
       {imageFailed ? (
         <div
           className="absolute inset-0"
           style={{ background: bannerFallbacks[slideIndex % bannerFallbacks.length] }}
         />
       ) : (
-        <img
-          src={imgSrc}
-          alt={banner.title ?? "Banner"}
-          decoding="async"
-          loading="eager"
-          fetchPriority="high"
-          onError={handleImgError}
-        />
+        <picture>
+          {banner.mobileImageUrl && (
+            <source media="(max-width: 767px)" srcSet={banner.mobileImageUrl} />
+          )}
+          <img
+            src={imgSrc}
+            alt={banner.altText || banner.title || "Özel Güvenlik duyurusu"}
+            decoding="async"
+            loading="eager"
+            fetchPriority="high"
+            onError={handleImgError}
+          />
+        </picture>
       )}
-      {banner.title && (
+      {(banner.title || banner.subtitle || banner.ctaLabel) && (
         <>
-          <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/20 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 px-4 py-3">
-            <p className="text-white text-sm font-extrabold leading-snug drop-shadow md:text-base">{banner.title}</p>
+          {(banner.title || banner.subtitle) && <div className="og-banner-carousel__shade" aria-hidden />}
+          <div className={`og-banner-carousel__copy${!banner.title && !banner.subtitle ? " og-banner-carousel__copy--cta-only" : ""}`}>
+            {banner.title && <h1>{banner.title}</h1>}
+            {banner.subtitle && <p>{banner.subtitle}</p>}
+            {banner.ctaLabel && banner.linkUrl && <span>{banner.ctaLabel}</span>}
           </div>
         </>
       )}
     </div>
   );
+  const slideContent = banner.linkUrl ? (
+    <a className="og-banner-carousel__link" href={banner.linkUrl} aria-label={banner.ctaLabel || banner.title || "Banner bağlantısını aç"}>
+      {media}
+    </a>
+  ) : media;
 
   // Mobil / Lite: AnimatePresence remount iOS'ta img'yi düşürebiliyor — sabit slide kullan
   if (isLite || reduceMotion) {
     return (
-      <div className="og-banner-carousel">
+      <div className={`og-banner-carousel${banner.mobileImageUrl ? " og-banner-carousel--responsive" : " og-banner-carousel--legacy"}`}>
         <div className="og-banner-carousel__slide">{slideContent}</div>
-        {!isLite && banners.length > 1 && (
-          <>
-            <div className="og-banner-carousel__dots absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-              {banners.map((_, i) => (
-                <button key={i} type="button" onClick={() => setCurrent(i)}
-                  className={`h-1.5 rounded-full transition-all ${i === current ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
-              ))}
-            </div>
-            <button type="button" onClick={() => setCurrent(c => (c - 1 + banners.length) % banners.length)}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
-              ‹
-            </button>
-            <button type="button" onClick={next}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
-              ›
-            </button>
-          </>
-        )}
       </div>
     );
   }
 
   return (
-    <div className="og-banner-carousel">
+    <div className={`og-banner-carousel${banner.mobileImageUrl ? " og-banner-carousel--responsive" : " og-banner-carousel--legacy"}`}>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={current}
@@ -203,24 +199,6 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
         </motion.div>
       </AnimatePresence>
 
-      {banners.length > 1 && (
-        <>
-          <div className="og-banner-carousel__dots absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-            {banners.map((_, i) => (
-              <button key={i} type="button" onClick={() => setCurrent(i)}
-                className={`h-1.5 rounded-full transition-all ${i === current ? "w-5 bg-white" : "w-1.5 bg-white/40"}`} />
-            ))}
-          </div>
-          <button type="button" onClick={() => setCurrent(c => (c - 1 + banners.length) % banners.length)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
-            ‹
-          </button>
-          <button type="button" onClick={next}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center z-10 text-base leading-none">
-            ›
-          </button>
-        </>
-      )}
     </div>
   );
 }
@@ -288,15 +266,10 @@ export default function Home() {
   });
 
   const { user } = useAuth();
-  const { isLite } = useDisplayMode();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: announcementsData } = useGetAnnouncements();
   const announcements = Array.isArray(announcementsData) ? announcementsData : [];
-  const tickerLines = useMemo(() => getHomeTickerLines(announcements), [announcements]);
-  const [featuredRot] = useState(() => nextFeaturedRotation());
-  const [liteTickerLines, setLiteTickerLines] = useState<string[]>([]);
-
   const savedHome = getSavedHomeState();
   const [page, setPage] = useState(savedHome.page);
   const pageSize = 10;
@@ -308,34 +281,12 @@ export default function Home() {
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
-  const gpuSafeMode = useGpuSafeMode();
-  const reduceMotion = isLite || gpuSafeMode;
-
   useEffect(() => {
     fetch("/api/listings/cities")
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setCityFilters(data); })
       .catch(() => setCityFilters([]));
   }, []);
-
-  useEffect(() => {
-    if (!isLite) return;
-    fetch("/api/announcements/lite-home")
-      .then(r => r.json())
-      .then((data: { content?: string }[]) => {
-        const lines = Array.isArray(data)
-          ? data.map(a => a.content?.trim()).filter((c): c is string => Boolean(c))
-          : [];
-        setLiteTickerLines(lines);
-      })
-      .catch(() => setLiteTickerLines([]));
-  }, [isLite]);
-
-  const liteTickerDisplay = useMemo(() => {
-    if (liteTickerLines.length > 0) return liteTickerLines;
-    const home = getHomeTickerLines(announcements);
-    return home.length > 0 ? [home[0]!] : ["Özel güvenlik iş ilanları — ozelguvenlik.online"];
-  }, [liteTickerLines, announcements]);
 
   const cityFilter = useMemo(() => {
     if (activePill === "other" && otherCity) return otherCity;
@@ -356,7 +307,7 @@ export default function Home() {
     page: 1,
     limit: 20,
     featured: true,
-    sort: sortMode,
+    sort: "newest",
   } as Parameters<typeof useGetListings>[0]);
 
   useEffect(() => {
@@ -394,7 +345,11 @@ export default function Home() {
     });
   }, [page, isLoading, isFetching]);
 
-  const [banners, setBanners] = useState<Banner[]>([]);
+  const [banners, setBanners] = useState<Banner[]>(() => {
+    const seeds = getHomeBannerSeeds();
+    const primary = seeds.find((banner) => banner.ctaLabel && banner.linkUrl) ?? seeds[0];
+    return primary ? [primary] : [];
+  });
 
   /* Favorites */
   const { data: favData } = useGetMyFavorites({
@@ -423,9 +378,24 @@ export default function Home() {
 
   useEffect(() => {
     fetch("/api/banners")
-      .then(r => r.json())
-      .then(data => setBanners(Array.isArray(data) ? data : []))
-      .catch(() => setBanners([]));
+      .then(r => {
+        if (!r.ok) throw new Error("Bannerlar yüklenemedi");
+        return r.json();
+      })
+      .then(data => {
+        const available: Banner[] = Array.isArray(data) && data.length > 0 ? data : [...getHomeBannerSeeds()];
+        const primary = available.find((banner) => banner.ctaLabel && banner.linkUrl) ?? available[0];
+        setBanners(primary ? [{
+          ...primary,
+          imageUrl: "/banners/career-hero.png",
+          mobileImageUrl: null,
+        }] : []);
+      })
+      .catch(() => {
+        const primary = getHomeBannerSeeds().find((banner) => banner.ctaLabel && banner.linkUrl)
+          ?? getHomeBannerSeeds()[0];
+        setBanners(primary ? [primary] : []);
+      });
   }, []);
 
   useEffect(() => {
@@ -492,14 +462,20 @@ export default function Home() {
     });
     return arr;
   }, [filtered, sortMode]);
+  const totalCount = apiTotal;
+  const displayListings: JobCardListing[] = sorted;
 
   const featuredList = useMemo(() => featuredData?.listings ?? [], [featuredData]);
-  const displayFeaturedList = useMemo(
-    () => (isLite ? rotateFeaturedListings(featuredList, featuredRot) : featuredList),
-    [featuredList, featuredRot, isLite],
-  );
-  const totalCount = apiTotal;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const homeFeaturedListings = useMemo(() => {
+    const source = featuredList.length > 0 ? featuredList : displayListings;
+    return [...source]
+      .sort((a, b) => {
+        const aTs = new Date((a as { sourcePublishedAt?: string }).sourcePublishedAt || a.createdAt).getTime();
+        const bTs = new Date((b as { sourcePublishedAt?: string }).sourcePublishedAt || b.createdAt).getTime();
+        return bTs - aTs;
+      })
+      .slice(0, 8);
+  }, [featuredList, displayListings]);
 
   /* Stats */
   const dayAgo = Date.now() - 24 * 3600 * 1000;
@@ -513,50 +489,16 @@ export default function Home() {
     setNearbyOpen(true);
   }, []);
 
-  const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";
-  const canQuickDeleteListing = user?.role === "admin";
-
-  const quickChangeCity = async (listingId: number, currentCity: string) => {
-    const nextCity = window.prompt("İlanın il / ilçe / semt bilgisini değiştir", currentCity);
-    if (!nextCity || nextCity.trim() === currentCity.trim()) return;
-    const token = localStorage.getItem("auth_token") ?? "";
-    const res = await fetch(`/api/admin/listings/${listingId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ city: nextCity.trim() }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast({ title: "İl değiştirilemedi", description: data.error || "Hata oluştu", variant: "destructive" });
-      return;
-    }
-    toast({ title: `İlan #${listingId} il bilgisi güncellendi` });
-    void refetch();
-  };
-
-  const quickDeleteListing = async (listingId: number) => {
-    if (!window.confirm(`#${listingId} numaralı ilan silinsin mi?`)) return;
-    const token = localStorage.getItem("auth_token") ?? "";
-    const res = await fetch(`/api/admin/listings/${listingId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast({ title: "İlan silinemedi", description: data.error || "Hata oluştu", variant: "destructive" });
-      return;
-    }
-    toast({ title: `İlan #${listingId} silindi` });
-    void refetch();
-  };
-
   return (
     <Layout>
-      <HomeNewsTicker
-        lines={isLite ? liteTickerDisplay : tickerLines}
-        variant={isLite ? "static" : "marquee"}
-      />
       <div className="og-home-top">
+        {banners.length > 0 && (
+          <div className="og-home-banner desktop-hero">
+            <BannerCarousel banners={banners} />
+          </div>
+        )}
+
+        <div className="og-home-body">
         <div className="og-home-mode-row mobile-home">
           <button type="button" className="og-home-total-count" onClick={scrollToListings}>
             <span>Toplam İlan</span>
@@ -564,15 +506,6 @@ export default function Home() {
           </button>
           <DisplayModeToggle />
         </div>
-
-        {/* Pro: her ekranda; Lite mobilde gizli, masaüstünde Pro zorlandığı için görünür */}
-        {banners.length > 0 && !isLite && (
-          <div className="og-home-banner desktop-hero">
-            <BannerCarousel banners={banners} />
-          </div>
-        )}
-
-        <div className="og-home-body">
         {/* ── Hızlı kartlar — kart HTML/CSS'ine dokunulmaz; yalnızca dış wrap ── */}
         <div className="desktop-coming-soon-wrap">
         <HomeQuickCards
@@ -580,8 +513,9 @@ export default function Home() {
           onNearClick={handleNearClick}
         />
         </div>
+        <HomeNewsCards announcements={announcements} />
         {/* ── Filter Pills ─────────────────────────────────── */}
-        <section className="og-pills hide-scrollbar">
+        <section className="og-pills og-home-filter-pills hide-scrollbar" aria-hidden="true">
           {QUICK_CITY_PILLS.map(p => {
             const active = activePill === p.id;
             const href =
@@ -666,14 +600,14 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* ── Öne çıkan + canlı destek + tüm ilanlar (sıkı aralık) ── */}
+        {/* ── En yeni öne çıkan ilanlar: tüm cihazlarda yatay kompakt kartlar ── */}
         <div className="flex flex-col gap-1">
-        {displayFeaturedList.length > 0 && (
-          <section className="space-y-1">
+        {homeFeaturedListings.length > 0 && (
+          <section ref={listingsTopRef} className="space-y-1 og-home-featured-newest">
             <div className="featured-section-head">
               <h2 className="og-section-title flex items-center gap-1.5 text-sm mb-0">
                 <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                Öne Çıkan İlanlar
+                En Yeni Öne Çıkan İlanlar
               </h2>
               <Link href="/ilanlar?featured=1" className="featured-section-head__link">
                 Tümünü Gör
@@ -681,178 +615,16 @@ export default function Home() {
               </Link>
             </div>
             <FeaturedJobCarousel
-              listings={displayFeaturedList}
-              isLite={isLite}
+              listings={homeFeaturedListings}
+              isLite
               onNavigate={saveHomeScroll}
               savedIds={favIds}
               onToggleSave={handleToggleFav}
             />
           </section>
         )}
-
-        <div className="mobile-home">
-          <LiveSupportBar />
-        </div>
-
-        {/* ── Tüm İlanlar ──────────────────────────────────── */}
-        <section ref={listingsTopRef} className="desktop-section">
-          {/* Mobil kart listesi */}
-          <div className="mobile-home">
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="og-section-title">
-              Tüm İlanlar <span className="og-text-muted text-sm font-semibold">({totalCount})</span>
-            </h2>
-            <button
-              onClick={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
-              className="og-sort-btn"
-            >
-              {sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {isLoading ? (
-              [1,2,3,4,5].map(i => (
-                <div key={i} className="og-list-skeleton" style={{ minHeight: 140 }} />
-              ))
-            ) : sorted.length === 0 ? (
-              <div className="og-empty">
-                <Briefcase className="w-8 h-8 mb-2 opacity-40" />
-                <p className="text-sm font-semibold">Bu filtreye uygun ilan bulunamadı</p>
-                <button onClick={() => { setActivePill("all"); setOtherCity(null); }} className="text-amber-400 text-xs mt-1 hover:underline">
-                  Filtreyi Temizle
-                </button>
-              </div>
-            ) : (
-              sorted.map((listing, idx) => {
-                const card = (
-                  <JobListingCard
-                    listing={listing}
-                    onNavigate={saveHomeScroll}
-                    saved={favIds.has(listing.id) || !!listing.isFavoritedByMe}
-                    onToggleSave={handleToggleFav}
-                    adminOverlay={canQuickEditCity ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void quickChangeCity(listing.id, listing.city);
-                          }}
-                          className="rounded-full bg-black/70 px-1.5 py-0.5 text-[8px] font-black text-white border border-white/20"
-                        >
-                          İl Değiştir
-                        </button>
-                        {canQuickDeleteListing && (
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              void quickDeleteListing(listing.id);
-                            }}
-                            className="rounded-full bg-red-600/90 px-1.5 py-0.5 text-[8px] font-black text-white border border-red-200/30"
-                          >
-                            Sil
-                          </button>
-                        )}
-                      </>
-                    ) : undefined}
-                  />
-                );
-
-                if (reduceMotion) {
-                  return (
-                    <div key={listing.id} className="og-list-row-wrap">
-                      {card}
-                    </div>
-                  );
-                }
-
-                return (
-                  <motion.div
-                    key={listing.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(idx * 0.02, 0.2) }}
-                    className="og-list-row-wrap"
-                  >
-                    {card}
-                  </motion.div>
-                );
-              })
-            )}
-          </div>
-          </div>
-
-          {/* Masaüstü tablo — aynı sorted verisi */}
-          {!isLoading && sorted.length > 0 && (
-            <DesktopListingsTable
-              listings={sorted}
-              totalCount={totalCount}
-              sortNewest={sortMode === "oldest" ? "old" : "new"}
-              sortLabel={sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
-              onToggleSort={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
-              onNavigate={saveHomeScroll}
-              savedIds={favIds}
-              onToggleSave={handleToggleFav}
-            />
-          )}
-          {isLoading && (
-            <div className="desktop-home desktop-listings-table" aria-hidden>
-              <div className="og-list-skeleton" style={{ minHeight: 200 }} />
-            </div>
-          )}
-          {!isLoading && sorted.length === 0 && (
-            <div className="desktop-home og-empty">
-              <Briefcase className="w-8 h-8 mb-2 opacity-40" />
-              <p className="text-sm font-semibold">Bu filtreye uygun ilan bulunamadı</p>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {!isLoading && totalPages > 1 && (
-            <div className="flex items-center justify-center gap-1.5 sm:gap-2 mt-5 flex-wrap">
-              <button
-                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(1); }}
-                disabled={page <= 1}
-                className="og-page-btn"
-                title="İlk sayfa"
-              >
-                « İlk
-              </button>
-              <button
-                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(p => Math.max(1, p - 1)); }}
-                disabled={page <= 1}
-                className="og-page-btn"
-              >
-                Önceki
-              </button>
-              <div className="og-page-current">
-                Sayfa {page} / {totalPages}
-              </div>
-              <button
-                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(p => Math.min(totalPages, p + 1)); }}
-                disabled={page >= totalPages}
-                className="og-page-btn"
-              >
-                Sonraki
-              </button>
-              <button
-                onClick={() => { sessionStorage.removeItem(HOME_SCROLL_KEY); setPage(totalPages); }}
-                disabled={page >= totalPages}
-                className="og-page-btn"
-                title="Son sayfa"
-              >
-                Son »
-              </button>
-            </div>
-          )}
-
           {/* Trust strip */}
-          {!isLoading && sorted.length > 0 && (
+          {!isLoading && displayListings.length > 0 && (
             <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-2 og-trust-strip">
               {[
                 { icon: "🛡️", title: "Güvenilir İlanlar", subtitle: "Tüm ilanlar doğrulanır." },
@@ -870,7 +642,9 @@ export default function Home() {
               ))}
             </div>
           )}
-        </section>
+          <div className="mobile-home mt-4">
+            <LiveSupportBar />
+          </div>
         </div>
         </div>
       </div>

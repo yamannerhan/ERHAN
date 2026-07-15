@@ -9,7 +9,11 @@ import {
 type Banner = {
   id: number;
   title: string | null;
+  subtitle: string | null;
+  ctaLabel: string | null;
+  altText: string | null;
   imageUrl: string;
+  mobileImageUrl: string | null;
   linkUrl: string | null;
   isActive: boolean;
   sortOrder: number;
@@ -20,7 +24,12 @@ type ToastFn = (opts: { title: string; description?: string; variant?: "default"
 
 const emptyForm = () => ({
   title: "",
+  subtitle: "",
+  ctaLabel: "Hemen İlanları Keşfet",
+  altText: "",
   imageUrl: "",
+  mobileImageUrl: "",
+  linkUrl: "/ilanlar",
   isActive: true,
 });
 
@@ -42,6 +51,7 @@ export function HomeBannersAdminSection({
   const dragId = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
+  const mobileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,10 +67,11 @@ export function HomeBannersAdminSection({
 
   useEffect(() => { void load(); }, [load]);
 
-  const uploadImage = async (file: File): Promise<string> => {
+  const uploadImage = async (file: File, variant: "desktop" | "mobile" = "desktop"): Promise<string> => {
     const token = getToken();
     const formData = new FormData();
     formData.append("image", file);
+    formData.append("variant", variant);
     const res = await fetch("/api/admin/banners/upload", {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -107,6 +118,24 @@ export function HomeBannersAdminSection({
     }
   };
 
+  const handleMobileImage = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Sadece resim dosyası yükleyebilirsiniz", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await uploadImage(file, "mobile");
+      setForm((f) => ({ ...f, mobileImageUrl: url }));
+      toast({ title: "Mobil banner yüklendi", description: "960×540 (16:9) olarak hazırlandı" });
+    } catch (e: any) {
+      toast({ title: "Mobil görsel yüklenemedi", description: e?.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const startNew = () => {
     setEditingId("new");
     setForm(emptyForm());
@@ -116,7 +145,12 @@ export function HomeBannersAdminSection({
     setEditingId(banner.id);
     setForm({
       title: banner.title ?? "",
+      subtitle: banner.subtitle ?? "",
+      ctaLabel: banner.ctaLabel ?? "",
+      altText: banner.altText ?? "",
       imageUrl: banner.imageUrl,
+      mobileImageUrl: banner.mobileImageUrl ?? "",
+      linkUrl: banner.linkUrl ?? "",
       isActive: banner.isActive,
     });
   };
@@ -136,8 +170,12 @@ export function HomeBannersAdminSection({
       if (editingId === "new") {
         await apiCall("/admin/banners", "POST", {
           title: form.title.trim() || null,
+          subtitle: form.subtitle.trim() || null,
+          ctaLabel: form.ctaLabel.trim() || null,
+          altText: form.altText.trim() || null,
           imageUrl: form.imageUrl,
-          linkUrl: null,
+          mobileImageUrl: form.mobileImageUrl || null,
+          linkUrl: form.linkUrl.trim() || null,
           isActive: form.isActive,
           sortOrder: items.length + 1,
         });
@@ -145,8 +183,12 @@ export function HomeBannersAdminSection({
       } else if (typeof editingId === "number") {
         await apiCall(`/admin/banners/${editingId}`, "PATCH", {
           title: form.title.trim() || null,
+          subtitle: form.subtitle.trim() || null,
+          ctaLabel: form.ctaLabel.trim() || null,
+          altText: form.altText.trim() || null,
           imageUrl: form.imageUrl,
-          linkUrl: null,
+          mobileImageUrl: form.mobileImageUrl || null,
+          linkUrl: form.linkUrl.trim() || null,
           isActive: form.isActive,
         });
         toast({ title: "Banner güncellendi" });
@@ -265,15 +307,32 @@ export function HomeBannersAdminSection({
             className="hidden"
             onChange={(e) => { void handleReplaceImage(e.target.files?.[0] ?? null); e.target.value = ""; }}
           />
+          <input
+            ref={mobileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => { void handleMobileImage(e.target.files?.[0] ?? null); e.target.value = ""; }}
+          />
 
           {form.imageUrl ? (
             <div className="space-y-2">
               <div className="relative w-full overflow-hidden rounded-xl border border-white/10 aspect-[3/1] bg-[#0b0e14]">
                 <img
                   src={form.imageUrl}
-                  alt="Önizleme"
+                  alt={form.altText || "Masaüstü banner önizlemesi"}
                   className="absolute inset-0 w-full h-full object-cover object-center"
                 />
+                {(form.title || form.subtitle || form.ctaLabel) && (
+                  <>
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#06366d]/85 via-[#064b8b]/35 to-transparent" />
+                    <div className="absolute inset-y-0 left-0 flex w-3/5 flex-col justify-center p-4 text-white">
+                      {form.title && <strong className="text-lg leading-tight">{form.title}</strong>}
+                      {form.subtitle && <span className="mt-1 text-xs text-white/90">{form.subtitle}</span>}
+                      {form.ctaLabel && <span className="mt-2 w-fit rounded-full bg-white px-3 py-1 text-[10px] font-bold text-blue-600">{form.ctaLabel}</span>}
+                    </div>
+                  </>
+                )}
                 {uploading && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                     <Loader2 className="w-8 h-8 animate-spin text-white" />
@@ -321,9 +380,62 @@ export function HomeBannersAdminSection({
           <Input
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-            placeholder="Üst yazı (opsiyonel)"
+            placeholder="Başlık (gerçek HTML metni)"
             className="border-white/[0.06] bg-[#0d1321]/60 rounded-xl"
           />
+          <Input
+            value={form.subtitle}
+            onChange={(e) => setForm((f) => ({ ...f, subtitle: e.target.value }))}
+            placeholder="Açıklama"
+            className="border-white/[0.06] bg-[#0d1321]/60 rounded-xl"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input
+              value={form.ctaLabel}
+              onChange={(e) => setForm((f) => ({ ...f, ctaLabel: e.target.value }))}
+              placeholder="Buton etiketi"
+              className="border-white/[0.06] bg-[#0d1321]/60 rounded-xl"
+            />
+            <Input
+              value={form.linkUrl}
+              onChange={(e) => setForm((f) => ({ ...f, linkUrl: e.target.value }))}
+              placeholder="Buton bağlantısı (/ilanlar)"
+              className="border-white/[0.06] bg-[#0d1321]/60 rounded-xl"
+            />
+          </div>
+          <Input
+            value={form.altText}
+            onChange={(e) => setForm((f) => ({ ...f, altText: e.target.value }))}
+            placeholder="Görsel alternatif metni"
+            className="border-white/[0.06] bg-[#0d1321]/60 rounded-xl"
+          />
+
+          <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">Mobil banner (16:9)</p>
+                <p className="text-[11px] text-muted-foreground">Eklenmezse masaüstü görseli kullanılır.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => mobileInputRef.current?.click()} disabled={uploading}>
+                <Upload className="w-4 h-4 mr-1" /> {form.mobileImageUrl ? "Değiştir" : "Yükle"}
+              </Button>
+            </div>
+            {form.imageUrl && (
+              <div className="relative overflow-hidden rounded-lg aspect-video bg-slate-100">
+                <img src={form.mobileImageUrl || form.imageUrl} alt={form.altText || "Mobil banner önizlemesi"} className="absolute inset-0 w-full h-full object-cover" />
+                {(form.title || form.subtitle || form.ctaLabel) && (
+                  <>
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#06366d]/85 via-[#064b8b]/30 to-transparent" />
+                    <div className="absolute inset-y-0 left-0 flex w-3/4 flex-col justify-center p-3 text-white">
+                      {form.title && <strong className="text-base leading-tight">{form.title}</strong>}
+                      {form.subtitle && <span className="mt-1 line-clamp-2 text-[10px] text-white/90">{form.subtitle}</span>}
+                      {form.ctaLabel && <span className="mt-2 w-fit rounded-full bg-white px-2 py-1 text-[9px] font-bold text-blue-600">{form.ctaLabel}</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
 
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
             <input
@@ -369,13 +481,23 @@ export function HomeBannersAdminSection({
               className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] p-2 hover:border-white/12 transition-colors"
             >
               <GripVertical className="w-4 h-4 text-muted-foreground shrink-0 cursor-grab" />
-              <div className="relative w-28 shrink-0 overflow-hidden rounded-lg aspect-[3/1] bg-[#0b0e14]">
-                <img
-                  src={banner.imageUrl}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-cover object-center"
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
+              <div className="flex w-28 shrink-0 items-center gap-1">
+                <div className="relative flex-1 overflow-hidden rounded-lg aspect-[3/1] bg-slate-100" title="Masaüstü önizlemesi">
+                  <img
+                    src={banner.imageUrl}
+                    alt={banner.altText || "Masaüstü banner önizlemesi"}
+                    className="absolute inset-0 w-full h-full object-cover object-center"
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                </div>
+                <div className="relative w-8 overflow-hidden rounded-md aspect-[9/10] bg-slate-100" title="Mobil önizleme">
+                  <img
+                    src={banner.mobileImageUrl || banner.imageUrl}
+                    alt={banner.altText || "Mobil banner önizlemesi"}
+                    className="absolute inset-0 w-full h-full object-cover object-center"
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                </div>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">{banner.title || "—"}</div>

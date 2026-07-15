@@ -4,18 +4,12 @@
 export const HOME_BANNER_ASSETS = [
   {
     title: null,
-    imageUrl: "/banners/banner-1.jpg",
+    subtitle: null,
+    ctaLabel: "Hemen İlanları Keşfet",
+    altText: "Özel güvenlik görevlisi ve İstanbul silüeti",
+    imageUrl: "/banners/career-hero.png",
+    linkUrl: "/ilanlar",
     sortOrder: 1,
-  },
-  {
-    title: null,
-    imageUrl: "/banners/banner-2.jpg",
-    sortOrder: 2,
-  },
-  {
-    title: null,
-    imageUrl: "/banners/banner-3.jpg",
-    sortOrder: 3,
   },
 ] as const;
 
@@ -23,8 +17,12 @@ export function getHomeBannerSeeds() {
   return HOME_BANNER_ASSETS.map((b, i) => ({
     id: 9001 + i,
     title: b.title,
+    subtitle: b.subtitle,
+    ctaLabel: b.ctaLabel,
+    altText: b.altText,
     imageUrl: b.imageUrl,
-    linkUrl: null as string | null,
+    mobileImageUrl: null as string | null,
+    linkUrl: b.linkUrl,
     sortOrder: b.sortOrder,
   }));
 }

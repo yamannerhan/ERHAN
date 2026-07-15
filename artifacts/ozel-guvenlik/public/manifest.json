@@ -2,15 +2,15 @@
   "name": "ozelguvenlik.online",
   "short_name": "ÖzelGüvenlik",
   "description": "Türkiye geneli özel güvenlik iş ilanları — bay bayan personel alımları",
-  "theme_color": "#0F172A",
-  "background_color": "#0F172A",
+  "theme_color": "#FFFFFF",
+  "background_color": "#F5F9FF",
   "display": "standalone",
   "orientation": "portrait",
   "scope": "/",
   "start_url": "/",
   "icons": [
     {
-      "src": "/brand-logo.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

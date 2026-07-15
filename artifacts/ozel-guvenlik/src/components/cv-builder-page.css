@@ -1,10 +1,10 @@
 /* ── CV Oluştur — referans görsel ───────────────────────────── */
 
 .og-cv-page {
-  --cv-gold: #f5c518;
-  --cv-border: rgba(245, 197, 24, 0.28);
-  --cv-card: rgba(14, 18, 28, 0.98);
-  --cv-field: rgba(10, 14, 22, 0.95);
+  --cv-gold: #0878e8;
+  --cv-border: rgba(8, 120, 232, 0.20);
+  --cv-card: #ffffff;
+  --cv-field: #f8fbff;
   padding: 0 14px 20px;
 }
 

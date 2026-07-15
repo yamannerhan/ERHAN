@@ -1,10 +1,10 @@
 /* ── İlan Oluştur sayfası — referans görsel ─────────────────── */
 
 .og-create-listing-page {
-  --cl-gold: #f5c518;
-  --cl-gold-2: #ffb800;
-  --cl-border: rgba(245, 197, 24, 0.28);
-  --cl-field-bg: rgba(12, 16, 24, 0.95);
+  --cl-gold: #0878e8;
+  --cl-gold-2: #25a8ff;
+  --cl-border: rgba(8, 120, 232, 0.20);
+  --cl-field-bg: #f8fbff;
   padding: 0 14px 16px;
   display: flex;
   flex-direction: column;

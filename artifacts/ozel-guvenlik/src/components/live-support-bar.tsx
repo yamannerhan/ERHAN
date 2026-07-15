@@ -6,7 +6,7 @@ import "./live-support-bar.css";
 
 export function LiveSupportBar({
   title = "Canlı Destek",
-  description = "Sorun mu var? Hemen yazın",
+  description = "Soruların mı var? Hemen yazın, ekibimiz size yardımcı olsun.",
   className = "",
 }: {
   title?: string;
@@ -45,8 +45,8 @@ export function LiveSupportBar({
         <span className="og-support-description">{description}</span>
       </span>
       <span className="og-support-cta" aria-hidden>
-        <span className="og-support-cta__long">Destek Al</span>
-        <span className="og-support-cta__short">Destek</span>
+        <span className="og-support-cta__long">Sohbet Et</span>
+        <span className="og-support-cta__short">Sohbet</span>
         <ChevronRight strokeWidth={2.25} />
       </span>
     </button>

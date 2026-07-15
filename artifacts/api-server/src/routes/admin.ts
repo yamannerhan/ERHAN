@@ -2093,18 +2093,27 @@ router.post("/admin/listings/bulk-delete", authMiddleware, requireAdmin, async (
 const DEFAULT_BANNERS = [
   {
     title: null as string | null,
-    imageUrl: "/banners/banner-1.jpg",
-    linkUrl: null as string | null,
+    subtitle: null as string | null,
+    ctaLabel: "Hemen İlanları Keşfet",
+    altText: "Özel güvenlik görevlisi ve İstanbul silüeti",
+    imageUrl: "/banners/career-hero.png",
+    linkUrl: "/ilanlar",
     sortOrder: 1,
   },
   {
     title: null as string | null,
+    subtitle: null as string | null,
+    ctaLabel: null as string | null,
+    altText: "Özel Güvenlik iş ilanları bannerı",
     imageUrl: "/banners/banner-2.jpg",
     linkUrl: null as string | null,
     sortOrder: 2,
   },
   {
     title: null as string | null,
+    subtitle: null as string | null,
+    ctaLabel: null as string | null,
+    altText: "Özel Güvenlik iş ilanları bannerı",
     imageUrl: "/banners/banner-3.jpg",
     linkUrl: null as string | null,
     sortOrder: 3,
@@ -2116,6 +2125,11 @@ async function ensureBannerSchema(): Promise<void> {
   if (bannerSchemaReady) return;
   try {
     await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS image_data TEXT`);
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS mobile_image_url TEXT`);
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS mobile_image_data TEXT`);
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS subtitle TEXT`);
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS cta_label TEXT`);
+    await db.execute(sql`ALTER TABLE banners ADD COLUMN IF NOT EXISTS alt_text TEXT`);
     bannerSchemaReady = true;
   } catch (e) {
     console.warn("[banners] schema ensure failed", e);
@@ -2125,7 +2139,8 @@ async function ensureBannerSchema(): Promise<void> {
 function isLegacyBannerSeed(imageUrl: string | null): boolean {
   if (!imageUrl) return true;
   if (imageUrl.includes("unsplash.com")) return true;
-  if (imageUrl.endsWith(".png") && imageUrl.startsWith("/banners/banner-")) return true;
+  if (imageUrl === "/banners/banner-1.jpg") return true;
+  if (/^\/banners\/banner-[123]\.png$/.test(imageUrl)) return true;
   return false;
 }
 
@@ -2143,12 +2158,19 @@ async function ensureDefaultBanners(): Promise<void> {
 
   for (const row of existing) {
     if (!isLegacyBannerSeed(row.imageUrl)) continue;
-    const idx = existing.indexOf(row) % DEFAULT_BANNERS.length;
-    const fallback = DEFAULT_BANNERS[idx]!.imageUrl;
-    await db.update(bannersTable).set({ imageUrl: fallback, linkUrl: null }).where(eq(bannersTable.id, row.id));
+    const idx = row.imageUrl === "/banners/banner-1.jpg"
+      ? 0
+      : existing.indexOf(row) % DEFAULT_BANNERS.length;
+    const fallback = DEFAULT_BANNERS[idx]!;
+    await db.update(bannersTable).set({
+      imageUrl: fallback.imageUrl,
+      title: fallback.title,
+      subtitle: fallback.subtitle,
+      ctaLabel: fallback.ctaLabel,
+      altText: fallback.altText,
+      linkUrl: fallback.linkUrl,
+    }).where(eq(bannersTable.id, row.id));
   }
-
-  await db.update(bannersTable).set({ linkUrl: null }).where(sql`${bannersTable.linkUrl} is not null`);
 }
 
 /** Upload URL / data URL → Postgres'te saklanacak base64 */
@@ -2176,6 +2198,18 @@ async function extractBannerImageData(imageUrl: string): Promise<string | null> 
 function publicBannerImageUrl(id: number, imageUrl: string, hasData: boolean): string {
   if (hasData) return `/api/banners/${id}/image`;
   return resolveBannerImageUrl(imageUrl, id);
+}
+
+function safeBannerLink(value: unknown): string | null {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return null;
+  if (/^\/(?!\/)/.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 router.get("/banner-images/:filename", (req, res): void => {
@@ -2236,6 +2270,50 @@ router.get("/banners/:id/image", async (req, res): Promise<void> => {
   }
 });
 
+router.get("/banners/:id/mobile-image", async (req, res): Promise<void> => {
+  await ensureBannerSchema();
+  const id = safeId(req.params["id"]);
+  if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  try {
+    const [row] = await db
+      .select({
+        mobileImageData: bannersTable.mobileImageData,
+        mobileImageUrl: bannersTable.mobileImageUrl,
+        imageData: bannersTable.imageData,
+        imageUrl: bannersTable.imageUrl,
+      })
+      .from(bannersTable)
+      .where(eq(bannersTable.id, id))
+      .limit(1);
+    if (!row) { res.status(404).json({ error: "Banner bulunamadı" }); return; }
+    const data = row.mobileImageData ?? row.imageData;
+    if (data) {
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(Buffer.from(data, "base64"));
+      return;
+    }
+    const imageUrl = row.mobileImageUrl ?? row.imageUrl;
+    const filename = bannerFilenameFromUrl(imageUrl);
+    if (filename) {
+      const filepath = path.join(BANNER_IMAGES_DIR, filename);
+      if (fs.existsSync(filepath)) {
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.sendFile(filepath);
+        return;
+      }
+    }
+    if (imageUrl.startsWith("/banners/") && !imageUrl.includes("..")) {
+      res.redirect(imageUrl);
+      return;
+    }
+    res.status(404).json({ error: "Mobil görsel bulunamadı" });
+  } catch (e) {
+    console.error("[banners] mobile image serve", e);
+    res.status(500).json({ error: "Mobil görsel yüklenemedi" });
+  }
+});
+
 router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUpload.single("image"), async (req, res): Promise<void> => {
   try {
     if (!req.file) {
@@ -2243,11 +2321,14 @@ router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUp
       return;
     }
     await ensureBannerSchema();
-    const filename = `banner_${req.user!.id}_${Date.now()}.jpg`;
+    const mobile = String(req.body?.variant ?? "") === "mobile";
+    const width = mobile ? 960 : BANNER_WIDTH;
+    const height = mobile ? 540 : BANNER_HEIGHT;
+    const filename = `banner_${mobile ? "mobile_" : ""}${req.user!.id}_${Date.now()}.jpg`;
     const filepath = path.join(BANNER_IMAGES_DIR, filename);
     const buf = await sharp(req.file.buffer)
       .rotate()
-      .resize(BANNER_WIDTH, BANNER_HEIGHT, {
+      .resize(width, height, {
         fit: "cover",
         position: "centre",
       })
@@ -2263,9 +2344,9 @@ router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUp
     await fs.promises.writeFile(filepath, buf);
     res.json({
       url: `/api/banner-images/${filename}`,
-      width: BANNER_WIDTH,
-      height: BANNER_HEIGHT,
-      aspectRatio: "3:1",
+      width,
+      height,
+      aspectRatio: mobile ? "16:9" : "3:1",
     });
   } catch (e) {
     console.error("[banners] upload", e);
@@ -2290,8 +2371,14 @@ router.get("/admin/banners", authMiddleware, requireAdmin, async (_req, res): Pr
           out.push({
             id: b.id,
             title: b.title,
+            subtitle: b.subtitle,
+            ctaLabel: b.ctaLabel,
+            altText: b.altText,
             imageUrl: `/api/banners/${b.id}/image`,
-            linkUrl: b.linkUrl,
+            mobileImageUrl: b.mobileImageData
+              ? `/api/banners/${b.id}/mobile-image`
+              : (b.mobileImageUrl ?? `/api/banners/${b.id}/image`),
+            linkUrl: safeBannerLink(b.linkUrl),
             isActive: b.isActive,
             sortOrder: b.sortOrder,
             createdAt: b.createdAt.toISOString(),
@@ -2302,8 +2389,14 @@ router.get("/admin/banners", authMiddleware, requireAdmin, async (_req, res): Pr
       out.push({
         id: b.id,
         title: b.title,
+        subtitle: b.subtitle,
+        ctaLabel: b.ctaLabel,
+        altText: b.altText,
         imageUrl: publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData)),
-        linkUrl: b.linkUrl,
+        mobileImageUrl: b.mobileImageData
+          ? `/api/banners/${b.id}/mobile-image`
+          : (b.mobileImageUrl ?? publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData))),
+        linkUrl: safeBannerLink(b.linkUrl),
         isActive: b.isActive,
         sortOrder: b.sortOrder,
         createdAt: b.createdAt.toISOString(),
@@ -2332,24 +2425,36 @@ router.post("/admin/banners/reorder", authMiddleware, requireAdmin, async (req, 
 router.post("/admin/banners", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   try {
     await ensureBannerSchema();
-    const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
+    const { title, subtitle, ctaLabel, altText, imageUrl, mobileImageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
     if (!imageUrl) { res.status(400).json({ error: "Resim URL zorunludur" }); return; }
     const rawUrl = String(imageUrl);
+    const normalizedLink = safeBannerLink(linkUrl);
+    if (linkUrl && !normalizedLink) {
+      res.status(400).json({ error: "Bağlantı / ile başlamalı veya geçerli bir http(s) adresi olmalıdır." });
+      return;
+    }
     // data: URL istemciden gelmesin diye sınırla (çok büyük gövde = 500)
     if (rawUrl.startsWith("data:") && rawUrl.length > 900_000) {
       res.status(400).json({ error: "Görsel çok büyük. Lütfen tekrar yükleyin." });
       return;
     }
     const imageData = await extractBannerImageData(rawUrl);
+    const rawMobileUrl = mobileImageUrl ? String(mobileImageUrl) : "";
+    const mobileImageData = rawMobileUrl ? await extractBannerImageData(rawMobileUrl) : null;
     if ((rawUrl.includes("/api/banner-images/") || rawUrl.startsWith("data:image/")) && !imageData) {
       res.status(400).json({ error: "Yüklenen görsel bulunamadı. Lütfen resmi tekrar yükleyin." });
       return;
     }
     const [banner] = await db.insert(bannersTable).values({
       title: title ? String(title) : null,
+      subtitle: subtitle ? String(subtitle) : null,
+      ctaLabel: ctaLabel ? String(ctaLabel) : null,
+      altText: altText ? String(altText) : null,
       imageUrl: imageData ? "/banners/pending.jpg" : rawUrl,
       imageData: imageData,
-      linkUrl: linkUrl ? String(linkUrl) : null,
+      mobileImageUrl: rawMobileUrl || null,
+      mobileImageData,
+      linkUrl: normalizedLink,
       isActive: isActive !== false,
       sortOrder: sortOrder ? parseInt(String(sortOrder), 10) : 0,
     }).returning();
@@ -2358,10 +2463,14 @@ router.post("/admin/banners", authMiddleware, requireAdmin, async (req, res): Pr
       return;
     }
     const finalUrl = imageData ? `/api/banners/${banner.id}/image` : resolveBannerImageUrl(rawUrl, banner.id);
-    if (imageData || finalUrl !== banner.imageUrl) {
-      await db.update(bannersTable).set({ imageUrl: finalUrl }).where(eq(bannersTable.id, banner.id));
+    const finalMobileUrl = mobileImageData ? `/api/banners/${banner.id}/mobile-image` : (rawMobileUrl || finalUrl);
+    if (imageData || mobileImageData || finalUrl !== banner.imageUrl) {
+      await db.update(bannersTable).set({
+        imageUrl: finalUrl,
+        mobileImageUrl: finalMobileUrl,
+      }).where(eq(bannersTable.id, banner.id));
     }
-    res.status(201).json({ id: banner.id, imageUrl: finalUrl, isActive: banner.isActive });
+    res.status(201).json({ id: banner.id, imageUrl: finalUrl, mobileImageUrl: finalMobileUrl, isActive: banner.isActive });
   } catch (e) {
     console.error("[banners] create", e);
     res.status(500).json({ error: "Banner kaydedilemedi. Lütfen tekrar deneyin." });
@@ -2375,10 +2484,20 @@ router.patch("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res
     if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
     const [existing] = await db.select().from(bannersTable).where(eq(bannersTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Banner bulunamadı" }); return; }
-    const { title, imageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
+    const { title, subtitle, ctaLabel, altText, imageUrl, mobileImageUrl, linkUrl, isActive, sortOrder } = req.body as Record<string, unknown>;
     const updates: Partial<typeof bannersTable.$inferInsert> = {};
     if (title !== undefined) updates.title = title ? String(title) : null;
-    if (linkUrl !== undefined) updates.linkUrl = linkUrl ? String(linkUrl) : null;
+    if (subtitle !== undefined) updates.subtitle = subtitle ? String(subtitle) : null;
+    if (ctaLabel !== undefined) updates.ctaLabel = ctaLabel ? String(ctaLabel) : null;
+    if (altText !== undefined) updates.altText = altText ? String(altText) : null;
+    if (linkUrl !== undefined) {
+      const normalizedLink = safeBannerLink(linkUrl);
+      if (linkUrl && !normalizedLink) {
+        res.status(400).json({ error: "Bağlantı / ile başlamalı veya geçerli bir http(s) adresi olmalıdır." });
+        return;
+      }
+      updates.linkUrl = normalizedLink;
+    }
     if (isActive !== undefined) updates.isActive = Boolean(isActive);
     if (sortOrder !== undefined) updates.sortOrder = parseInt(String(sortOrder), 10);
     if (imageUrl !== undefined) {
@@ -2395,9 +2514,20 @@ router.patch("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res
         updates.imageUrl = rawUrl;
       }
     }
+    if (mobileImageUrl !== undefined) {
+      const rawMobileUrl = mobileImageUrl ? String(mobileImageUrl) : "";
+      if (rawMobileUrl !== (existing.mobileImageUrl ?? "")) {
+        const mobileImageData = rawMobileUrl ? await extractBannerImageData(rawMobileUrl) : null;
+        updates.mobileImageData = mobileImageData;
+        updates.mobileImageUrl = mobileImageData ? `/api/banners/${id}/mobile-image` : (rawMobileUrl || null);
+      }
+    }
     await db.update(bannersTable).set(updates).where(eq(bannersTable.id, id));
     if (imageUrl !== undefined && String(imageUrl) !== existing.imageUrl) {
       await deleteBannerImageFile(existing.imageUrl);
+    }
+    if (mobileImageUrl !== undefined && String(mobileImageUrl ?? "") !== (existing.mobileImageUrl ?? "")) {
+      await deleteBannerImageFile(existing.mobileImageUrl);
     }
     res.json({ success: true });
   } catch (e) {
@@ -2409,9 +2539,15 @@ router.patch("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res
 router.delete("/admin/banners/:id", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
-  const [existing] = await db.select({ imageUrl: bannersTable.imageUrl }).from(bannersTable).where(eq(bannersTable.id, id)).limit(1);
+  const [existing] = await db.select({
+    imageUrl: bannersTable.imageUrl,
+    mobileImageUrl: bannersTable.mobileImageUrl,
+  }).from(bannersTable).where(eq(bannersTable.id, id)).limit(1);
   await db.delete(bannersTable).where(eq(bannersTable.id, id));
-  if (existing) await deleteBannerImageFile(existing.imageUrl);
+  if (existing) {
+    await deleteBannerImageFile(existing.imageUrl);
+    await deleteBannerImageFile(existing.mobileImageUrl);
+  }
   res.sendStatus(204);
 });
 
@@ -2458,8 +2594,14 @@ router.get("/banners", async (_req, res): Promise<void> => {
           resolved.push({
             id: b.id,
             title: b.title,
+            subtitle: b.subtitle,
+            ctaLabel: b.ctaLabel,
+            altText: b.altText,
             imageUrl: `/api/banners/${b.id}/image`,
-            linkUrl: null,
+            mobileImageUrl: b.mobileImageData
+              ? `/api/banners/${b.id}/mobile-image`
+              : (b.mobileImageUrl ?? `/api/banners/${b.id}/image`),
+            linkUrl: safeBannerLink(b.linkUrl),
           });
           continue;
         }
@@ -2467,8 +2609,14 @@ router.get("/banners", async (_req, res): Promise<void> => {
       resolved.push({
         id: b.id,
         title: b.title,
+        subtitle: b.subtitle,
+        ctaLabel: b.ctaLabel,
+        altText: b.altText,
         imageUrl: publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData)),
-        linkUrl: null,
+        mobileImageUrl: b.mobileImageData
+          ? `/api/banners/${b.id}/mobile-image`
+          : (b.mobileImageUrl ?? publicBannerImageUrl(b.id, b.imageUrl, Boolean(b.imageData))),
+        linkUrl: safeBannerLink(b.linkUrl),
       });
     }
 

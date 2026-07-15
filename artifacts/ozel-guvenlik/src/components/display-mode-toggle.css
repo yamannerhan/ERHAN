@@ -4,34 +4,35 @@
   gap: 0;
   padding: 2px;
   border-radius: 999px;
-  border: 1px solid rgba(245, 197, 24, 0.28);
-  background: rgba(10, 14, 20, 0.85);
+  border: 1px solid rgba(8, 120, 232, 0.22);
+  background: #edf6ff;
 }
 
 .og-mode-toggle__btn {
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: #60738d;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  padding: 5px 12px;
+  min-height: 30px;
+  padding: 7px 12px;
   border-radius: 999px;
   cursor: pointer;
   line-height: 1;
 }
 
 .og-mode-toggle__btn--active {
-  background: linear-gradient(180deg, #ffd54a 0%, #f5c518 100%);
-  color: #0a0e14;
-  box-shadow: 0 1px 6px rgba(245, 197, 24, 0.35);
+  background: linear-gradient(180deg, #25a8ff 0%, #0878e8 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 8px rgba(8, 120, 232, 0.25);
 }
 
 .og-home-mode-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 2px 12px 0;
+  padding: 8px 0 2px;
   margin: 0;
   min-height: 0;
 }
@@ -40,19 +41,19 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 25px;
-  padding: 3px 9px;
-  border: 1px solid rgba(245, 197, 24, 0.24);
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid rgba(8, 120, 232, 0.18);
   border-radius: 999px;
-  background: rgba(10, 14, 20, 0.72);
-  color: #94a3b8;
-  font-size: 9px;
+  background: #ffffff;
+  color: #60738d;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
 }
 
 .og-home-total-count strong {
-  color: #f5c518;
+  color: #0878e8;
   font-size: 11px;
   font-weight: 900;
 }
@@ -72,14 +73,14 @@ html:not(.dark) .og-home-total-count {
 .og-home-banner {
   width: 100%;
   box-sizing: border-box;
-  padding: 2px 12px 0;
+  padding: clamp(8px, 2.5vw, 16px) clamp(10px, 3vw, 24px) 0;
   margin: 0;
 }
 
 .og-home-body {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 12px 16px;
+  padding: 8px clamp(10px, 3vw, 24px) 20px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -87,18 +88,23 @@ html:not(.dark) .og-home-total-count {
 
 @media (max-width: 768px) {
   .og-home-mode-row {
-    padding: 1px 10px 0;
+    padding: 8px 0 2px;
   }
   .og-home-banner {
-    padding: 1px 10px 0;
+    padding: 8px 10px 0;
   }
   .og-home-body {
     padding: 4px 10px 14px;
     gap: 8px;
   }
   .og-home-banner .og-banner-carousel {
-    border-radius: 12px;
-    min-height: 72px;
+    border-radius: 18px;
+    min-height: 0;
+    aspect-ratio: 16 / 8.5;
+    box-shadow: 0 12px 30px rgba(25, 94, 165, 0.14);
+  }
+  .og-home-banner .og-banner-carousel--legacy {
+    aspect-ratio: 3 / 1;
   }
 }
 

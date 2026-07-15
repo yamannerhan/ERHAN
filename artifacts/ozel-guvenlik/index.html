@@ -1,18 +1,15 @@
 <!DOCTYPE html>
-<html lang="tr" style="background:#0F172A;color:#F1F5F9">
+<html lang="tr" style="background:#F5F9FF;color:#10233F">
   <head>
     <script>
-      // Pre-paint theme init — avoids flash. Default = dark.
+      // Beyaz-mavi tema: tüm cihaz ve modlarda ilk boyamadan önce uygula.
       (function () {
         try {
-          var t = localStorage.getItem("theme");
-          if (t !== "light") {
-            document.documentElement.classList.add("dark");
-          } else {
-            document.documentElement.classList.remove("dark");
-          }
+          localStorage.setItem("theme", "light");
+          localStorage.setItem("og_white_blue_theme_v1", "1");
+          document.documentElement.classList.remove("dark");
         } catch (e) {
-          document.documentElement.classList.add("dark");
+          document.documentElement.classList.remove("dark");
         }
       })();
     </script>
@@ -22,7 +19,8 @@
         try {
           var pref = localStorage.getItem("og_display_mode");
           if (pref === "full") return;
-          document.documentElement.classList.add("og-lite", "dark");
+          document.documentElement.classList.add("og-lite");
+          document.documentElement.classList.remove("dark");
           localStorage.setItem("og_display_mode", "lite");
           if ("serviceWorker" in navigator) {
             navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -36,7 +34,7 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <style>
       /* Erken: uzun basma Google Kaydet/Paylaş menüsü */
       html,body,#root{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
@@ -62,10 +60,10 @@
 
     <!-- PWA / Mobile -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Özel Güvenlik İş İlanları" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#0F172A" />
+    <meta name="theme-color" content="#FFFFFF" />
 
     <!-- Open Graph -->
     <meta property="og:locale" content="tr_TR" />
@@ -86,8 +84,8 @@
     <meta name="twitter:image" content="https://ozelguvenlik.online/og-brand.jpg" />
 
     <!-- Favicon -->
-    <link rel="icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />

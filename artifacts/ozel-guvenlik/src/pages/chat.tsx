@@ -581,7 +581,7 @@ export default function Chat() {
       {/* fixed: header(56px) ile bottom-nav(70px) arasını kapla — Layout scroll'undan bağımsız.
           Inline style: calc içinde + etrafı boşluklu olmalı, yoksa CSS geçersiz sayar. */}
       <div
-        className="fixed left-0 right-0 flex flex-col bg-background z-20"
+        className="og-chat-page fixed left-0 right-0 flex flex-col bg-background z-20"
         style={{
           top: "calc(var(--mobile-header-height) + var(--safe-top))",
           bottom: keyboardInset > 0

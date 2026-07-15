@@ -552,3 +552,66 @@
 .og-ls-section-hidden {
   display: none;
 }
+
+/* Beyaz-mavi tema */
+html:not(.dark) .og-ls-page {
+  color: #10233f;
+  background: transparent;
+}
+html:not(.dark) :is(
+  .og-ls-hero,
+  .og-ls-tabs,
+  .og-ls-chat,
+  .og-ls-ticket-box,
+  .og-ls-faq,
+  .og-ls-faq-item,
+  .og-ls-gate
+) {
+  color: #10233f;
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.14);
+  box-shadow: 0 8px 24px rgba(25, 94, 165, 0.08);
+}
+html:not(.dark) :is(
+  .og-ls-hero__icon-wrap,
+  .og-ls-ticket-box__icon,
+  .og-ls-msg__avatar,
+  .og-ls-composer__attach
+) {
+  color: #0878e8;
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.20);
+}
+html:not(.dark) :is(
+  .og-ls-hero__title,
+  .og-ls-chat__head-title,
+  .og-ls-ticket-box__title,
+  .og-ls-faq__title,
+  .og-ls-faq-trigger
+) {
+  color: #10233f;
+}
+html:not(.dark) .og-ls-faq__head {
+  color: #10233f;
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.14);
+}
+html:not(.dark) :is(.og-ls-tab, .og-ls-pill) {
+  color: #35506e;
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.16);
+}
+html:not(.dark) .og-ls-tab.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #0878e8, #0568ce);
+}
+html:not(.dark) :is(.og-ls-composer__input, .og-ls-textarea) {
+  color: #10233f;
+  background: #f8fbff;
+  border-color: rgba(25, 94, 165, 0.18);
+}
+html:not(.dark) :is(.og-ls-composer__send, .og-ls-submit, .og-ls-gate__btn) {
+  color: #ffffff;
+  background: linear-gradient(135deg, #25a8ff, #0878e8);
+  border-color: transparent;
+}

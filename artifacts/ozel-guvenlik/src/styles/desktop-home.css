@@ -44,17 +44,17 @@
 
 @media (min-width: 1024px) {
   .og-app {
-    --page-bg: #0d172b;
-    --header-bg: #080e1b;
-    --card-bg: #111a2b;
-    --card-bg-dark: #0b1220;
-    --card-border: rgba(226, 169, 17, 0.48);
-    --gold: #ffbe0b;
-    --gold-light: #ffd85a;
-    --text-primary: #f7f8fa;
-    --text-secondary: #aeb7c5;
-    --text-muted: #788395;
-    --divider: rgba(255, 255, 255, 0.08);
+    --page-bg: #f5f9ff;
+    --header-bg: rgba(255, 255, 255, 0.97);
+    --card-bg: #ffffff;
+    --card-bg-dark: #edf6ff;
+    --card-border: rgba(25, 94, 165, 0.14);
+    --gold: #0878e8;
+    --gold-light: #25a8ff;
+    --text-primary: #10233f;
+    --text-secondary: #60738d;
+    --text-muted: #71849b;
+    --divider: rgba(25, 94, 165, 0.10);
 
     background-color: var(--page-bg) !important;
     color: var(--text-primary);
@@ -128,7 +128,7 @@
     min-height: 72px;
     background: var(--header-bg, #080e1b) !important;
     border-bottom: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
-    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 5px 22px rgba(25, 94, 165, 0.08);
   }
 
   .og-header-inner.og-shell {
@@ -445,7 +445,7 @@
 
 @media (min-width: 1024px) and (max-width: 1199px) {
   .desktop-coming-soon-wrap .og-ref-quick-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -915,6 +915,66 @@
 
   .desktop-listings-table table {
     min-width: 720px;
+  }
+}
+
+/* Ana sayfada dört ilanı tek sırada göster. */
+@media (min-width: 1024px) {
+  .desktop-home.og-home-listings-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: clamp(10px, 1.2vw, 16px);
+    width: 100%;
+    min-width: 0;
+    margin-top: 8px;
+  }
+
+  .og-home-listings-grid > *,
+  .og-home-listings-grid .og-job {
+    min-width: 0;
+    height: 100%;
+  }
+
+  .og-home-listings-grid .og-job__inner {
+    gap: 9px;
+    padding: 12px 11px 10px;
+  }
+
+  .og-home-listings-grid .og-job__head {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .og-home-listings-grid :is(.og-job__logo, .og-job__logo-wrap) {
+    width: 54px;
+  }
+
+  .og-home-listings-grid .og-job__logo {
+    height: 54px;
+  }
+
+  .og-home-listings-grid .og-job__title {
+    font-size: 14px;
+  }
+
+  .og-home-listings-grid .og-job__aside {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    max-width: none;
+  }
+
+  .og-home-listings-grid .og-job__salary-box {
+    flex: 1;
+    max-width: none;
+  }
+
+  .og-home-listings-grid .og-job__foot {
+    gap: 6px;
+  }
+
+  .og-home-listings-grid .og-job__actions {
+    gap: 5px;
   }
 }
 

@@ -81,7 +81,6 @@ export function initDisplayModeEarly(): void {
   const lite = isLiteMode();
   applyLiteClassToDocument(lite);
   if (lite) {
-    try { document.documentElement.classList.add("dark"); } catch { /* ignore */ }
     try {
       if (localStorage.getItem(LS_MODE) !== "full") {
         localStorage.setItem(LS_MODE, "lite");

@@ -1,87 +1,49 @@
-import type { ReactNode } from "react";
-import { Briefcase, Newspaper, FileText, MapPin } from "lucide-react";
+import { Send, Bell, FileText, MapPin } from "lucide-react";
+import { Link } from "wouter";
 import "./home-ref-ui.css";
-
-/** Tasarım hazır olunca ilgili kartı true yapın — link/onClick tekrar açılır */
-const QUICK_CARDS_ENABLED = {
-  news: false,
-  near: false,
-} as const;
 
 type HomeQuickCardsProps = {
   showNewsBadge: boolean;
   onNearClick?: () => void;
 };
 
-function SoonQuickCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="og-ref-quick-card og-ref-quick-card--soon" aria-disabled="true">
-      <div className="og-ref-quick-soon-overlay">
-        <span>Yakında hizmetinizde</span>
-      </div>
-      {children}
-    </div>
-  );
-}
-
 export function HomeQuickCards({
-  showNewsBadge,
-  onNearClick,
+  showNewsBadge: _showNewsBadge,
+  onNearClick: _onNearClick,
 }: HomeQuickCardsProps) {
   return (
     <section className="og-ref-quick-row" aria-label="Hızlı erişim">
-      <SoonQuickCard>
+      <div className="og-ref-quick-card" aria-label="Yeni özellikler yakında hizmetinizde">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Briefcase className="w-4 h-4" strokeWidth={2.25} />
+          <Send className="w-7 h-7" strokeWidth={1.8} />
         </div>
-        <div className="og-ref-quick-title">Bana Uygun İş İlanları</div>
-        <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
-      </SoonQuickCard>
+        <div className="og-ref-quick-title">Yakında Hizmetinizde</div>
+        <div className="og-ref-quick-sub">Yeni özellikleri yolda!</div>
+      </div>
 
-      {QUICK_CARDS_ENABLED.news ? (
-        <a href="/blog" className="og-ref-quick-card">
-          {showNewsBadge && <span className="og-ref-quick-badge">Yeni</span>}
-          <div className="og-ref-quick-icon" aria-hidden>
-            <Newspaper className="w-4 h-4" strokeWidth={2.25} />
-          </div>
-          <div className="og-ref-quick-title">Haberler</div>
-          <div className="og-ref-quick-sub">Güncel</div>
-        </a>
-      ) : (
-        <SoonQuickCard>
-          <div className="og-ref-quick-icon" aria-hidden>
-            <Newspaper className="w-4 h-4" strokeWidth={2.25} />
-          </div>
-          <div className="og-ref-quick-title">Haberler</div>
-          <div className="og-ref-quick-sub">Güncel</div>
-        </SoonQuickCard>
-      )}
-
-      {QUICK_CARDS_ENABLED.near ? (
-        <button type="button" className="og-ref-quick-card" onClick={onNearClick}>
-          <div className="og-ref-quick-icon" aria-hidden>
-            <MapPin className="w-4 h-4" strokeWidth={2.25} />
-          </div>
-          <div className="og-ref-quick-title">Ö.GG ARAÇLARI</div>
-          <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
-        </button>
-      ) : (
-        <SoonQuickCard>
-          <div className="og-ref-quick-icon" aria-hidden>
-            <MapPin className="w-4 h-4" strokeWidth={2.25} />
-          </div>
-          <div className="og-ref-quick-title">Ö.GG ARAÇLARI</div>
-          <div className="og-ref-quick-sub">Yakında hizmetinizde</div>
-        </SoonQuickCard>
-      )}
-
-      <a href="/cv-olustur" className="og-ref-quick-card">
+      <div className="og-ref-quick-card" aria-label="Geliştirmeler yakında hizmetinizde">
         <div className="og-ref-quick-icon" aria-hidden>
-          <FileText className="w-4 h-4" strokeWidth={2.25} />
+          <MapPin className="w-7 h-7" strokeWidth={2} />
+        </div>
+        <div className="og-ref-quick-title">Yakında Hizmetinizde</div>
+        <div className="og-ref-quick-sub">Geliştirmeler devam ediyor</div>
+      </div>
+
+      <div className="og-ref-quick-card" aria-label="Bildirimler yakında hizmetinizde">
+        <div className="og-ref-quick-icon" aria-hidden>
+          <Bell className="w-7 h-7" strokeWidth={2} />
+        </div>
+        <div className="og-ref-quick-title">Yakında Hizmetinizde</div>
+        <div className="og-ref-quick-sub">Bildirimlerle haberdar olun</div>
+      </div>
+
+      <Link href="/cv-olustur" className="og-ref-quick-card" aria-label="CV oluşturma sayfasını aç">
+        <div className="og-ref-quick-icon" aria-hidden>
+          <FileText className="w-7 h-7" strokeWidth={2} />
         </div>
         <div className="og-ref-quick-title">CV Oluştur</div>
         <div className="og-ref-quick-sub">CV'ni hemen hazırla</div>
-      </a>
+      </Link>
     </section>
   );
 }

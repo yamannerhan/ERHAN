@@ -1,12 +1,12 @@
 /* ── İlanlar sayfası — referans görsel ───────────────────────── */
 
 .og-listings-page {
-  --lp-bg: #0a0e14;
-  --lp-gold: #f5c518;
-  --lp-gold-2: #ffb800;
-  --lp-border: rgba(245, 197, 24, 0.28);
-  --lp-card-border: rgba(100, 116, 139, 0.32);
-  --lp-pill: rgba(255, 255, 255, 0.06);
+  --lp-bg: #f5f9ff;
+  --lp-gold: #0878e8;
+  --lp-gold-2: #25a8ff;
+  --lp-border: rgba(8, 120, 232, 0.20);
+  --lp-card-border: rgba(25, 94, 165, 0.14);
+  --lp-pill: #edf6ff;
   padding: 0 14px 12px;
   display: flex;
   flex-direction: column;

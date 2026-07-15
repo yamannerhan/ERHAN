@@ -11,7 +11,7 @@ export function PageLoader() {
         flexDirection: "column",
         gap: 12,
         padding: 24,
-        color: "#94a3b8",
+        color: "#60738d",
         fontFamily: "system-ui, sans-serif",
       }}
       aria-live="polite"
@@ -21,8 +21,8 @@ export function PageLoader() {
         style={{
           width: 32,
           height: 32,
-          border: "3px solid rgba(245,197,24,0.2)",
-          borderTopColor: "#f5c518",
+          border: "3px solid rgba(8,120,232,0.16)",
+          borderTopColor: "#0878e8",
           borderRadius: "50%",
           animation: "og-spin 0.9s linear infinite",
         }}

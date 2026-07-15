@@ -43,37 +43,45 @@
 
 :root {
   --radius: 0.625rem;
-  --background: #0F172A;
-  --foreground: #F1F5F9;
-  --card: #1E293B;
-  --card-foreground: #F1F5F9;
-  --popover: #1E293B;
-  --popover-foreground: #F1F5F9;
-  --primary: #4F46E5;
-  --primary-foreground: #F1F5F9;
-  --secondary: #7C3AED;
-  --secondary-foreground: #F1F5F9;
-  --muted: #334155;
-  --muted-foreground: #94A3B8;
-  --accent: #06B6D4;
-  --accent-foreground: #0F172A;
+  --background: #f5f9ff;
+  --foreground: #10233f;
+  --card: #ffffff;
+  --card-foreground: #10233f;
+  --popover: #ffffff;
+  --popover-foreground: #10233f;
+  --primary: #0878e8;
+  --primary-foreground: #ffffff;
+  --secondary: #25a8ff;
+  --secondary-foreground: #ffffff;
+  --muted: #eaf3ff;
+  --muted-foreground: #60738d;
+  --accent: #0878e8;
+  --accent-foreground: #ffffff;
   --destructive: #EF4444;
-  --border: rgba(255,255,255,0.08);
-  --input: rgba(255,255,255,0.08);
-  --ring: #4F46E5;
-  --chart-1: #4F46E5;
-  --chart-2: #7C3AED;
-  --chart-3: #06B6D4;
+  --border: rgba(25, 94, 165, 0.14);
+  --input: rgba(25, 94, 165, 0.12);
+  --ring: #0878e8;
+  --chart-1: #0878e8;
+  --chart-2: #25a8ff;
+  --chart-3: #0ea5e9;
   --chart-4: #10B981;
   --chart-5: #F59E0B;
-  --sidebar: #1E293B;
-  --sidebar-foreground: #F1F5F9;
-  --sidebar-primary: #4F46E5;
-  --sidebar-primary-foreground: #F1F5F9;
-  --sidebar-accent: #334155;
-  --sidebar-accent-foreground: #F1F5F9;
-  --sidebar-border: rgba(255,255,255,0.08);
-  --sidebar-ring: #4F46E5;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #10233f;
+  --sidebar-primary: #0878e8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eaf3ff;
+  --sidebar-accent-foreground: #10233f;
+  --sidebar-border: rgba(25, 94, 165, 0.14);
+  --sidebar-ring: #0878e8;
+  --og-blue-50: #f4f9ff;
+  --og-blue-100: #e5f2ff;
+  --og-blue-500: #0878e8;
+  --og-blue-600: #0568ce;
+  --og-blue-700: #0759aa;
+  --og-ink: #10233f;
+  --og-surface: #ffffff;
+  --og-shadow: 0 10px 30px rgba(20, 84, 150, 0.10);
 
   /* Responsive shell â€” Xiaomi 13T baseline (safe=0 â†’ mevcut pb-24 / h-14 / 68px nav) */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -172,7 +180,8 @@
   border-radius: 1rem;
   aspect-ratio: 3 / 1;
   min-height: 88px;
-  background: #0b0e14;
+  background: linear-gradient(135deg, #0759aa, #25a8ff);
+  box-shadow: var(--og-shadow);
   isolation: isolate;
 }
 .og-banner-carousel__slide {
@@ -186,12 +195,101 @@
   width: 100%;
   height: 100%;
 }
+.og-banner-carousel__link,
+.og-banner-carousel picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .og-banner-carousel img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: center;
+}
+.og-banner-carousel__shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(4, 36, 75, 0.78), rgba(4, 63, 117, 0.32) 58%, transparent 82%);
+  pointer-events: none;
+}
+.og-banner-carousel__copy {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: clamp(18px, 4vw, 52px);
+  width: min(58%, 36rem);
+  transform: translateY(-50%);
+  color: #ffffff;
+  pointer-events: none;
+}
+.og-banner-carousel__copy h1 {
+  margin: 0;
+  font-size: clamp(19px, 3.3vw, 42px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.og-banner-carousel__copy p {
+  margin: clamp(6px, 1vw, 12px) 0 0;
+  font-size: clamp(10px, 1.35vw, 17px);
+  font-weight: 600;
+  line-height: 1.35;
+  opacity: 0.93;
+}
+.og-banner-carousel__copy span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin-top: clamp(9px, 1.7vw, 18px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  color: #0878e8;
+  background: #ffffff;
+  box-shadow: 0 5px 15px rgba(3, 34, 70, 0.18);
+  font-size: clamp(9px, 1.2vw, 13px);
+  font-weight: 850;
+}
+.og-banner-carousel__copy--cta-only {
+  top: auto;
+  bottom: clamp(12px, 2vw, 24px);
+  width: auto;
+  transform: none;
+}
+.og-banner-carousel__copy--cta-only span {
+  min-height: 34px;
+  margin-top: 0;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0878e8, #0568ce);
+  box-shadow: 0 7px 18px rgba(8, 120, 232, 0.30);
+}
+@media (max-width: 767px) {
+  .og-banner-carousel__copy {
+    left: 18px;
+    width: 70%;
+  }
+  .og-banner-carousel__copy h1 {
+    font-size: clamp(18px, 6vw, 27px);
+  }
+  .og-banner-carousel__copy p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: clamp(10px, 3vw, 13px);
+  }
+  .og-banner-carousel__copy--cta-only {
+    bottom: 10px;
+    left: 18px;
+  }
+  .og-banner-carousel__copy--cta-only span {
+    min-height: 28px;
+    padding: 5px 10px;
+    font-size: 9px;
+  }
 }
 @supports not (aspect-ratio: 3 / 1) {
   .og-banner-carousel {
@@ -939,24 +1037,24 @@
    LIGHT MODE OVERRIDES â€” applies when html does NOT have .dark
    â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 html:not(.dark) {
-  --background: #fafafa;
-  --foreground: #0f172a;
+  --background: #f5f9ff;
+  --foreground: #10233f;
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #10233f;
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #f59e0b;
-  --primary-foreground: #1e1b0a;
-  --secondary: #facc15;
-  --secondary-foreground: #1e1b0a;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #f59e0b;
-  --accent-foreground: #1e1b0a;
+  --popover-foreground: #10233f;
+  --primary: #0878e8;
+  --primary-foreground: #ffffff;
+  --secondary: #25a8ff;
+  --secondary-foreground: #ffffff;
+  --muted: #eaf3ff;
+  --muted-foreground: #60738d;
+  --accent: #0878e8;
+  --accent-foreground: #ffffff;
   --destructive: #ef4444;
-  --border: rgba(15,23,42,0.10);
-  --input: rgba(15,23,42,0.08);
-  --ring: #f59e0b;
+  --border: rgba(25, 94, 165, 0.14);
+  --input: rgba(25, 94, 165, 0.12);
+  --ring: #0878e8;
 }
 html:not(.dark) body {
   background: var(--background);
@@ -967,7 +1065,7 @@ html:not(.dark) body {
 .og-text { color: var(--foreground); }
 .og-text-muted { color: var(--muted-foreground); }
 .og-gold-gradient {
-  background: linear-gradient(135deg, #facc15, #f59e0b);
+  background: linear-gradient(135deg, #0878e8, #25a8ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

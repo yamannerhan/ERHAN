@@ -8,6 +8,11 @@ export const bannersTable = pgTable("banners", {
   imageUrl: text("image_url").notNull(),
   /** Deploy-sonrası kalıcı JPEG (base64, data: öneki yok) */
   imageData: text("image_data"),
+  mobileImageUrl: text("mobile_image_url"),
+  mobileImageData: text("mobile_image_data"),
+  subtitle: text("subtitle"),
+  ctaLabel: text("cta_label"),
+  altText: text("alt_text"),
   linkUrl: text("link_url"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),

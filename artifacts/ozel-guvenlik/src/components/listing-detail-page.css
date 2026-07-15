@@ -539,3 +539,46 @@
   max-width: 400px;
   margin: 0 auto;
 }
+
+/* Beyaz-mavi tema */
+html:not(.dark) .og-ld-page {
+  color: #10233f;
+  background: transparent;
+}
+html:not(.dark) :is(
+  .og-ld-card,
+  .og-ld-side-card,
+  .og-ld-company-box,
+  .og-ld-quick-item,
+  .og-ld-stat,
+  .og-ld-gate
+) {
+  color: #10233f;
+  background: #ffffff;
+  border-color: rgba(25, 94, 165, 0.14);
+  box-shadow: 0 8px 24px rgba(25, 94, 165, 0.08);
+}
+html:not(.dark) :is(
+  .og-ld-title,
+  .og-ld-section-title,
+  .og-ld-side-title,
+  .og-ld-company-name,
+  .og-ld-side-company-name
+) {
+  color: #10233f;
+}
+html:not(.dark) :is(
+  .og-ld-cv-btn,
+  .og-ld-side-outline,
+  .og-ld-share-btn--x,
+  .og-ld-share-btn--copy
+) {
+  color: #0878e8;
+  background: #edf6ff;
+  border-color: rgba(8, 120, 232, 0.24);
+}
+html:not(.dark) .og-ld-apply-btn {
+  color: #ffffff;
+  background: linear-gradient(135deg, #25a8ff, #0878e8);
+  border-color: transparent;
+}

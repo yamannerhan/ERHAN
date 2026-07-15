@@ -9,8 +9,8 @@
   justify-content: center;
   gap: 14px;
   padding: 24px;
-  background: radial-gradient(ellipse 120% 80% at 50% 20%, #1a2744 0%, #0f172a 55%, #080d18 100%);
-  color: #f1f5f9;
+  background: radial-gradient(ellipse 120% 80% at 50% 20%, #ffffff 0%, #f5f9ff 58%, #eaf4ff 100%);
+  color: #10233f;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   text-align: center;
   overflow: hidden;
@@ -21,7 +21,7 @@
   width: 220px;
   height: 220px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(245, 197, 24, 0.28) 0%, rgba(245, 197, 24, 0) 70%);
+  background: radial-gradient(circle, rgba(37, 168, 255, 0.20) 0%, rgba(37, 168, 255, 0) 70%);
   animation: og-splash-glow 2.4s ease-in-out infinite;
   pointer-events: none;
 }
@@ -37,7 +37,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  filter: drop-shadow(0 8px 24px rgba(245, 197, 24, 0.35));
+  filter: drop-shadow(0 8px 24px rgba(8, 120, 232, 0.20));
   animation: og-splash-float 2.8s ease-in-out 0.85s infinite;
 }
 
@@ -46,18 +46,18 @@
   font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: #e2e8f0;
+  color: #10233f;
   animation: og-splash-text-in 0.7s ease 0.35s both;
 }
 
 .og-pwa-splash__brand span {
-  color: #f5c518;
+  color: #0878e8;
 }
 
 .og-pwa-splash__tag {
   margin: 0;
   font-size: 11px;
-  color: #64748b;
+  color: #60738d;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -67,8 +67,8 @@
 .og-pwa-splash__ring {
   width: 28px;
   height: 28px;
-  border: 2px solid rgba(245, 197, 24, 0.2);
-  border-top-color: #f5c518;
+  border: 2px solid rgba(8, 120, 232, 0.16);
+  border-top-color: #0878e8;
   border-radius: 50%;
   animation: og-splash-spin 0.85s linear infinite, og-splash-text-in 0.5s ease 0.65s both;
   margin-top: 4px;

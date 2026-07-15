@@ -7,11 +7,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Link, useLocation } from "wouter";
 import {
   Bell, X, Heart, MessageCircle, Info, Briefcase, CheckCheck, ChevronRight, ChevronLeft,
-  Menu, Sun, Moon, Home as HomeIcon, Tag, Plus, Clock3, Search,
+  Menu, Home as HomeIcon, Tag, Plus, Clock3, Search,
   MapPin, User as UserIcon, Bookmark,
 } from "lucide-react";
 import "./mobile-bottom-nav.css";
 import "@/styles/desktop-home.css";
+import "@/styles/white-blue-theme.css";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   useGetOnlineCount, getGetOnlineCountQueryKey,
@@ -32,12 +33,13 @@ const ChatBubble = lazy(() => import("./chat-bubble").then((m) => ({ default: m.
 /* ── Theme hook ───────────────────────────────────────────── */
 function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof window === "undefined") return "dark";
+    if (typeof window === "undefined") return "light";
     try {
+      if (localStorage.getItem("og_white_blue_theme_v1") !== "1") return "light";
       const stored = localStorage.getItem("theme");
-      return stored === "light" ? "light" : "dark";
+      return stored === "dark" ? "dark" : "light";
     } catch {
-      return "dark";
+      return "light";
     }
   });
 
@@ -50,6 +52,7 @@ function useTheme() {
     }
     try {
       localStorage.setItem("theme", theme);
+      localStorage.setItem("og_white_blue_theme_v1", "1");
     } catch { /* ignore */ }
   }, [theme]);
 
@@ -87,7 +90,7 @@ function MobileBottomNav() {
     { icon: MapPin, label: "Yakınımda", path: "/yakindaki-ilanlar" },
   ];
 
-  const hasDividerAfter = (index: number) => index === 0 || index === 1 || index === 3;
+  const hasDividerAfter = (index: number) => index < items.length - 1;
 
   const nav = (
     <nav className="og-bottom-nav" aria-label="Alt menü">
@@ -96,9 +99,9 @@ function MobileBottomNav() {
           <svg className="og-bn-arch-line" viewBox="0 -34 84 34" preserveAspectRatio="none">
             <path
               d="M 0.77 0 A 42 42 0 0 1 83.23 0 Z"
-              fill="#111d2e"
-              stroke="#D99A00"
-              strokeWidth="1"
+              fill="#ffffff"
+              stroke="#0878e8"
+              strokeWidth="1.5"
               vectorEffect="non-scaling-stroke"
             />
           </svg>
@@ -168,7 +171,7 @@ export function Layout({
   const { isLite, isDesktop } = useDisplayMode();
   const [location, navigate] = useLocation();
   const queryClient = useQueryClient();
-  const { theme, toggle: toggleTheme } = useTheme();
+  useTheme();
 
   const [liveCount, setLiveCount] = useState<number | null>(null);
   const [showPanel, setShowPanel] = useState(false);
@@ -222,11 +225,6 @@ export function Layout({
       cancelled = true;
       cleanup?.();
     };
-  }, [isLite]);
-
-  useEffect(() => {
-    if (!isLite) return;
-    document.documentElement.classList.add("dark");
   }, [isLite]);
 
   /* Socket.io — online count + push notifications (lite modda kapalı) */
@@ -299,6 +297,15 @@ export function Layout({
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, [showPanel]);
+
+  useEffect(() => {
+    if (!showPanel) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowPanel(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
   }, [showPanel]);
 
   const handleBellClick = async () => {
@@ -400,7 +407,7 @@ export function Layout({
           </button>
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group min-w-0 shrink">
+            <Link href="/" className="og-header-brand-link flex items-center gap-2 group min-w-0 shrink" aria-label="Özel Güvenlik ana sayfa">
             <div className="relative w-[42px] h-[42px] shrink-0 rounded-lg og-logo-shield og-logo-shield--brand flex items-center justify-center overflow-hidden">
               <BrandLogo size={42} />
             </div>
@@ -475,23 +482,6 @@ export function Layout({
 
             {!customHeader && <PwaInstall />}
 
-            {/* Theme toggle — Lite modda kapalı */}
-            {!customHeader && !isLite && (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === "dark" ? "Aydınlık moda geç" : "Karanlık moda geç"}
-              className="og-icon-btn p-2"
-              title={theme === "dark" ? "Aydınlık mod" : "Karanlık mod"}
-            >
-              {theme === "dark" ? (
-                <Sun className="w-[18px] h-[18px]" />
-              ) : (
-                <Moon className="w-[18px] h-[18px]" />
-              )}
-            </button>
-            )}
-
             {/* Bell */}
             <div ref={panelRef} className="relative">
               <button
@@ -534,7 +524,11 @@ export function Layout({
                             <CheckCheck className="w-3.5 h-3.5" /> Tümünü okundu
                           </button>
                         )}
-                        <button onClick={() => setShowPanel(false)} className="text-muted-foreground hover:text-foreground p-0.5 ml-1">
+                        <button
+                          onClick={() => setShowPanel(false)}
+                          className="text-muted-foreground hover:text-foreground p-2 ml-1"
+                          aria-label="Bildirim panelini kapat"
+                        >
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -599,7 +593,11 @@ export function Layout({
             </div>
 
             {/* Avatar + greeting */}
-            <Link href={user ? `/profil/${user.username}` : "/giris"} className="og-header-user shrink-0 ml-1 flex items-center gap-2">
+            <Link
+              href={user?.username ? `/profil/${user.username}` : "/giris"}
+              className="og-header-user shrink-0 ml-1 flex items-center gap-2"
+              aria-label={user?.username ? `${user.username} profilini aç` : "Giriş yap veya profilini aç"}
+            >
               {user?.avatarUrl ? (
                 <img src={user.avatarUrl} alt={user.username} className="w-8 h-8 rounded-full object-cover ring-2 ring-amber-400/40 hover:ring-amber-400 transition-all" />
               ) : user ? (
