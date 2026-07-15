@@ -1,6 +1,4 @@
 User-agent: *
 Allow: /
 
-Disallow: /ilanlar?
-
 Sitemap: https://ozelguvenlik.online/sitemap.xml

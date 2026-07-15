@@ -2,15 +2,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 import { Link } from "wouter";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
-import { SEO_BASE_URL, SEO_OG_IMAGE, buildNotFoundDescription, buildNotFoundTitle } from "@/lib/seo-config";
+import { SEO_OG_IMAGE, buildNotFoundDescription, buildNotFoundTitle } from "@/lib/seo-config";
 
 export default function NotFound() {
-  const pageUrl = typeof window !== "undefined" ? window.location.href.split("?")[0] : SEO_BASE_URL;
-
   useDocumentMeta({
     title: buildNotFoundTitle(),
     description: buildNotFoundDescription(),
-    canonical: pageUrl,
+    robots: "noindex, follow",
+    canonical: null,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
   });

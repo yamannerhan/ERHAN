@@ -5,13 +5,11 @@
  */
 
 import { db, listingsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq, ilike } from "drizzle-orm";
+import { indexableListingCondition } from "./seo-listing-policy";
 
 export const SEO_BASE_URL = "https://ozelguvenlik.online";
 export const SEO_DISPLAY_URL = "ozelguvenlik.online";
-
-const DEFAULT_SALARY_MIN = 25000;
-const DEFAULT_SALARY_MAX = 55000;
 
 function parseSalaryMinMax(salary: unknown): { min: number | null; max: number | null } {
   const raw = String(salary ?? "").trim();
@@ -49,10 +47,8 @@ function buildBaseSalary(opts: {
     min = parsed.min;
     max = parsed.max;
   }
-  if (min == null && max == null) {
-    min = DEFAULT_SALARY_MIN;
-    max = DEFAULT_SALARY_MAX;
-  } else if (min == null) {
+  if (min == null && max == null) return undefined;
+  if (min == null) {
     min = max;
   } else if (max == null) {
     max = min;
@@ -64,7 +60,24 @@ function buildBaseSalary(opts: {
   return { "@type": "MonetaryAmount", currency: "TRY", value };
 }
 
-const PROVINCES = [
+function mapEmploymentType(workType: unknown): string | undefined {
+  const value = String(workType ?? "").trim().toLocaleLowerCase("tr-TR");
+  if (!value) return undefined;
+  if (/part|yarı\s*zaman|yarim\s*zaman|günlük|gunluk/.test(value)) return "PART_TIME";
+  if (/proje|geçici|gecici|dönemsel|donemsel/.test(value)) return "TEMPORARY";
+  if (/sözleşmeli|sozlesmeli|kontrat/.test(value)) return "CONTRACTOR";
+  if (/staj|intern/.test(value)) return "INTERN";
+  if (/tam\s*zaman|full[\s-]*time|sürekli|surekli/.test(value)) return "FULL_TIME";
+  return undefined;
+}
+
+function toIsoDate(value: unknown): string | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+export const SEO_PROVINCES = [
   "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
   "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
   "Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun",
@@ -76,12 +89,12 @@ const PROVINCES = [
   "Karabük","Kilis","Osmaniye","Düzce",
 ];
 
-const DISTRICTS = [
+export const SEO_DISTRICTS = [
   "Gebze","Darıca","Çayırova","Dilovası","İzmit","GOSB","TOSB",
   "İstanbul Anadolu Yakası","İstanbul Avrupa Yakası",
 ];
 
-export const ALL_LOCATIONS = [...PROVINCES, ...DISTRICTS];
+export const ALL_LOCATIONS = [...SEO_PROVINCES, ...SEO_DISTRICTS];
 
 export function toSlug(txt: string): string {
   return txt
@@ -108,14 +121,27 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-interface SeoMeta {
+export interface SeoMeta {
   title: string;
   description: string;
-  canonical: string;
+  canonical: string | null;
   ogImage?: string;
   ogType?: string;
+  robots?: string;
   jsonLd?: object[];
   bodyHtml: string;
+}
+
+export function buildNotFoundSeoMeta(): SeoMeta {
+  return {
+    title: "Sayfa Bulunamadı | Özel Güvenlik Online",
+    description: "Aradığınız sayfa bulunamadı. Güncel özel güvenlik iş ilanlarına ana sayfadan ulaşabilirsiniz.",
+    canonical: null,
+    robots: "noindex, follow",
+    ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
+    ogType: "website",
+    bodyHtml: "<main><h1>Sayfa Bulunamadı</h1><p>Aradığınız sayfa mevcut değil veya kaldırılmış olabilir.</p></main>",
+  };
 }
 
 /* ───────────── HOME ───────────── */
@@ -125,11 +151,11 @@ function buildHomeMeta(): SeoMeta {
     .join(" · ");
 
   return {
-    title: "Özel Güvenlik İş İlanları | ozelguvenlik.online — Bay Bayan Güvenlik Personeli Alımları",
+    title: "Özel Güvenlik İş İlanları | Özel Güvenlik Online",
     description:
-      "ozelguvenlik.online — Türkiye geneli özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV oluşturma ve anında başvuru.",
+      "Türkiye genelindeki güncel özel güvenlik iş ilanlarını inceleyin. Silahlı, silahsız, bay ve bayan güvenlik görevlisi ilanlarına ücretsiz ulaşın.",
     canonical: `${SEO_BASE_URL}/`,
-    ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+    ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
     ogType: "website",
     jsonLd: [
       {
@@ -155,7 +181,7 @@ function buildHomeMeta(): SeoMeta {
       },
     ],
     bodyHtml: `
-<header><h1>Özel Güvenlik İş İlanları — Türkiye Geneli Bay Bayan Personel Alımı</h1></header>
+<header><h1>Türkiye Geneli Güncel Özel Güvenlik İş İlanları</h1></header>
 <main>
 <p><strong>ozelguvenlik.online</strong>, Türkiye genelinde silahlı ve silahsız özel güvenlik görevlisi iş ilanlarının yayınlandığı ücretsiz bir platformdur. AVM, fabrika, site, plaza, hastane, otel, OSB, lojistik ve okul güvenliği gibi tüm pozisyonlarda bay bayan personel alımları burada listelenir. Yapay zeka destekli iş bulma asistanı, ücretsiz CV oluşturma aracı ve şehir bazlı detaylı arama özellikleri ile aradığınız özel güvenlik işine kolayca ulaşırsınız.</p>
 <h2>Şehir Bazlı Özel Güvenlik İş İlanları</h2>
@@ -234,12 +260,10 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
         city: listingsTable.city,
       })
       .from(listingsTable)
-      .where(eq(listingsTable.status, "active"))
+      .where(and(indexableListingCondition(), ilike(listingsTable.city, `%${city}%`)))
       .orderBy(desc(listingsTable.updatedAt))
       .limit(50);
-    cityListings = rows
-      .filter(r => (r.city || "").toLocaleLowerCase("tr-TR").includes(city.toLocaleLowerCase("tr-TR")))
-      .slice(0, 20);
+    cityListings = rows.slice(0, 20);
   } catch { /* ignore */ }
 
   const listingLinks = cityListings.length
@@ -258,7 +282,7 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     title,
     description,
     canonical: pageUrl,
-    ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+    ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
     ogType: "website",
     jsonLd: [
       {
@@ -312,54 +336,48 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
     const rows = await db
       .select()
       .from(listingsTable)
-      .where(eq(listingsTable.id, id))
+      .where(and(eq(listingsTable.id, id), indexableListingCondition()))
       .limit(1);
     const listing = rows[0];
-    if (!listing || listing.status !== "active") return null;
+    if (!listing) return null;
 
     const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
-    const company = (listing.company || "").trim() || "Belirtilmemiş";
-    const city = (listing.city || "").trim() || "Türkiye";
-    const title = `${listing.title || "Güvenlik Personeli"} | ${company} | Özel Güvenlik İş İlanları`;
+    const listingTitle = (listing.title || "").trim();
+    const company = (listing.company || "").trim();
+    const city = (listing.city || "").trim();
+    const title = `${listingTitle || "Güvenlik Personeli"}${company ? ` | ${company}` : ""} | Özel Güvenlik İş İlanları`;
     const desc = ((listing.description || "") + "")
       .replace(/\s+/g, " ")
-      .slice(0, 158) || `${city} bölgesinde ${company} özel güvenlik görevlisi alımı.`;
-    const validThrough = listing.expiresAt
-      ? new Date(listing.expiresAt as Date).toISOString()
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const datePosted = listing.createdAt
-      ? new Date(listing.createdAt as Date).toISOString()
-      : new Date().toISOString();
+      .slice(0, 158) || `${city || "Türkiye"} bölgesinde özel güvenlik görevlisi alımı.`;
+    const validThrough = toIsoDate(listing.expiresAt);
+    const datePosted = toIsoDate(listing.publishedAt) ?? toIsoDate(listing.sourcePublishedAt) ?? toIsoDate(listing.createdAt);
+    const employmentType = mapEmploymentType(listing.workType);
+    const baseSalary = buildBaseSalary({ salary: listing.salary, salaryMin: listing.salaryMin, salaryMax: listing.salaryMax });
+    const companyLogo = listing.companyLogoUrl
+      ? (listing.companyLogoUrl.startsWith("http") ? listing.companyLogoUrl : `${SEO_BASE_URL}${listing.companyLogoUrl.startsWith("/") ? "" : "/"}${listing.companyLogoUrl}`)
+      : undefined;
 
     return {
       title,
       description: desc,
       canonical: pageUrl,
-      ogImage: (listing as any).companyLogoUrl || `${SEO_BASE_URL}/og-image.jpg`,
+      ogImage: companyLogo || `${SEO_BASE_URL}/og-brand.jpg`,
       ogType: "article",
       jsonLd: [
         {
           "@context": "https://schema.org",
           "@type": "JobPosting",
-          title: listing.title || "Güvenlik Personeli Aranıyor",
-          description: listing.description || desc,
+          ...(listingTitle ? { title: listingTitle } : {}),
+          ...(listing.description?.trim() ? { description: listing.description.trim() } : {}),
           identifier: { "@type": "PropertyValue", name: "Özel Güvenlik Online", value: String(listing.id) },
-          datePosted,
-          validThrough,
-          employmentType: "FULL_TIME",
-          directApply: true,
-          hiringOrganization: { "@type": "Organization", name: company, sameAs: SEO_BASE_URL },
-          jobLocation: {
-            "@type": "Place",
-            address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" },
-          },
-          baseSalary: buildBaseSalary({
-            salary: (listing as { salary?: string | null }).salary,
-            salaryMin: (listing as { salaryMin?: number | null }).salaryMin,
-            salaryMax: (listing as { salaryMax?: number | null }).salaryMax,
-          }),
+          ...(datePosted ? { datePosted } : {}),
+          ...(validThrough ? { validThrough } : {}),
+          ...(employmentType ? { employmentType } : {}),
+          ...(company ? { hiringOrganization: { "@type": "Organization", name: company } } : {}),
+          ...(city ? { jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" } } } : {}),
+          ...(baseSalary ? { baseSalary } : {}),
           url: pageUrl,
-          image: (listing as { companyLogoUrl?: string | null }).companyLogoUrl || `${SEO_BASE_URL}/og-image.jpg`,
+          ...(companyLogo ? { image: companyLogo } : {}),
         },
         {
           "@context": "https://schema.org",
@@ -377,11 +395,11 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
 <p><strong>Firma:</strong> ${escapeHtml(listing.company || "")}<br/>
 <strong>Şehir:</strong> ${escapeHtml(listing.city || "")}<br/>
 <strong>Pozisyon:</strong> Özel Güvenlik Görevlisi<br/>
-<strong>Çalışma Tipi:</strong> ${escapeHtml((listing as any).workType || "Tam Zamanlı")}<br/>
-<strong>Maaş:</strong> ${escapeHtml((listing as any).salary || "Görüşülecek")}</p>
+${listing.workType ? `<strong>Çalışma Tipi:</strong> ${escapeHtml(listing.workType)}<br/>` : ""}
+${listing.salary ? `<strong>Maaş:</strong> ${escapeHtml(listing.salary)}` : ""}</p>
 <h2>İlan Açıklaması</h2>
 <p>${escapeHtml(listing.description || desc)}</p>
-${(listing as any).requirements ? `<h2>Aranan Şartlar</h2><p>${escapeHtml((listing as any).requirements)}</p>` : ""}
+${listing.requirements ? `<h2>Aranan Şartlar</h2><p>${escapeHtml(listing.requirements)}</p>` : ""}
 <p><a href="${SEO_BASE_URL}/ilanlar">Tüm İlanlar</a> · <a href="${SEO_BASE_URL}/${toSlug(listing.city || "turkiye")}">${escapeHtml(listing.city || "")} İlanları</a></p>
 </main>`,
     };
@@ -392,6 +410,7 @@ ${(listing as any).requirements ? `<h2>Aranan Şartlar</h2><p>${escapeHtml((list
 
 /* ───────────── ROUTING ───────────── */
 export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | null> {
+  const hasQuery = pathname.includes("?");
   const clean = pathname.split("?")[0]!.replace(/\/+$/, "") || "/";
 
   if (clean === "/" || clean === "") return buildHomeMeta();
@@ -401,14 +420,19 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
       title: "Güncel Özel Güvenlik İş İlanları | Bay Bayan Personel Alımları",
       description: "Aktif özel güvenlik iş ilanlarını şehir, maaş ve pozisyona göre filtreleyin. Silahlı, silahsız, AVM, fabrika ve site güvenliği bay bayan personel alımları.",
       canonical: `${SEO_BASE_URL}/ilanlar`,
-      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
       ogType: "website",
-      jsonLd: [{
-        "@context": "https://schema.org",
-        "@type": "CollectionPage",
-        name: "Özel Güvenlik İş İlanları",
-        url: `${SEO_BASE_URL}/ilanlar`,
-      }],
+      robots: hasQuery ? "noindex, follow" : undefined,
+      jsonLd: [
+        {
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
+            { "@type": "ListItem", position: 2, name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+          ],
+        },
+        { "@context": "https://schema.org", "@type": "CollectionPage", name: "Özel Güvenlik İş İlanları", url: `${SEO_BASE_URL}/ilanlar` },
+      ],
       bodyHtml: `<header><h1>Güncel Özel Güvenlik İş İlanları</h1></header><main><p>Türkiye genelinde aktif özel güvenlik iş ilanları.</p></main>`,
     };
   }
@@ -418,8 +442,15 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
       title: "Özel Güvenlik Blog | İş Arama Rehberi",
       description: "Özel güvenlik sektörü blog yazıları, maaş rehberleri ve iş arama ipuçları.",
       canonical: `${SEO_BASE_URL}/blog`,
-      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
       ogType: "website",
+      jsonLd: [{
+        "@context": "https://schema.org", "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
+          { "@type": "ListItem", position: 2, name: "Blog", item: `${SEO_BASE_URL}/blog` },
+        ],
+      }],
       bodyHtml: `<header><h1>Özel Güvenlik Blog</h1></header>`,
     };
   }
@@ -434,14 +465,30 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
       "istanbul-ozel-guvenlik-is-ilanlari-rehberi": "İstanbul Özel Güvenlik İş İlanları Rehberi",
       "kocaeli-gebze-guvenlik-is-ilanlari": "Kocaeli ve Gebze Güvenlik İş İlanları",
     };
-    const title = titles[slug] ?? "Özel Güvenlik Blog";
+    const title = titles[slug];
+    if (!title) return null;
+    const descriptions: Record<string, string> = {
+      "ozel-guvenlik-is-ilanlari-nasil-bulunur": "Özel güvenlik iş ilanlarına nasıl ulaşılır, hangi platformlar güvenilirdir ve başvuru sürecinde nelere dikkat edilmelidir? Kapsamlı rehber.",
+      "silahli-silahsiz-guvenlik-maaslari": "2026 yılında silahlı ve silahsız özel güvenlik görevlisi maaşları, yan haklar ve bölgesel farklılıklar hakkında güncel bilgiler.",
+      "ozel-guvenlik-kimlik-karti-nasil-alinir": "ÖGG ve silahlı özel güvenlik kimlik kartı alma şartları, eğitim süreci ve başvuru adımları.",
+      "istanbul-ozel-guvenlik-is-ilanlari-rehberi": "İstanbul Anadolu ve Avrupa Yakası özel güvenlik iş ilanları, bölgesel farklar ve başvuru ipuçları.",
+      "kocaeli-gebze-guvenlik-is-ilanlari": "Kocaeli, Gebze, GOSB ve TOSB bölgesi özel güvenlik iş ilanları ve fabrika güvenliği fırsatları.",
+    };
     const pageUrl = `${SEO_BASE_URL}/blog/${slug}`;
     return {
       title: `${title} | Özel Güvenlik Blog`,
-      description: `${title} — özel güvenlik sektörü rehber yazısı.`,
+      description: descriptions[slug]!,
       canonical: pageUrl,
-      ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+      ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
       ogType: "article",
+      jsonLd: [{
+        "@context": "https://schema.org", "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
+          { "@type": "ListItem", position: 2, name: "Blog", item: `${SEO_BASE_URL}/blog` },
+          { "@type": "ListItem", position: 3, name: title, item: pageUrl },
+        ],
+      }],
       bodyHtml: `<article><h1>${escapeHtml(title)}</h1></article>`,
     };
   }
@@ -472,8 +519,16 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
         title: company ? `${company} İş İlanları | Özel Güvenlik İş İlanları` : `${label} | Güncel Personel Alımları`,
         description: `${label} ve güncel özel güvenlik personel alımları. Bay bayan güvenlik görevlisi pozisyonlarına hemen başvurun.`,
         canonical: pageUrl,
-        ogImage: `${SEO_BASE_URL}/og-image.jpg`,
+        ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
         ogType: "website",
+        jsonLd: [{
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
+            { "@type": "ListItem", position: 2, name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+            { "@type": "ListItem", position: 3, name: label, item: pageUrl },
+          ],
+        }],
         bodyHtml: `<header><h1>${escapeHtml(label)}</h1></header>`,
       };
     }
@@ -500,6 +555,23 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
     if (Number.isFinite(id)) return buildListingMeta(id);
   }
 
+  const noIndexExact = new Set([
+    "/sohbet", "/destek", "/giris", "/kayit", "/ilan-ekle", "/firma-basvurusu",
+    "/bildirimler", "/favoriler", "/cv-olustur", "/part-time", "/yakindaki-ilanlar",
+    "/admin", "/moderator",
+  ]);
+  if (noIndexExact.has(clean) || /^\/profil\/[^/]+$/i.test(clean) || /^\/moderator\/[^/]+$/i.test(clean)) {
+    return {
+      title: "Özel Güvenlik Online",
+      description: "Özel Güvenlik Online kullanıcı sayfası.",
+      canonical: `${SEO_BASE_URL}${clean}`,
+      robots: "noindex, follow",
+      ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
+      ogType: "website",
+      bodyHtml: "",
+    };
+  }
+
   return null;
 }
 
@@ -516,17 +588,19 @@ export function injectSeoIntoHtml(html: string, meta: SeoMeta): string {
     `<meta name="description" content="${escapeHtml(meta.description)}" />`,
   );
 
-  // canonical
   out = out.replace(
-    /<link rel="canonical" href="[^"]*"\s*\/?>/,
-    `<link rel="canonical" href="${escapeHtml(meta.canonical)}" />`,
+    /<meta name="robots" content="[^"]*"\s*\/?>/,
+    `<meta name="robots" content="${escapeHtml(meta.robots ?? "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1")}" />`,
   );
 
-  // og:url
-  out = out.replace(
-    /<meta property="og:url" content="[^"]*"\s*\/?>/,
-    `<meta property="og:url" content="${escapeHtml(meta.canonical)}" />`,
-  );
+  // canonical
+  if (meta.canonical) {
+    out = out.replace(/<link rel="canonical" href="[^"]*"\s*\/?>/, `<link rel="canonical" href="${escapeHtml(meta.canonical)}" />`);
+    out = out.replace(/<meta property="og:url" content="[^"]*"\s*\/?>/, `<meta property="og:url" content="${escapeHtml(meta.canonical)}" />`);
+  } else {
+    out = out.replace(/\s*<link rel="canonical" href="[^"]*"\s*\/?>/, "");
+    out = out.replace(/\s*<meta property="og:url" content="[^"]*"\s*\/?>/, "");
+  }
 
   // og:title
   out = out.replace(
@@ -580,11 +654,10 @@ export function injectSeoIntoHtml(html: string, meta: SeoMeta): string {
     out = out.replace("</head>", `${ldScripts}\n</head>`);
   }
 
-  // Body content: replace #root spinner with SEO content (React will replace on mount)
-  // Match <div id="root">…</div> (single line, contains spinner)
+  // Mevcut açılış ekranını değiştirmeden kaynak HTML'e semantik SEO içeriği ekle.
   out = out.replace(
-    /<div id="root">[\s\S]*?<\/div>\s*<script type="module"/,
-    `<div id="root"><div data-seo-content="1" style="position:absolute;left:-99999px;top:0;width:1px;height:1px;overflow:hidden">${meta.bodyHtml}</div><div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#0F172A"><div style="width:40px;height:40px;border:3px solid rgba(79,70,229,0.25);border-top-color:#4F46E5;border-radius:50%;animation:_sp 0.8s linear infinite"></div><style>@keyframes _sp{to{transform:rotate(360deg)}}</style></div></div>\n    <script type="module"`,
+    '<div id="root">',
+    `<div id="root"><div data-seo-content="1" class="sr-only">${meta.bodyHtml}</div>`,
   );
 
   return out;

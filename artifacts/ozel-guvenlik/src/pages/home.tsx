@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { buildHomeTitle, buildHomeDescription, SEO_BASE_URL, SEO_OG_IMAGE, breadcrumbSchema } from "@/lib/seo-config";
+import { buildHomeTitle, buildHomeDescription, SEO_BASE_URL, SEO_OG_IMAGE } from "@/lib/seo-config";
 import { toSlug } from "@/lib/seo-cities";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { useQueryClient } from "@tanstack/react-query";
@@ -161,7 +161,11 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
         <>
           {(banner.title || banner.subtitle) && <div className="og-banner-carousel__shade" aria-hidden />}
           <div className={`og-banner-carousel__copy${!banner.title && !banner.subtitle ? " og-banner-carousel__copy--cta-only" : ""}`}>
-            {banner.title && <h1>{banner.title}</h1>}
+            {banner.title && (
+              <h2 style={{ margin: 0, fontSize: "clamp(19px, 3.3vw, 42px)", fontWeight: 900, lineHeight: 1.05, letterSpacing: "-0.035em" }}>
+                {banner.title}
+              </h2>
+            )}
             {banner.subtitle && <p>{banner.subtitle}</p>}
             {banner.ctaLabel && banner.linkUrl && <span>{banner.ctaLabel}</span>}
           </div>
@@ -231,8 +235,7 @@ export default function Home() {
   useDocumentMeta({
     title: buildHomeTitle(),
     description: buildHomeDescription(),
-    keywords: "özel güvenlik iş ilanları, ozelguvenlik.online, özelgüvenlik.online, güvenlik görevlisi alımı, bay bayan güvenlik ilanları, silahlı güvenlik iş ilanları, silahsız güvenlik iş ilanları, İstanbul özel güvenlik iş ilanları, Kocaeli özel güvenlik iş ilanları, Gebze güvenlik iş ilanları, GOSB güvenlik ilanları, TOSB güvenlik ilanları, avm güvenlik, fabrika güvenlik, site güvenlik, özel güvenlik maaşları, ögg iş ilanları",
-    canonical: SEO_BASE_URL,
+    canonical: `${SEO_BASE_URL}/`,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
     jsonLd: [
@@ -491,6 +494,7 @@ export default function Home() {
 
   return (
     <Layout>
+      <h1 className="sr-only">Türkiye Geneli Güncel Özel Güvenlik İş İlanları</h1>
       <div className="og-home-top">
         {banners.length > 0 && (
           <div className="og-home-banner desktop-hero">

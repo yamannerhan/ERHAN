@@ -15,11 +15,14 @@ import { Layout } from "@/components/layout";
 import { Link } from "wouter";
 
 export function ListingsWithSeo() {
+  const [location] = useLocation();
   const pageUrl = `${SEO_BASE_URL}/ilanlar`;
+  const hasQuery = location.includes("?");
   useDocumentMeta({
     title: buildListingsTitle(),
     description: buildListingsDescription(),
     canonical: pageUrl,
+    robots: hasQuery ? "noindex, follow" : undefined,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
     jsonLd: [
@@ -36,7 +39,7 @@ export function ListingsWithSeo() {
       },
     ],
   });
-  return <Listings />;
+  return <><h1 className="sr-only">Güncel Özel Güvenlik İş İlanları</h1><Listings /></>;
 }
 
 /**
@@ -93,14 +96,14 @@ function KeywordSeoListings({ keyword }: { keyword: NonNullable<ReturnType<typeo
       { name: keyword.h1, item: pageUrl },
     ]),
   });
-  return <Listings initialSearch={keyword.searchQuery} />;
+  return <><h1 className="sr-only">{keyword.h1}</h1><Listings initialSearch={keyword.searchQuery} /></>;
 }
 
 function CompanySeoListings({ company }: { company: NonNullable<ReturnType<typeof getSeoCompany>> }) {
   const pageUrl = `${SEO_BASE_URL}/${company.slug}-is-ilanlari`;
   useDocumentMeta({
     title: buildCompanyTitle(company.name),
-    description: buildCompanyDescription(company.name),
+    description: company.description || buildCompanyDescription(company.name),
     canonical: pageUrl,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
@@ -110,7 +113,7 @@ function CompanySeoListings({ company }: { company: NonNullable<ReturnType<typeo
       { name: company.name, item: pageUrl },
     ]),
   });
-  return <Listings initialSearch={company.searchTerms[0]} />;
+  return <><h1 className="sr-only">{company.name} Özel Güvenlik İş İlanları</h1><Listings initialSearch={company.searchTerms[0]} /></>;
 }
 
 /** Kısa il sayfası: /ankara, /istanbul, /kocaeli … */
@@ -121,7 +124,6 @@ export function CityShortSeoPage({ city, slug }: { city: string; slug: string })
   useDocumentMeta({
     title: seo?.title ?? `${city} Özel Güvenlik İş İlanları`,
     description: seo?.description ?? "Türkiye genelinde özel güvenlik iş ilanları.",
-    keywords: seo?.keywords,
     canonical: pageUrl,
     ogImage: SEO_OG_IMAGE,
     ogType: "website",
@@ -142,7 +144,7 @@ export function CityShortSeoPage({ city, slug }: { city: string; slug: string })
     ],
   });
 
-  return <Listings initialCity={city} />;
+  return <><h1 className="sr-only">{city} Özel Güvenlik İş İlanları</h1><Listings initialCity={city} /></>;
 }
 
 export function BlogIndexPage() {
@@ -185,6 +187,7 @@ export function BlogPostPage() {
   useDocumentMeta({
     title: post ? `${post.title} | Özel Güvenlik Blog` : "Blog | Özel Güvenlik",
     description: post?.description ?? "Özel güvenlik sektörü blog yazısı.",
+    robots: post ? undefined : "noindex, follow",
     canonical: pageUrl,
     ogImage: SEO_OG_IMAGE,
     ogType: "article",

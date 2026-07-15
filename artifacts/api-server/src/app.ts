@@ -5,8 +5,19 @@ import path from "path";
 import fs from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL, slugToCity } from "./lib/seo-render";
-import { generateSitemapXml, generateStaticSitemapXml } from "./lib/seo-sitemap";
+import { buildNotFoundSeoMeta, getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL, slugToCity } from "./lib/seo-render";
+import {
+  buildSitemapXml,
+  generateBlogSitemapXml,
+  generateCategoriesSitemapXml,
+  generateCitiesSitemapXml,
+  generateCompaniesSitemapXml,
+  generateDistrictsSitemapXml,
+  generateJobsSitemapXml,
+  generatePagesSitemapXml,
+  generateSitemapIndexXml,
+  generateStaticSitemapIndexXml,
+} from "./lib/seo-sitemap";
 
 const app: Express = express();
 
@@ -34,7 +45,9 @@ app.use((req, res, next) => {
     "özelgüvenlik.online",
     "www.özelgüvenlik.online",
   ]);
-  if (host && host !== primaryHost && aliasHosts.has(host)) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0]?.trim().toLowerCase();
+  const protocol = forwardedProto || req.protocol;
+  if ((host && host !== primaryHost && aliasHosts.has(host)) || (host === primaryHost && protocol !== "https")) {
     res.redirect(301, `${SEO_BASE_URL}${req.originalUrl}`);
     return;
   }
@@ -47,7 +60,8 @@ app.use((req, res, next) => {
   if (m) {
     const slug = m[1]!;
     if (slugToCity(slug)) {
-      res.redirect(301, `${SEO_BASE_URL}/${slug}`);
+      const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+      res.redirect(301, `${SEO_BASE_URL}/${slug}${query}`);
       return;
     }
   }
@@ -89,12 +103,38 @@ app.get(["/health", "/api/health", "/api/healthz"], (_req, res) => {
 app.get("/sitemap.xml", (req, res) => {
   void (async () => {
     try {
-      const xml = await generateSitemapXml();
+      const xml = await generateSitemapIndexXml();
       sendXml(res, xml);
     } catch (err) {
       logger.error({ err, path: req.path, userAgent: req.headers["user-agent"] }, "Sitemap generation failed");
       if (!res.headersSent) {
-        sendXml(res, generateStaticSitemapXml());
+        sendXml(res, generateStaticSitemapIndexXml());
+      }
+    }
+  })();
+});
+
+app.get("/sitemap-pages.xml", (_req, res) => sendXml(res, generatePagesSitemapXml()));
+app.get("/sitemap-cities.xml", (_req, res) => sendXml(res, generateCitiesSitemapXml()));
+app.get("/sitemap-districts.xml", (_req, res) => sendXml(res, generateDistrictsSitemapXml()));
+app.get("/sitemap-categories.xml", (_req, res) => sendXml(res, generateCategoriesSitemapXml()));
+app.get("/sitemap-companies.xml", (_req, res) => sendXml(res, generateCompaniesSitemapXml()));
+app.get("/sitemap-blog.xml", (_req, res) => sendXml(res, generateBlogSitemapXml()));
+app.get("/sitemap-jobs-:page.xml", (req, res) => {
+  void (async () => {
+    const page = Number(req.params["page"]);
+    try {
+      const xml = await generateJobsSitemapXml(page);
+      if (!xml) {
+        res.status(404).type("text/plain").send("Sitemap not found");
+        return;
+      }
+      sendXml(res, xml);
+    } catch (err) {
+      logger.error({ err, page }, "Job sitemap generation failed");
+      if (!res.headersSent) {
+        res.setHeader("X-Sitemap-Degraded", "1");
+        sendXml(res, buildSitemapXml([]));
       }
     }
   })();
@@ -104,8 +144,6 @@ app.get("/robots.txt", (_req, res) => {
   const body = [
     "User-agent: *",
     "Allow: /",
-    "",
-    "Disallow: /ilanlar?",
     "",
     `Sitemap: ${SEO_BASE_URL}/sitemap.xml`,
     "",
@@ -174,11 +212,14 @@ app.use((req, res, next) => {
   if (clientIndexHtml) {
     void (async () => {
       try {
-        const meta = await getSeoMetaForPath(req.path);
-        const html = meta ? injectSeoIntoHtml(clientIndexHtml!, meta) : clientIndexHtml!;
-        res.status(200).type("html").send(html);
+        const meta = await getSeoMetaForPath(req.originalUrl);
+        if (!meta) {
+          res.status(404).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
+          return;
+        }
+        res.status(200).type("html").send(injectSeoIntoHtml(clientIndexHtml!, meta));
       } catch {
-        res.status(200).type("html").send(clientIndexHtml!);
+        res.status(500).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
       }
     })();
     return;
