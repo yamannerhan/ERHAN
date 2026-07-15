@@ -94,6 +94,7 @@ export type WhatsAppDiscoveryDiagnostics = {
   chatCount: number;
   groupCount: number;
   channelCount: number;
+  contactGroupCount: number | null;
   storeChatCount: number | null;
   storeGroupMetadataCount: number | null;
   errors: string[];
@@ -540,6 +541,26 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     logger.warn({ err: e }, "wa: getChats failed");
   }
 
+  // Bazı WhatsApp Web sürümlerinde getChats bozulurken grup kimlikleri
+  // kişi koleksiyonunda kalır. Bunu listeleme için güvenli yedek yap.
+  try {
+    if (typeof client.getContacts === "function") {
+      const contacts = await client.getContacts();
+      for (const contact of contacts as any[]) {
+        const id = String(contact?.id?._serialized ?? "");
+        if (!id || !(contact?.isGroup || id.endsWith("@g.us"))) continue;
+        byId.set(id, {
+          id,
+          name: String(contact?.name || contact?.pushname || contact?.shortName || contact?.formattedName || id),
+          participants: 0,
+          kind: "group",
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getContacts group fallback failed");
+  }
+
   // Abone olunan kanallar — getChats bazen eksik bırakır
   try {
     if (typeof client.getChannels === "function") {
@@ -576,6 +597,7 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
     chatCount: 0,
     groupCount: 0,
     channelCount: 0,
+    contactGroupCount: null,
     storeChatCount: null,
     storeGroupMetadataCount: null,
     errors: [],
@@ -599,7 +621,22 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
     }).length;
     diagnostic.steps.push(`getChats: ${diagnostic.chatCount} sohbet, ${diagnostic.groupCount} grup, ${diagnostic.channelCount} kanal`);
   } catch (e) {
-    diagnostic.errors.push(`getChats hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
+    diagnostic.errors.push(`getChats hatası: ${e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 300) : String(e).slice(0, 300)}`);
+  }
+
+  try {
+    if (typeof client.getContacts !== "function") {
+      diagnostic.steps.push("getContacts: bu whatsapp-web.js sürümünde yok");
+    } else {
+      const contacts = await client.getContacts();
+      diagnostic.contactGroupCount = contacts.filter((contact: any) => {
+        const id = String(contact?.id?._serialized ?? "");
+        return Boolean(contact?.isGroup || id.endsWith("@g.us"));
+      }).length;
+      diagnostic.steps.push(`getContacts: ${diagnostic.contactGroupCount} grup kimliği`);
+    }
+  } catch (e) {
+    diagnostic.errors.push(`getContacts hatası: ${e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 300) : String(e).slice(0, 300)}`);
   }
 
   try {
@@ -631,11 +668,12 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
           chats: sizeOf(w.Store?.Chat),
           groupMetadata: sizeOf(w.Store?.GroupMetadata),
           hasWWebJS: Boolean(w.WWebJS),
+          wwebjsKeys: w.WWebJS ? Object.keys(w.WWebJS).slice(0, 30) : [],
         };
       });
       diagnostic.storeChatCount = store.chats;
       diagnostic.storeGroupMetadataCount = store.groupMetadata;
-      diagnostic.steps.push(`WA Store: Chat=${store.chats ?? "yok"}, GroupMetadata=${store.groupMetadata ?? "yok"}, WWebJS=${store.hasWWebJS ? "var" : "yok"}`);
+      diagnostic.steps.push(`WA Store: Chat=${store.chats ?? "yok"}, GroupMetadata=${store.groupMetadata ?? "yok"}, WWebJS=${store.hasWWebJS ? `var (${store.wwebjsKeys.join(", ") || "anahtar yok"})` : "yok"}`);
     }
   } catch (e) {
     diagnostic.errors.push(`WhatsApp Web Store hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);

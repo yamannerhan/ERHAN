@@ -3313,6 +3313,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
   const [discoveryDiagnostics, setDiscoveryDiagnostics] = useState<{
     ready: boolean; chatCount: number; groupCount: number; channelCount: number;
+    contactGroupCount: number | null;
     storeChatCount: number | null; storeGroupMetadataCount: number | null;
     errors: string[]; steps: string[];
   } | null>(null);
