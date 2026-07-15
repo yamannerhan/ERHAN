@@ -496,21 +496,24 @@ export async function stopWhatsAppClient(): Promise<void> {
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
   const byId = new Map<string, WhatsAppChannel>();
+  const addChannel = (raw: any, fallbackKind?: "group" | "channel") => {
+    const id = String(raw?.id?._serialized ?? raw?.id ?? raw?.serialized ?? "");
+    if (!id) return;
+    const isChannel = fallbackKind === "channel" || !!(raw?.isChannel || raw?.isNewsletter || id.endsWith("@newsletter"));
+    const isGroup = fallbackKind === "group" || !!(raw?.isGroup || id.endsWith("@g.us"));
+    if (!isChannel && !isGroup) return;
+    byId.set(id, {
+      id,
+      name: String(raw?.name || raw?.formattedTitle || raw?.title || id),
+      participants: Number(raw?.participants?.length ?? raw?.groupMetadata?.participants?.length ?? raw?.subscribersCount ?? 0) || 0,
+      kind: isChannel ? "channel" : "group",
+    });
+  };
 
   try {
     const chats = await client.getChats();
     for (const c of chats as any[]) {
-      const id = String(c?.id?._serialized ?? "");
-      if (!id) continue;
-      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
-      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
-      if (!isChannel && !isGroup) continue;
-      byId.set(id, {
-        id,
-        name: String(c.name || c.formattedTitle || id),
-        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
-        kind: isChannel ? "channel" : "group",
-      });
+      addChannel(c);
     }
   } catch (e) {
     logger.warn({ err: e }, "wa: getChats failed");
@@ -521,18 +524,40 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     if (typeof client.getChannels === "function") {
       const channels = await client.getChannels();
       for (const c of channels as any[]) {
-        const id = String(c?.id?._serialized ?? "");
-        if (!id) continue;
-        byId.set(id, {
-          id,
-          name: String(c.name || c.formattedTitle || id),
-          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
-          kind: "channel",
-        });
+        addChannel(c, "channel");
       }
     }
   } catch (e) {
     logger.warn({ err: e }, "wa: getChannels failed");
+  }
+
+  // whatsapp-web.js getChats(), özellikle yeni katılınan grup ve kanalları
+  // önbelleğe almadan önce eksik döndürebilir. WA Store doğrudan okununca
+  // ekranda görünen ama istemcinin kaçırdığı kaynaklar da listelenir.
+  try {
+    const page = (client as any).pupPage;
+    const storeChannels = page ? await page.evaluate(() => {
+      const w = window as any;
+      const collect = (collection: any) => {
+        if (!collection) return [];
+        if (typeof collection.getModelsArray === "function") return collection.getModelsArray();
+        if (Array.isArray(collection.models)) return collection.models;
+        if (Array.isArray(collection)) return collection;
+        return [];
+      };
+      const chats = collect(w.Store?.Chat);
+      const newsletters = collect(w.Store?.Newsletter);
+      return [...chats, ...newsletters].map((item: any) => ({
+        id: item?.id?._serialized ?? item?.id ?? "",
+        name: item?.name ?? item?.formattedTitle ?? item?.title ?? "",
+        isGroup: Boolean(item?.isGroup || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
+        isChannel: Boolean(item?.isChannel || item?.isNewsletter || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@newsletter")),
+        participants: item?.participants?.length ?? item?.groupMetadata?.participants?.length ?? item?.subscribersCount ?? 0,
+      }));
+    }) : [];
+    for (const channel of storeChannels) addChannel(channel);
+  } catch (e) {
+    logger.warn({ err: e }, "wa: Store group/channel discovery failed");
   }
 
   return [...byId.values()].sort((a, b) => {
@@ -597,6 +622,8 @@ export type WhatsAppFetchResult = {
   /** Chromium/WA daha eski yükleyemiyor — gidebildiği kadar bitti */
   historyExhausted: boolean;
   rounds: number;
+  /** Boş taramanın nedeni için yönetim ekranına iletilen kısa teknik tanı */
+  diagnostic: string | null;
 };
 
 /**
@@ -628,10 +655,14 @@ export async function fetchWhatsAppMessagesDetailed(
   } = {},
 ): Promise<WhatsAppFetchResult> {
   if (!client || !isReady) {
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+    return {
+      messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0,
+      diagnostic: "WhatsApp istemcisi hazır değil; oturum veya bağlantı bekleniyor.",
+    };
   }
 
   const page = (client as any).pupPage;
+  const diagnostics: string[] = [];
   try {
     // Sohbeti aç — geçmiş senkronu için şart
     await (client as any).interface?.openChatWindow?.(groupJid);
@@ -651,40 +682,50 @@ export async function fetchWhatsAppMessagesDetailed(
         }, groupJid);
       } catch { /* ignore */ }
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    diagnostics.push(`Sohbet penceresi açılamadı: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+  }
 
   let chat: any;
   try {
     chat = await client.getChatById(groupJid);
   } catch (e) {
     logger.warn({ err: e, groupJid }, "wa: getChatById failed");
+    diagnostics.push(`getChatById başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
   }
   if (!chat) {
     try {
       const chats = await client.getChats();
       chat = (chats as any[]).find((candidate) => candidate?.id?._serialized === groupJid);
-    } catch { /* ignore */ }
+    } catch (e) {
+      diagnostics.push(`getChats yedeği başarısız: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`);
+    }
   }
-  if (!chat) {
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+  if (!chat && !page) {
+    return {
+      messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0,
+      diagnostic: diagnostics.join(" | ") || "Grup/kanal istemcide ve WhatsApp Web Store'da bulunamadı.",
+    };
   }
+  if (!chat) diagnostics.push("wwebjs sohbet nesnesi bulunamadı; WhatsApp Web Store yedeğiyle okunuyor.");
 
   // syncHistory (wwebjs) — sunucudan geçmiş çekmeye zorla
   try {
-    if (typeof chat.syncHistory === "function") {
+    if (typeof chat?.syncHistory === "function") {
       const synced = await chat.syncHistory();
       logger.info({ groupJid, synced }, "wa: syncHistory");
       await new Promise((r) => setTimeout(r, 2000));
     }
   } catch (e) {
     logger.warn({ err: e, groupJid }, "wa: syncHistory failed");
+    diagnostics.push(`syncHistory başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
   }
 
   const cutoff = opts.afterTimestampMs != null
     ? opts.afterTimestampMs
     : (Date.now() - (opts.maxAgeDays ?? 730) * 24 * 60 * 60 * 1000);
 
-  const chatId = (chat as any).id?._serialized ?? groupJid;
+  const chatId = (chat as any)?.id?._serialized ?? groupJid;
   const byId = new Map<string, WhatsAppMessage>();
   let rounds = 0;
   let reachedCutoff = false;
@@ -699,6 +740,7 @@ export async function fetchWhatsAppMessagesDetailed(
   };
 
   const pullFetchMessages = async (limit: number) => {
+    if (!chat) return 0;
     try {
       const batch = (await chat.fetchMessages({ limit })) ?? [];
       for (const m of batch) {
@@ -713,6 +755,7 @@ export async function fetchWhatsAppMessagesDetailed(
       return batch.length;
     } catch (e) {
       logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
+      diagnostics.push(`fetchMessages başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
       return 0;
     }
   };
@@ -870,7 +913,7 @@ export async function fetchWhatsAppMessagesDetailed(
 
     // Son bir syncHistory + büyük fetch
     try {
-      if (typeof chat.syncHistory === "function") await chat.syncHistory();
+      if (typeof chat?.syncHistory === "function") await chat.syncHistory();
     } catch { /* ignore */ }
     await pullFetchMessages(5000);
     await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
@@ -908,7 +951,14 @@ export async function fetchWhatsAppMessagesDetailed(
     },
     "wa: mesajlar hazır (eski→yeni)",
   );
-  return { messages: out, oldestTs, reachedCutoff, historyExhausted, rounds };
+  return {
+    messages: out,
+    oldestTs,
+    reachedCutoff,
+    historyExhausted,
+    rounds,
+    diagnostic: diagnostics.length ? diagnostics.join(" | ").slice(0, 700) : null,
+  };
 }
 
 export async function sendWhatsAppMessage(jid: string, text: string): Promise<void> {

@@ -1735,6 +1735,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   let historyExhausted = false;
   let fetchRounds = 0;
   let oldestTs = Date.now();
+  let fetchDiagnostic: string | null = null;
   const heartbeat = setInterval(() => {
     void patchSourceProgress(source.id, {
       lastCheckedAt: new Date(),
@@ -1771,6 +1772,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     historyExhausted = fetched.historyExhausted;
     fetchRounds = fetched.rounds;
     oldestTs = fetched.oldestTs || Date.now();
+    fetchDiagnostic = fetched.diagnostic;
   } catch (e) {
     clearInterval(heartbeat);
     const errMsg = e instanceof Error ? e.message : String(e);
@@ -1790,7 +1792,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   if (isInitialScan && messages.length === 0) {
     clearInterval(heartbeat);
     await patchSourceProgress(source.id, {
-      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).",
+      lastError: `Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).${fetchDiagnostic ? ` Tanı: ${fetchDiagnostic}` : ""}`,
       isScanning: false,
       lastCheckedAt: new Date(),
       initialScanDone: false,
@@ -1884,9 +1886,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
 
   liveProgress = markDone ? 100 : Math.min(95, Math.max(liveProgress, depthPct));
   const diagnostic = stats.found === 0
-    ? `Tarama tanısı: ${messages.length} mesaj okundu; ${skippedNonListing} mesaj ilan eşiğini karşılamadı; ${skippedByRules} ilan filtre/veri kuralıyla atlandı; ${stats.errors} işlem hatası.`
+    ? `Tarama tanısı: ${messages.length} mesaj okundu; ${skippedNonListing} mesaj ilan eşiğini karşılamadı; ${skippedByRules} ilan filtre/veri kuralıyla atlandı; ${stats.errors} işlem hatası.${fetchDiagnostic ? ` Alım tanısı: ${fetchDiagnostic}` : ""}`
     : stats.errors > 0
-      ? `Tarama tamamlandı: ${messages.length} mesaj, ${stats.found} ilan eşleşti; ${stats.errors} mesaj işleme hatası.`
+      ? `Tarama tamamlandı: ${messages.length} mesaj, ${stats.found} ilan eşleşti; ${stats.errors} mesaj işleme hatası.${fetchDiagnostic ? ` Alım tanısı: ${fetchDiagnostic}` : ""}`
       : null;
 
   await patchSourceProgress(source.id, {
