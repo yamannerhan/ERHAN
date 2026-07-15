@@ -24,7 +24,6 @@ import { DesktopListingsTable } from "@/components/desktop-listings-table";
 import { LiveSupportBar } from "@/components/live-support-bar";
 import {
   isIstanbulSideLabel,
-  matchesIstanbulSide,
   resolveIstanbulSideFromLabel,
   type IstanbulSide,
 } from "@/lib/istanbul-side";
@@ -283,13 +282,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
   const displayListings = useMemo(() => {
     let list = [...listings];
-    if (sideFilter) {
-      list = list.filter((l) => matchesIstanbulSide(l.city, sideFilter));
-    } else if (city && !isIstanbulSideLabel(city)) {
-      list = list.filter((l) =>
-        l.city.toLocaleLowerCase("tr-TR").includes(city.toLocaleLowerCase("tr-TR")),
-      );
-    }
+    // Konum doğruluğu ve sayfalama API'deki yapılandırılmış city/ilçe filtresinin sorumluluğudur.
     if (categoryFilter !== "all") list = list.filter(l => matchesCategory(l, categoryFilter));
     if (search.trim()) {
       const q = search.trim().toLocaleLowerCase("tr-TR");
@@ -305,7 +298,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
       });
     }
     return list;
-  }, [listings, sideFilter, city, categoryFilter, search, sortMode]);
+  }, [listings, categoryFilter, search, sortMode]);
 
   const dayAgo = Date.now() - 86_400_000;
   const newToday = displayListings.filter(l => new Date(l.createdAt).getTime() > dayAgo).length;

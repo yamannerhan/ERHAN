@@ -20,8 +20,19 @@ import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
 const router = Router();
+const ROLE_RANK: Record<string, number> = { user: 0, moderator: 1, senior_moderator: 2, admin: 3 };
+
+async function canModerateTarget(req: { user?: { id: number; role: string } }, targetId: number): Promise<boolean> {
+  const actor = req.user;
+  if (!actor || actor.id === targetId) return false;
+  if (actor.role === "admin") return true;
+  const [target] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, targetId)).limit(1);
+  if (!target) return false;
+  return (ROLE_RANK[actor.role] ?? -1) > (ROLE_RANK[target.role] ?? 99);
+}
 
 const BANNER_IMAGES_DIR = path.join(process.cwd(), "uploads", "banner-images");
 fs.mkdirSync(BANNER_IMAGES_DIR, { recursive: true });
@@ -31,7 +42,7 @@ const BANNER_HEIGHT = 400;
 
 const bannerImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 12 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp"];
     cb(null, allowed.includes(file.mimetype));
@@ -344,11 +355,8 @@ router.post("/admin/users/:id/ban", authMiddleware, requireAdminOrModerator, asy
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { reason, expiresAt } = req.body as { reason?: string; expiresAt?: string | null };
   if (!reason) { res.status(400).json({ error: "Ban sebebi zorunludur" }); return; }
-  if (req.user!.role === "moderator") {
-    const [target] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, id));
-    if (!target || target.role !== "user") {
-      res.status(403).json({ error: "Moderatörler yalnızca normal kullanıcıları yasaklayabilir" }); return;
-    }
+  if (!(await canModerateTarget(req, id))) {
+    res.status(403).json({ error: "Bu kullanıcı üzerinde işlem yetkiniz yok" }); return;
   }
   await db.update(usersTable).set({ isBanned: true, banReason: reason, banExpiresAt: expiresAt ? new Date(expiresAt) : null }).where(eq(usersTable.id, id));
   res.json({ success: true, message: "Kullanıcı yasaklandı" });
@@ -357,6 +365,9 @@ router.post("/admin/users/:id/ban", authMiddleware, requireAdminOrModerator, asy
 router.post("/admin/users/:id/unban", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  if (!(await canModerateTarget(req, id))) {
+    res.status(403).json({ error: "Bu kullanıcı üzerinde işlem yetkiniz yok" }); return;
+  }
   await db.update(usersTable).set({ isBanned: false, banReason: null, banExpiresAt: null }).where(eq(usersTable.id, id));
   res.json({ success: true, message: "Yasak kaldırıldı" });
 });
@@ -365,9 +376,8 @@ router.post("/admin/users/:id/unban", authMiddleware, requireAdminOrModerator, a
 router.post("/admin/users/:id/mute", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
-  if (req.user!.role === "moderator") {
-    const [target] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, id));
-    if (!target || target.role !== "user") { res.status(403).json({ error: "Moderatörler yalnızca normal kullanıcıları susturabilir" }); return; }
+  if (!(await canModerateTarget(req, id))) {
+    res.status(403).json({ error: "Bu kullanıcı üzerinde işlem yetkiniz yok" }); return;
   }
   const { hours, days, months, years } = req.body as {
     hours?: number; days?: number; months?: number; years?: number;
@@ -391,6 +401,9 @@ router.post("/admin/users/:id/mute", authMiddleware, requireAdminOrModerator, as
 router.post("/admin/users/:id/unmute", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+  if (!(await canModerateTarget(req, id))) {
+    res.status(403).json({ error: "Bu kullanıcı üzerinde işlem yetkiniz yok" }); return;
+  }
   await db.update(usersTable).set({ mutedUntil: null }).where(eq(usersTable.id, id));
   res.json({ success: true });
 });
@@ -468,7 +481,7 @@ router.post("/admin/users/:id/reset-password", authMiddleware, requireAdmin, asy
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
   const { newPassword } = req.body as { newPassword?: string };
-  if (!newPassword || newPassword.length < 6) { res.status(400).json({ error: "Yeni şifre en az 6 karakter olmalıdır" }); return; }
+  if (!newPassword || newPassword.length < 10 || newPassword.length > 128) { res.status(400).json({ error: "Yeni şifre 10-128 karakter olmalıdır" }); return; }
   const hash = await bcrypt.hash(newPassword, 10);
   await db.update(usersTable).set({ passwordHash: hash }).where(eq(usersTable.id, id));
   res.json({ success: true, message: "Şifre sıfırlandı" });
@@ -485,7 +498,7 @@ router.patch("/admin/users/:id/display-name", authMiddleware, requireAdmin, asyn
 
 router.post("/admin/create-staff", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const { username, email, password, role } = req.body as { username?: string; email?: string; password?: string; role?: string };
-  if (!username || !email || !password) { res.status(400).json({ error: "Kullanıcı adı, e-posta ve şifre zorunludur" }); return; }
+  if (!username || !email || !password || password.length < 12 || password.length > 128) { res.status(400).json({ error: "Kullanıcı adı, e-posta ve 12-128 karakter şifre zorunludur" }); return; }
   const allowedRoles = ["moderator", "senior_moderator", "admin"];
   const targetRole = allowedRoles.includes(role ?? "") ? role! : "moderator";
 
@@ -2324,9 +2337,9 @@ router.post("/admin/banners/upload", authMiddleware, requireAdmin, bannerImageUp
     const mobile = String(req.body?.variant ?? "") === "mobile";
     const width = mobile ? 960 : BANNER_WIDTH;
     const height = mobile ? 540 : BANNER_HEIGHT;
-    const filename = `banner_${mobile ? "mobile_" : ""}${req.user!.id}_${Date.now()}.jpg`;
+    const filename = `banner_${mobile ? "mobile_" : ""}${crypto.randomBytes(12).toString("hex")}.jpg`;
     const filepath = path.join(BANNER_IMAGES_DIR, filename);
-    const buf = await sharp(req.file.buffer)
+    const buf = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
       .rotate()
       .resize(width, height, {
         fit: "cover",

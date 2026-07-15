@@ -20,9 +20,11 @@ import {
 } from "./workers/scraper";
 import { initTelegramClient, shutdownTelegramClient } from "./services/telegram-client";
 import { initWhatsAppClient, stopWhatsAppClient } from "./services/whatsapp-client";
-import { db, pool, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
+import { db, pool, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable, supportTicketsTable } from "@workspace/db";
 import { eq, count, sql, asc, and, or, isNotNull } from "drizzle-orm";
 import { trimChatHistory } from "./lib/chat-retention";
+import { verifyAuthToken } from "./middlewares/auth";
+import { corsOrigin, isAllowedOrigin } from "./middlewares/security";
 
 const rawPort = process.env["PORT"] || "3000";
 const port = Number(rawPort);
@@ -32,7 +34,8 @@ const httpServer = createServer(app);
 let fallbackServer: ReturnType<typeof createServer> | null = null;
 export const io = new SocketIOServer(httpServer, {
   path: "/ws",
-  cors: { origin: "*", methods: ["GET", "POST"] },
+  cors: { origin: corsOrigin, methods: ["GET", "POST"], credentials: true },
+  allowRequest: (req, callback) => callback(null, isAllowedOrigin(req.headers.origin)),
   transports: ["polling", "websocket"],
   allowUpgrades: true,
   pingInterval: 25000,
@@ -40,6 +43,31 @@ export const io = new SocketIOServer(httpServer, {
 });
 setRealtimeServer(io);
 app.set("io", io);
+io.use(async (socket, next) => {
+  const token = typeof socket.handshake.auth?.["token"] === "string"
+    ? socket.handshake.auth["token"]
+    : "";
+  if (!token) {
+    next();
+    return;
+  }
+  try {
+    const payload = verifyAuthToken(token);
+    const [user] = await db.select({ id: usersTable.id, role: usersTable.role })
+      .from(usersTable)
+      .where(eq(usersTable.id, payload.userId))
+      .limit(1);
+    if (!user) {
+      next(new Error("Socket kullanıcısı bulunamadı"));
+      return;
+    }
+    socket.data["userId"] = user.id;
+    socket.data["role"] = user.role;
+    next();
+  } catch {
+    next(new Error("Geçersiz socket tokenı"));
+  }
+});
 setBotIo(io);
 
 export async function saveChatMessage(userId: number, content: string): Promise<{ id: number; createdAt: Date } | null> {
@@ -782,13 +810,14 @@ const WELCOME_COOLDOWN_MS = 60 * 60 * 1000;
 // ── Socket.io ─────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   const socketId = socket.id;
+  const tokenUserId = Number(socket.data["userId"]) || null;
   onlineSockets.set(socketId, { joinedAt: new Date() });
   logger.info({ socketId, online: onlineSockets.size }, "Socket connected");
   void broadcastOnlineCount();
 
-  socket.on("authenticate", async (data: { userId?: number }) => {
-    if (data?.userId) {
-      const userId = data.userId;
+  socket.on("authenticate", async () => {
+    if (tokenUserId) {
+      const userId = tokenUserId;
       const entry = onlineSockets.get(socketId);
       const alreadyAuthenticatedOnSocket = entry?.userId === userId;
       if (entry) { entry.userId = userId; onlineSockets.set(socketId, entry); }
@@ -799,9 +828,14 @@ io.on("connection", (socket) => {
       const alreadyConnected = [...onlineSockets.values()].filter(e => e.userId === userId).length;
 
       try {
-        const [user] = await db.select({ username: usersTable.username, displayName: usersTable.displayName, isVip: usersTable.isVip, vipUntil: usersTable.vipUntil })
+        const [user] = await db.select({ username: usersTable.username, displayName: usersTable.displayName, role: usersTable.role, isVip: usersTable.isVip, vipUntil: usersTable.vipUntil })
           .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
         if (user) {
+          socket.data["userId"] = userId;
+          socket.data["role"] = user.role;
+          if (["admin", "moderator", "senior_moderator"].includes(user.role)) {
+            void socket.join("support:staff");
+          }
           if (!alreadyAuthenticatedOnSocket && alreadyConnected <= 1) {
             const lastDisconnect = userLastDisconnect.get(userId);
             const awayLong = !lastDisconnect || (Date.now() - lastDisconnect) >= JOIN_THRESHOLD_MS;
@@ -837,9 +871,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("presence:update", (data: { visible?: boolean; userId?: number }) => {
+  socket.on("presence:update", (data: { visible?: boolean }) => {
     const entry = onlineSockets.get(socketId);
-    const userId = data?.userId ?? entry?.userId;
+    const userId = entry?.userId;
     if (!userId) return;
     void import("./lib/presence").then(({ setPresence }) => {
       setPresence(socketId, userId, data?.visible !== false);
@@ -850,7 +884,24 @@ io.on("connection", (socket) => {
   socket.on("support:join", (data: { ticketId?: number }) => {
     const ticketId = Number(data?.ticketId);
     if (!Number.isInteger(ticketId) || ticketId <= 0) return;
-    void socket.join(`support:ticket:${ticketId}`);
+    const userId = Number(socket.data["userId"]);
+    const role = String(socket.data["role"] ?? "");
+    if (!userId) {
+      socket.emit("support:error", { ticketId, error: "Kimlik doğrulaması gerekli" });
+      return;
+    }
+    void (async () => {
+      const [ticket] = await db.select({ userId: supportTicketsTable.userId })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.id, ticketId))
+        .limit(1);
+      const staff = ["admin", "moderator", "senior_moderator"].includes(role);
+      if (!ticket || (!staff && ticket.userId !== userId)) {
+        socket.emit("support:error", { ticketId, error: "Bu destek odasına erişim izniniz yok" });
+        return;
+      }
+      await socket.join(`support:ticket:${ticketId}`);
+    })().catch(() => socket.emit("support:error", { ticketId, error: "Destek odası doğrulanamadı" }));
   });
 
   socket.on("support:leave", (data: { ticketId?: number }) => {
@@ -1043,10 +1094,12 @@ async function broadcastOnlineCount() {
 
 process.on("unhandledRejection", (err) => {
   logger.error({ err }, "Unhandled rejection");
+  void gracefulShutdown("unhandledRejection");
 });
 
 process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
+  void gracefulShutdown("uncaughtException");
 });
 
 // Kaynak / yayıncı doğrulama şeması + backfill

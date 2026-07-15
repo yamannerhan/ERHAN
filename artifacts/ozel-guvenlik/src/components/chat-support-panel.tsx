@@ -105,6 +105,7 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
     if (!user) return;
     const s = io(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["polling", "websocket"],
       upgrade: true,
       secure: window.location.protocol === "https:",

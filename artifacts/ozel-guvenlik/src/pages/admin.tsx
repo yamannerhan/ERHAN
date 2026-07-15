@@ -464,6 +464,7 @@ function SupportAdminSection({ apiCall, toast }: {
     if (!user) return;
     const s = socketIo(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["websocket", "polling"],
       secure: window.location.protocol === "https:",
       withCredentials: true,
@@ -759,6 +760,7 @@ function AdminNotificationsInbox() {
     if (!user) return;
     const socket = socketIo(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["websocket", "polling"],
       secure: window.location.protocol === "https:",
       withCredentials: true,
@@ -2514,7 +2516,11 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
 
   useEffect(() => {
     void load();
-    const socket = socketIo(window.location.origin, { path: "/ws", transports: ["websocket", "polling"] });
+    const socket = socketIo(window.location.origin, {
+      path: "/ws",
+      auth: { token: getToken() },
+      transports: ["websocket", "polling"],
+    });
     socket.on("scraper:source", (data: Partial<Source> & { sourceId: number }) => {
       setSources(prev => prev.map(s => s.id === data.sourceId ? {
         ...s,
@@ -4371,6 +4377,7 @@ function AdminTopBar({
     if (!user) return;
     const socket = socketIo(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["websocket", "polling"],
       secure: window.location.protocol === "https:",
       withCredentials: true,

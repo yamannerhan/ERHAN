@@ -3,9 +3,12 @@ import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { db, partTimeWorkersTable } from "@workspace/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
+import { uploadRateLimit } from "../middlewares/security";
+import { isSafeGeneratedJpegName } from "../lib/safe-url";
 
 const router = Router();
 
@@ -16,7 +19,7 @@ fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
     cb(null, allowed.includes(file.mimetype));
@@ -216,7 +219,7 @@ router.post("/parttime/:id/ban", authMiddleware, async (req, res): Promise<void>
 });
 
 // ── POST /api/parttime/:id/photo — upload photo ───────────────────
-router.post("/parttime/:id/photo", authMiddleware, upload.single("photo"), async (req, res): Promise<void> => {
+router.post("/parttime/:id/photo", authMiddleware, uploadRateLimit, upload.single("photo"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "Fotoğraf gerekli" }); return; }
 
   const id = parseInt((req.params["id"] as string) || "0");
@@ -228,10 +231,10 @@ router.post("/parttime/:id/photo", authMiddleware, upload.single("photo"), async
     res.status(403).json({ error: "Yetkisiz" }); return;
   }
 
-  const filename = `${id}_${Date.now()}.jpg`;
+  const filename = `${id}_${crypto.randomBytes(12).toString("hex")}.jpg`;
   const filepath = path.join(UPLOADS_DIR, filename);
 
-  await sharp(req.file.buffer)
+  await sharp(req.file.buffer, { limitInputPixels: 25_000_000 })
     .resize(400, 400, { fit: "cover", position: "center" })
     .jpeg({ quality: 85 })
     .toFile(filepath);
@@ -243,11 +246,12 @@ router.post("/parttime/:id/photo", authMiddleware, upload.single("photo"), async
 
 // ── GET /api/parttime-photos/:filename — serve photos ─────────────
 router.get("/parttime-photos/:filename", (req, res): void => {
-  const filename = req.params["filename"];
-  if (!filename) { res.status(404).end(); return; }
-  const filepath = path.join(UPLOADS_DIR, filename);
-  if (!fs.existsSync(filepath)) { res.status(404).end(); return; }
-  res.sendFile(filepath);
+  const filename = String(req.params["filename"] ?? "");
+  if (!isSafeGeneratedJpegName(filename)) { res.status(404).end(); return; }
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type("image/jpeg").sendFile(filename, { root: UPLOADS_DIR, dotfiles: "deny" }, (error) => {
+    if (error && !res.headersSent) res.status(404).end();
+  });
 });
 
 // ── GET /api/admin/parttime — admin list all ───────────────────────

@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import crypto from "crypto";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
@@ -249,7 +250,12 @@ function cronAuthorized(req: Request): boolean {
   if (!secret) return false;
   const headerSecret = req.header("x-cron-secret") ?? "";
   const authSecret = (req.header("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  return headerSecret === secret || authSecret === secret;
+  const matches = (candidate: string) => {
+    const expected = Buffer.from(secret);
+    const actual = Buffer.from(candidate);
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  };
+  return matches(headerSecret) || matches(authSecret);
 }
 
 async function runScrapeEndpoint(req: Request, res: Response): Promise<void> {
@@ -265,7 +271,6 @@ async function runScrapeEndpoint(req: Request, res: Response): Promise<void> {
   res.json({ success: true, message: "İlan tarama işi başlatıldı." });
 }
 
-router.get("/admin/scrape/run", runScrapeEndpoint);
 router.post("/admin/scrape/run", runScrapeEndpoint);
 
 // ── WhatsApp endpoints ─────────────────────────────────────────────

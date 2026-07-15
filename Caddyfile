@@ -1,0 +1,34 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+	log {
+		output stdout
+		format json
+	}
+}
+
+{$APP_DOMAIN:ozelguvenlik.online} {
+	encode zstd gzip
+
+	@blocked path /.env* /.git/* /backups/* /uploads/*
+	respond @blocked 404
+
+	reverse_proxy web:8080 {
+		health_uri /livez
+		health_interval 30s
+		health_timeout 5s
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 60s
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+www.ozelguvenlik.online, xn--zelgvenlik-dcb0f.online, www.xn--zelgvenlik-dcb0f.online {
+	redir https://ozelguvenlik.online{uri} permanent
+}

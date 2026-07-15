@@ -1,34 +1,138 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: ozelguvenlik
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-ozelguvenlik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
+      POSTGRES_DB: ${POSTGRES_DB:-ozelguvenlik}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
-  app:
+  web:
     build: .
-    ports:
-      - "8080:8080"
+    restart: unless-stopped
+    init: true
+    expose: ["8080"]
     environment:
-      DATABASE_URL: postgresql://app:app@postgres:5432/ozelguvenlik
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ozelguvenlik}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ozelguvenlik}
       NODE_ENV: production
       BASE_PATH: /
       PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET gerekli}
+      APP_ORIGINS: ${APP_ORIGINS:-https://ozelguvenlik.online}
+      TRUST_PROXY_HOPS: "1"
+      ENABLE_HSTS: ${ENABLE_HSTS:-0}
+      RUN_BOT_WORKERS: ${RUN_BOT_WORKERS:-1}
+      PG_POOL_MAX: ${WEB_PG_POOL_MAX:-10}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      CRON_SECRET: ${CRON_SECRET:?CRON_SECRET gerekli}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_SKIP_DOWNLOAD: "true"
       WWEBJS_AUTH_PATH: /app/.wwebjs_auth
-      WA_AUTO_CONNECT: "1"
+      WA_AUTO_CONNECT: ${WA_AUTO_CONNECT:-1}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     shm_size: "256mb"
     volumes:
       - wa_auth:/app/.wwebjs_auth
+      - uploads:/app/uploads
+      - app_data:/app/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    stop_grace_period: 35s
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  worker:
+    profiles: ["split-workers"]
+    build: .
+    restart: unless-stopped
+    init: true
+    command: ["node", "--enable-source-maps", "/app/artifacts/api-server/dist/bot-worker.mjs"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ozelguvenlik}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ozelguvenlik}
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET gerekli}
+      BOT_PLATFORMS: telegram,whatsapp,eleman
+      PG_POOL_MAX: ${WORKER_PG_POOL_MAX:-4}
+      WORKER_HEALTH_PORT: "9090"
+      WWEBJS_AUTH_PATH: /app/.wwebjs_auth
+      WA_AUTO_CONNECT: ${WA_AUTO_CONNECT:-1}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - wa_auth:/app/.wwebjs_auth
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    stop_grace_period: 35s
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-ozelguvenlik.online}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL gerekli}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
 volumes:
   pgdata:
   wa_auth:
+  uploads:
+  app_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  backend:
+    driver: bridge

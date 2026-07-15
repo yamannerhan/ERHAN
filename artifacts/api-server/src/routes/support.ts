@@ -500,10 +500,13 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
       status: patch.status ?? ticket.status,
     };
 
-    // Canlı destek: açık thread'lere anında düşsün
-    emitRealtimeToRoom(`support:ticket:${id}`, "support:message", payload);
-    emitRealtime("support:message", payload);
-    emitRealtime("support:ticket-update", {
+    // Internal notlar yalnız staff odasına; normal mesajlar yalnız ticket odasına.
+    emitRealtimeToRoom(
+      isInternalNote ? "support:staff" : `support:ticket:${id}`,
+      "support:message",
+      payload,
+    );
+    emitRealtimeToRoom("support:staff", "support:ticket-update", {
       ticketId: id,
       status: payload.status,
       lastMessageAt: payload.createdAt,
@@ -511,12 +514,6 @@ router.post("/support/:id/reply", authMiddleware, async (req, res): Promise<void
       fromUserId: userId,
       isStaff: staff,
     });
-    if (!staff) {
-      // staff bildirimleri notifyStaff içinde
-    } else if (!isInternalNote) {
-      emitRealtimeToUser(ticket.userId, "support:message", payload);
-    }
-
     res.status(201).json(payload);
   } catch (e) {
     res.status(500).json({ error: String(e) });

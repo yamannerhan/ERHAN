@@ -7,7 +7,15 @@ import {
 import { eq, and, or, isNull, gt, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
-const JWT_SECRET = process.env.SESSION_SECRET ?? "ozelguvenlik-secret-key";
+const JWT_SECRET = (process.env["JWT_SECRET"] ?? process.env["SESSION_SECRET"] ?? "").trim();
+if (JWT_SECRET.length < 32) {
+  throw new Error("JWT_SECRET en az 32 karakter uzunluğunda kalıcı bir secret olmalıdır");
+}
+const JWT_OPTIONS = {
+  algorithms: ["HS256"] as jwt.Algorithm[],
+  issuer: "ozelguvenlik.online",
+  audience: "ozelguvenlik-web",
+};
 const activityThrottle = new Map<string, number>();
 
 export interface JwtPayload {
@@ -41,14 +49,20 @@ declare global {
 }
 
 export function signToken(userId: number, role: string): string {
-  return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign({ userId, role }, JWT_SECRET, {
+    algorithm: "HS256",
+    issuer: JWT_OPTIONS.issuer,
+    audience: JWT_OPTIONS.audience,
+    expiresIn: "7d",
+  });
+}
+
+export function verifyAuthToken(token: string): JwtPayload {
+  return jwt.verify(token, JWT_SECRET, JWT_OPTIONS) as JwtPayload;
 }
 
 function extractIp(req: Request): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const raw = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim()
-    || req.ip
-    || "";
+  const raw = req.ip || "";
   return raw.replace(/^::ffff:/, "");
 }
 
@@ -129,7 +143,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
   const token = authHeader.slice(7);
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    const payload = verifyAuthToken(token);
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId));
     if (!user) {
       res.status(401).json({ error: "Kullanıcı bulunamadı" });
@@ -226,7 +240,7 @@ export async function optionalAuthMiddleware(req: Request, _res: Response, next:
 
   const token = authHeader.slice(7);
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    const payload = verifyAuthToken(token);
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId));
     if (user && !user.isBanned) {
       req.user = {

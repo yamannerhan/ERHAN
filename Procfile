@@ -1,1 +1,1 @@
-﻿web: pnpm --filter @workspace/api-server start
+﻿web: node scripts/start.mjs

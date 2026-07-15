@@ -1,5 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "./lib/logger";
+import { createServer } from "node:http";
 
 const platformArg = process.argv.find((value) => value.startsWith("--platform="))?.split("=")[1];
 if (platformArg) process.env["BOT_PLATFORMS"] = platformArg;
@@ -40,6 +41,18 @@ if (platforms.includes("telegram")) await telegram.initTelegramClient();
 if (platforms.includes("whatsapp")) await whatsapp.initWhatsAppClient();
 scraper.startScraperWorker();
 logger.info({ platforms }, "Singleton bot worker başladı");
+const healthPort = Math.max(1, Number(process.env["WORKER_HEALTH_PORT"] ?? 9090));
+const healthServer = createServer((req, res) => {
+  if (req.url !== "/health" && req.url !== "/livez") {
+    res.writeHead(404).end();
+    return;
+  }
+  res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify({ status: "ok", service: "bot-worker", platforms }));
+});
+healthServer.listen(healthPort, "0.0.0.0", () => {
+  logger.info({ healthPort }, "Bot worker health endpoint hazır");
+});
 
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
@@ -53,6 +66,7 @@ async function shutdown(signal: string): Promise<void> {
     telegram.shutdownTelegramClient(),
     whatsapp.stopWhatsAppClient(),
   ]);
+  await new Promise<void>((resolve) => healthServer.close(() => resolve()));
   for (const lockName of acquiredLocks) {
     await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockName]).catch(() => {});
   }
@@ -64,3 +78,11 @@ async function shutdown(signal: string): Promise<void> {
 
 process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
 process.once("SIGINT", () => { void shutdown("SIGINT"); });
+process.once("uncaughtException", (error) => {
+  logger.error({ err: error }, "Bot worker uncaught exception");
+  void shutdown("uncaughtException");
+});
+process.once("unhandledRejection", (error) => {
+  logger.error({ err: error }, "Bot worker unhandled rejection");
+  void shutdown("unhandledRejection");
+});

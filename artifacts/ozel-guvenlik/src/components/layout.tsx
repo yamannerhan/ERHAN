@@ -272,6 +272,7 @@ export function Layout({
       if (cancelled) return;
       socket = io(window.location.origin, {
         path: "/ws",
+        auth: { token: localStorage.getItem("auth_token") ?? "" },
         transports: ["websocket", "polling"],
         secure: window.location.protocol === "https:",
         withCredentials: true,

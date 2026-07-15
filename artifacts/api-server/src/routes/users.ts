@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { db, usersTable, listingsTable, listingFavoritesTable } from "@workspace/db";
 import { eq, sql, or, desc, ilike } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
+import { uploadRateLimit } from "../middlewares/security";
 import { loadListingCompanyOverlays } from "../lib/listing-company-overlays";
 import { listingBadgeMeta, listingDisplayDate } from "../lib/listing-source";
 
@@ -44,14 +45,14 @@ function userJson(u: typeof usersTable.$inferSelect) {
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp"];
     cb(null, allowed.includes(file.mimetype));
   },
 });
 
-router.post("/users/avatar", authMiddleware, upload.single("avatar"), async (req, res): Promise<void> => {
+router.post("/users/avatar", authMiddleware, uploadRateLimit, upload.single("avatar"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp, gif)" }); return; }
 
   const isGif = req.file.mimetype === "image/gif";
@@ -66,6 +67,12 @@ router.post("/users/avatar", authMiddleware, upload.single("avatar"), async (req
       res.status(400).json({ error: "Hareketli GIF en fazla 5 MB olabilir." });
       return;
     }
+    const signature = req.file.buffer.subarray(0, 6).toString("ascii");
+    const metadata = await sharp(req.file.buffer, { animated: true, limitInputPixels: 25_000_000 }).metadata();
+    if (!["GIF87a", "GIF89a"].includes(signature) || (metadata.pages ?? 1) > 100) {
+      res.status(400).json({ error: "Geçersiz veya çok uzun GIF dosyası" });
+      return;
+    }
     // GIF’i olduğu gibi sakla (animasyon korunsun)
     const avatarUrl = `data:image/gif;base64,${req.file.buffer.toString("base64")}`;
     const [updated] = await db.update(usersTable).set({ avatarUrl }).where(eq(usersTable.id, req.user!.id)).returning();
@@ -73,7 +80,7 @@ router.post("/users/avatar", authMiddleware, upload.single("avatar"), async (req
     return;
   }
 
-  const avatarBuffer = await sharp(req.file.buffer)
+  const avatarBuffer = await sharp(req.file.buffer, { limitInputPixels: 25_000_000 })
     .resize(256, 256, { fit: "cover", position: "center" })
     .jpeg({ quality: 85 })
     .toBuffer();

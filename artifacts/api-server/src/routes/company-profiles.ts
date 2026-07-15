@@ -8,6 +8,7 @@ import { db, companyProfilesTable, listingsTable } from "@workspace/db";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { ensureCompanySchema } from "../lib/company-profiles";
 import { authMiddleware } from "../middlewares/auth";
+import { uploadRateLimit } from "../middlewares/security";
 import { emitRealtime } from "../lib/realtime";
 
 const router = Router();
@@ -155,6 +156,7 @@ router.put("/company-profiles/me", authMiddleware, async (req, res): Promise<voi
 router.post(
   "/company-profiles/me/logo",
   authMiddleware,
+  uploadRateLimit,
   (req, res, next) => {
     upload.single("logo")(req, res, (err) => {
       if (err) {
@@ -189,7 +191,7 @@ router.post(
       return;
     }
 
-    const meta = await sharp(req.file.buffer).metadata();
+    const meta = await sharp(req.file.buffer, { limitInputPixels: 25_000_000 }).metadata();
     if ((meta.width ?? 0) < 64 || (meta.height ?? 0) < 64) {
       res.status(400).json({ error: "Logo en az 64x64 olmalıdır (önerilen 256x256)" });
       return;
@@ -197,7 +199,7 @@ router.post(
 
     const filename = `co_${existing.id}_${crypto.randomBytes(8).toString("hex")}.webp`;
     const filepath = path.join(COMPANY_LOGO_DIR, filename);
-    const processedLogo = await sharp(req.file.buffer)
+    const processedLogo = await sharp(req.file.buffer, { limitInputPixels: 25_000_000 })
       .resize(512, 512, {
         fit: "cover",
         position: "centre",

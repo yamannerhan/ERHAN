@@ -226,6 +226,7 @@ export default function Chat() {
   useEffect(() => {
     const s = io(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["websocket", "polling"],
       upgrade: true,
       secure: window.location.protocol === "https:",

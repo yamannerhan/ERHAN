@@ -2,9 +2,12 @@
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const adminEmail = process.env.ADMIN_EMAIL || "erhanyaman001@gmail.com";
-const adminUsername = process.env.ADMIN_USERNAME || "admin";
-const adminPassword = process.env.ADMIN_PASSWORD || "yamann01";
+const adminEmail = process.env.ADMIN_EMAIL?.trim();
+const adminUsername = process.env.ADMIN_USERNAME?.trim();
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (!adminEmail || !adminUsername || !adminPassword || adminPassword.length < 12) {
+  throw new Error("ADMIN_EMAIL, ADMIN_USERNAME ve en az 12 karakter ADMIN_PASSWORD zorunludur");
+}
 
 async function main() {
   const passwordHash = await bcrypt.hash(adminPassword, 10);
