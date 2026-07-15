@@ -509,10 +509,6 @@ export async function stopWhatsAppClient(): Promise<void> {
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
-  return withWhatsAppPageLock(() => fetchWhatsAppGroupsUnlocked());
-}
-
-async function fetchWhatsAppGroupsUnlocked(): Promise<WhatsAppChannel[]> {
   const byId = new Map<string, WhatsAppChannel>();
   const addChannel = (raw: any, fallbackKind?: "group" | "channel") => {
     const id = String(raw?.id?._serialized ?? raw?.id ?? raw?.serialized ?? "");
