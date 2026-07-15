@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Production bootstrap — API'yi hemen baslat (Railway healthcheck),
- * DB schema'yi paralel uygula.
+ * Production bootstrap — API'yi hemen başlatır.
+ * Schema değişikliği yalnız RUN_SCHEMA_PUSH=1 ile açıkça istenirse çalışır.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -51,22 +51,26 @@ const child = spawn(
   },
 );
 
-// Schema push API'yi bloklamasin — arka planda
-log("Veritabani semasi arka planda uygulanıyor...");
-const push = spawn(
-  "pnpm",
-  ["--filter", "@workspace/db", "run", "push-force"],
-  {
-    cwd: rootDir,
-    env: process.env,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  },
-);
-push.on("exit", (code) => {
-  if (code === 0) log("Veritabani semasi tamam.");
-  else log(`UYARI: Veritabani semasi exit=${code}`);
-});
+let push = null;
+if (process.env.RUN_SCHEMA_PUSH === "1") {
+  log("Veritabani semasi açık izinle arka planda uygulanıyor...");
+  push = spawn(
+    "pnpm",
+    ["--filter", "@workspace/db", "run", "push-force"],
+    {
+      cwd: rootDir,
+      env: process.env,
+      stdio: "inherit",
+      shell: process.platform === "win32",
+    },
+  );
+  push.on("exit", (code) => {
+    if (code === 0) log("Veritabani semasi tamam.");
+    else log(`UYARI: Veritabani semasi exit=${code}`);
+  });
+} else {
+  log("Schema push kapalı; migration deploy adımında ayrıca çalıştırılmalı.");
+}
 
 child.on("exit", (code, signal) => {
   log(`API cikis: code=${code} signal=${signal}`);
@@ -74,10 +78,10 @@ child.on("exit", (code, signal) => {
 });
 
 process.on("SIGTERM", () => {
-  push.kill("SIGTERM");
+  push?.kill("SIGTERM");
   child.kill("SIGTERM");
 });
 process.on("SIGINT", () => {
-  push.kill("SIGINT");
+  push?.kill("SIGINT");
   child.kill("SIGINT");
 });

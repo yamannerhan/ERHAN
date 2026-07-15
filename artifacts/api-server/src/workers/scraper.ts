@@ -189,6 +189,16 @@ const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 0;
 let scraperIntervalHandle: ReturnType<typeof setInterval> | null = null;
+const workerTimerHandles = new Set<ReturnType<typeof setTimeout>>();
+let workerStopping = false;
+const enabledBotPlatforms = new Set(
+  (process.env["BOT_PLATFORMS"] ?? "telegram,whatsapp,eleman")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
+);
+const botPlatformEnabled = (platform: "telegram" | "whatsapp" | "eleman") =>
+  enabledBotPlatforms.has(platform);
 /** Admin «Tüm Botları Durdur» — sadece Telegram tarama durur (WA/Eleman etkilenmez) */
 let telegramScraperPaused = false;
 
@@ -559,19 +569,6 @@ async function processMessage(
     return "duplicate";
   }
 
-  const [imported] = await db.insert(importedPostsTable).values({
-    sourceId: source.id,
-    platform: source.platform,
-    externalId,
-    rawText: text,
-    sourceUrl,
-    duplicateHash: hash,
-    isJob: true,
-    status: "pending",
-  }).onConflictDoNothing().returning();
-
-  if (!imported) return "duplicate";
-
   const title = extractTitle(text);
   const v2City = await maybeClassifyWithV2({
     title,
@@ -606,52 +603,74 @@ async function processMessage(
     rawText: text,
   };
 
-  if (!shouldAutoPublish(source)) {
-    await db.insert(pendingJobsTable).values({
+  const outcome = await db.transaction(async (tx) => {
+    const [imported] = await tx.insert(importedPostsTable).values({
       sourceId: source.id,
-      importedPostId: imported.id,
-      rawText: text,
-      title,
-      company: companyName !== "Belirtilmemiş" ? companyName : null,
-      city,
-      salary,
-      phone: phoneField,
-      description: text,
-      applicationUrl: null,
-      sourceUrl,
       platform: source.platform,
-      status: "pending",
+      externalId,
+      rawText: text,
+      sourceUrl,
       duplicateHash: hash,
-    });
-    return "skipped";
-  }
+      isJob: true,
+      status: "pending",
+    }).onConflictDoNothing().returning();
+    if (!imported) return { kind: "duplicate" as const };
 
-  const [newListing] = await db.insert(listingsTable).values({
-    title: title ?? "Güvenlik Personeli Aranıyor",
-    company: companyName,
-    city,
-    salary: salary ?? undefined,
-    workType,
-    description: text,
-    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
-    status: "active",
-    isActive: true,
-    autoDeleteOnExpiry: true,
-    sourceTag: source.platform,
-    sourceType: "bot_imported",
-    sourceName: source.platform === "telegram" ? "Telegram"
-      : source.platform === "whatsapp" ? "WhatsApp"
-      : source.platform === "eleman" ? "Eleman.net"
-      : (source.platform || "Kaynak"),
-    sourcePublishedAt: postedAt ?? now,
-    verifiedPublisher: false,
-    applyUrl: formatTelApplyUrl(phones),
-    companyLogoUrl: brand?.logoUrl ?? null,
-    expiresAt: listingExpiryFrom(postedAt),
-    ...listingMeta,
-    ...(coords ?? {}),
-  }).returning();
-  if (!newListing) return "skipped";
+    if (!shouldAutoPublish(source)) {
+      await tx.insert(pendingJobsTable).values({
+        sourceId: source.id,
+        importedPostId: imported.id,
+        rawText: text,
+        title,
+        company: companyName !== "Belirtilmemiş" ? companyName : null,
+        city,
+        salary,
+        phone: phoneField,
+        description: text,
+        applicationUrl: null,
+        sourceUrl,
+        platform: source.platform,
+        status: "pending",
+        duplicateHash: hash,
+      });
+      return { kind: "pending" as const };
+    }
+
+    const [listing] = await tx.insert(listingsTable).values({
+      title: title ?? "Güvenlik Personeli Aranıyor",
+      company: companyName,
+      city,
+      salary: salary ?? undefined,
+      workType,
+      description: text,
+      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
+      status: "active",
+      isActive: true,
+      autoDeleteOnExpiry: true,
+      sourceTag: source.platform,
+      sourceType: "bot_imported",
+      sourceName: source.platform === "telegram" ? "Telegram"
+        : source.platform === "whatsapp" ? "WhatsApp"
+        : source.platform === "eleman" ? "Eleman.net"
+        : (source.platform || "Kaynak"),
+      sourcePublishedAt: postedAt ?? now,
+      verifiedPublisher: false,
+      applyUrl: formatTelApplyUrl(phones),
+      companyLogoUrl: brand?.logoUrl ?? null,
+      expiresAt: listingExpiryFrom(postedAt),
+      ...listingMeta,
+      ...(coords ?? {}),
+    }).returning();
+    if (!listing) throw new Error("İlan kaydı oluşturulamadı");
+
+    await tx.update(importedPostsTable)
+      .set({ status: "approved" })
+      .where(eq(importedPostsTable.id, imported.id));
+    return { kind: "added" as const, listing };
+  });
+  if (outcome.kind === "duplicate") return "duplicate";
+  if (outcome.kind === "pending") return "skipped";
+  const newListing = outcome.listing;
 
   try {
     const { logListingSourceHistory } = await import("../lib/listing-rank");
@@ -669,10 +688,6 @@ async function processMessage(
       lastCheckedAt: now,
     });
   } catch { /* ignore */ }
-
-  await db.update(importedPostsTable)
-    .set({ status: "approved" })
-    .where(eq(importedPostsTable.id, imported.id));
 
   // WhatsApp / Eleman: admin bildirimi + kaynak adı
   // Telegram: duyuruda ve bildirimde "Telegram" yazsın (ilk taramada sadece admin)
@@ -710,6 +725,7 @@ async function processMessage(
 // ── Bot API polling state ──────────────────────────────────────────
 let botUpdateOffset = 0;
 let botOffsetLoaded = false;
+let botPollRunning = false;
 
 async function loadBotUpdateOffset(): Promise<void> {
   if (botOffsetLoaded) return;
@@ -718,13 +734,12 @@ async function loadBotUpdateOffset(): Promise<void> {
       .from(telegramSessionsTable).limit(1);
     botUpdateOffset = rows[0]?.botUpdateOffset ?? 0;
     botOffsetLoaded = true;
-  } catch {
-    botOffsetLoaded = true;
+  } catch (error) {
+    logger.warn({ err: error }, "scraper: botUpdateOffset okunamadı; sonraki turda yeniden denenecek");
   }
 }
 
 async function persistBotUpdateOffset(offset: number): Promise<void> {
-  botUpdateOffset = offset;
   try {
     const rows = await db.select({ id: telegramSessionsTable.id }).from(telegramSessionsTable).limit(1);
     if (rows[0]) {
@@ -737,14 +752,27 @@ async function persistBotUpdateOffset(offset: number): Promise<void> {
         botUpdateOffset: offset,
       });
     }
+    botUpdateOffset = offset;
   } catch (e) {
     logger.warn({ err: e }, "scraper: botUpdateOffset kaydedilemedi");
+    throw e;
   }
 }
 
 async function processBotUpdates(): Promise<void> {
+  if (botPollRunning) return;
+  botPollRunning = true;
+  try {
+    await processBotUpdatesUnlocked();
+  } finally {
+    botPollRunning = false;
+  }
+}
+
+async function processBotUpdatesUnlocked(): Promise<void> {
   if (!isBotTokenSet()) return;
   await loadBotUpdateOffset();
+  if (!botOffsetLoaded) return;
 
   const updates = await getUpdates(botUpdateOffset);
   if (updates.length === 0) return;
@@ -787,6 +815,7 @@ async function processBotUpdates(): Promise<void> {
         await processMessage(source, `bot_${chatId}_${post.message_id}`, post.text, msgUrl, postedAt, false);
       } catch (e) {
         logger.error(e, `scraper: bot update processing error`);
+        throw e;
       }
     }
 
@@ -1246,7 +1275,7 @@ async function recoverStuckTelegramQueue(
   });
 
   if (!anyLive) {
-    await releaseStaleScanLocks(true);
+    await releaseStaleScanLocks(false);
     for (const s of incomplete) {
       if (s.lastError === "Sırada bekliyor…" || !s.lastError) {
         await patchSourceProgress(s.id, {
@@ -1441,18 +1470,6 @@ async function publishElemanJob(
     .limit(1);
   if (seenExt) return "duplicate";
 
-  const [imported] = await db.insert(importedPostsTable).values({
-    sourceId: source.id,
-    platform: "eleman",
-    externalId,
-    rawText: job.rawText,
-    sourceUrl: job.url,
-    duplicateHash: hash,
-    isJob: true,
-    status: "pending",
-  }).onConflictDoNothing().returning();
-  if (!imported) return "duplicate";
-
   const jobCity = job.locationDisplay ?? job.city;
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
   // Eleman.net'in yapılandırılmış il/ilçe alanı açıklamadaki servis/merkez adından daha güvenilir.
@@ -1475,40 +1492,56 @@ async function publishElemanJob(
     (await matchKnownCompany(companyName)) ||
     matchKnownCompanyInBlob(`${companyName} ${job.title} ${job.rawText}`);
   if (brand && (!job.companyName || companyName === "Belirtilmemiş")) companyName = brand.name;
-  const [newListing] = await db.insert(listingsTable).values({
-    title: job.title || "Güvenlik Personeli Aranıyor",
-    company: companyName,
-    city,
-    salary: extractSalary(job.rawText) ?? undefined,
-    workType: extractWorkType(job.rawText),
-    description: cleanDescription,
-    requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
-    status: "active",
-    isActive: true,
-    autoDeleteOnExpiry: true,
-    sourceId: source.id,
-    messageId,
-    sourceUrl: job.url,
-    sourceTag: "eleman",
-    sourceType: "bot_imported",
-    sourceName: "Eleman.net",
-    sourcePublishedAt: postedAt,
-    verifiedPublisher: false,
-    lastCheckedAt: now,
-    applyUrl: formatTelApplyUrl(contactPhones),
-    companyLogoUrl: brand?.logoUrl ?? null,
-    publishedAt: postedAt,
-    firstSeenAt: now,
-    lastSeenAt: now,
-    rawText: job.rawText,
-    expiresAt: listingExpiryFrom(postedAt),
-    ...(coords ?? {}),
-  }).returning();
-  if (!newListing) return "skipped";
+  const outcome = await db.transaction(async (tx) => {
+    const [imported] = await tx.insert(importedPostsTable).values({
+      sourceId: source.id,
+      platform: "eleman",
+      externalId,
+      rawText: job.rawText,
+      sourceUrl: job.url,
+      duplicateHash: hash,
+      isJob: true,
+      status: "pending",
+    }).onConflictDoNothing().returning();
+    if (!imported) return null;
 
-  await db.update(importedPostsTable)
-    .set({ status: "approved" })
-    .where(eq(importedPostsTable.id, imported.id));
+    const [listing] = await tx.insert(listingsTable).values({
+      title: job.title || "Güvenlik Personeli Aranıyor",
+      company: companyName,
+      city,
+      salary: extractSalary(job.rawText) ?? undefined,
+      workType: extractWorkType(job.rawText),
+      description: cleanDescription,
+      requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
+      status: "active",
+      isActive: true,
+      autoDeleteOnExpiry: true,
+      sourceId: source.id,
+      messageId,
+      sourceUrl: job.url,
+      sourceTag: "eleman",
+      sourceType: "bot_imported",
+      sourceName: "Eleman.net",
+      sourcePublishedAt: postedAt,
+      verifiedPublisher: false,
+      lastCheckedAt: now,
+      applyUrl: formatTelApplyUrl(contactPhones),
+      companyLogoUrl: brand?.logoUrl ?? null,
+      publishedAt: postedAt,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      rawText: job.rawText,
+      expiresAt: listingExpiryFrom(postedAt),
+      ...(coords ?? {}),
+    }).returning();
+    if (!listing) throw new Error("Eleman.net ilan kaydı oluşturulamadı");
+    await tx.update(importedPostsTable)
+      .set({ status: "approved" })
+      .where(eq(importedPostsTable.id, imported.id));
+    return listing;
+  });
+  if (!outcome) return "duplicate";
+  const newListing = outcome;
 
   void announceNewListing({
     id: newListing.id,
@@ -1628,6 +1661,7 @@ let cycleRunning = false;
 let cycleQueued = false;
 
 async function runScraperCycle(force = false): Promise<void> {
+  if (workerStopping) return;
   if (cycleRunning) {
     cycleQueued = true;
     return;
@@ -1645,29 +1679,32 @@ async function runScraperCycle(force = false): Promise<void> {
 }
 
 async function runScraperCycleInner(force = false): Promise<void> {
-  await ensureTelegramConnected(5);
-  await processBotUpdates();
+  if (botPlatformEnabled("telegram")) {
+    await ensureTelegramConnected(5);
+    await processBotUpdates();
+  }
 
   const sources = await db.select().from(sourcesTable)
     .where(eq(sourcesTable.active, true));
   const now = new Date();
 
   // Telegram önce — ilk tarama sırasında Eleman uzun sürmesin diye zinciri kesmesin
-  const telegramSources = sources.filter(s => s.platform === "telegram");
+  const telegramSources = botPlatformEnabled("telegram")
+    ? sources.filter(s => s.platform === "telegram")
+    : [];
   if (telegramSources.length > 0 && !telegramScraperPaused) {
     await scanTelegramSources(telegramSources, force);
   } else if (telegramScraperPaused && telegramSources.length > 0) {
     logger.info("scraper: Telegram tarama duraklatıldı (admin)");
   }
 
-  const whatsappSources = selectedWhatsAppSources(sources);
+  const whatsappSources = botPlatformEnabled("whatsapp") ? selectedWhatsAppSources(sources) : [];
   if (whatsappSources.length > 0) {
     await scanWhatsAppSources(whatsappSources, force);
   }
 
-  // Telegram ilk tarama bitmeden Eleman'ı aynı döngüde bekletme (cycle kilidi)
-  const tgInitialBusy = !telegramScraperPaused && await hasIncompleteInitialScan();
-  if (!tgInitialBusy) {
+  // Eleman taraması Telegram backfill durumundan bağımsız ilerler.
+  if (botPlatformEnabled("eleman")) {
     const elemanSources = sources.filter(s => s.platform === "eleman");
     if (elemanSources.length > 0) {
       await scanElemanSources(elemanSources, force);
@@ -1860,17 +1897,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       }
     } catch (e) {
       stats.errors++;
-      // İlan oluşturulmadan kalan pending kayıt sonraki taramayı kalıcı
-      // duplicate'a çevirmesin; yalnız bu WhatsApp mesajını yeniden denet.
-      try {
-        await db.delete(importedPostsTable).where(and(
-          eq(importedPostsTable.sourceId, source.id),
-          eq(importedPostsTable.externalId, `wa_${m.id}`),
-          eq(importedPostsTable.status, "pending"),
-        ));
-      } catch (cleanupError) {
-        logger.warn({ err: cleanupError, sourceId: source.id, messageId: m.id }, "scraper: wa pending cleanup failed");
-      }
+      // Import + ilan yazımı transaction içinde; hata halinde rezervasyon rollback olur.
       logger.warn({ err: e, sourceId: source.id }, "scraper: wa message process error");
     }
     processed++;
@@ -2457,8 +2484,9 @@ async function scheduleScraperInterval(): Promise<void> {
 }
 
 export function startScraperWorker(): void {
+  workerStopping = false;
   // Sadece takılı isScanning kilidini aç — imleç/progress ASLA sıfırlanmaz (deploy sonrası kaldığı yerden devam)
-  void releaseStaleScanLocks(true).then(async (n) => {
+  void releaseStaleScanLocks(false).then(async (n) => {
     if (n > 0) logger.info({ released: n }, "scraper: deploy sonrası scan kilitleri açıldı (imleçler korundu)");
 
     // Aktif kaynakları uyandır: bağlan uyarısı / takılı hata temizle (Sıfırla değil — imleç korunur)
@@ -2497,11 +2525,13 @@ export function startScraperWorker(): void {
       }, "scraper: kaynak kaldığı yerden devam edecek");
     }
   });
-  void ensureTelegramConnected(8).then((ok) => {
-    logger.info(`scraper: GramJS ${ok ? "bağlı — kaldığı mesajdan devam" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
-  });
-  ensureWhatsAppAutoConnect();
-  void loadBotUpdateOffset();
+  if (botPlatformEnabled("telegram")) {
+    void ensureTelegramConnected(8).then((ok) => {
+      logger.info(`scraper: GramJS ${ok ? "bağlı — kaldığı mesajdan devam" : "bağlı değil — Admin panelinden Telegram hesabı gerekli"}`);
+    });
+    void loadBotUpdateOffset();
+  }
+  if (botPlatformEnabled("whatsapp")) ensureWhatsAppAutoConnect();
   const mode = isClientConnected()
     ? "GramJS"
     : isBotTokenSet()
@@ -2511,14 +2541,14 @@ export function startScraperWorker(): void {
 
   void refreshScraperInterval();
 
-  setInterval(() => {
-    if (!isClientConnected()) void ensureTelegramConnected(5).catch(() => {});
-    ensureWhatsAppAutoConnect();
-  }, 5 * 60 * 1000);
+  workerTimerHandles.add(setInterval(() => {
+    if (botPlatformEnabled("telegram") && !isClientConnected()) void ensureTelegramConnected(5).catch(() => {});
+    if (botPlatformEnabled("whatsapp")) ensureWhatsAppAutoConnect();
+  }, 5 * 60 * 1000));
 
   // Canlı dinleme kaçırsa bile her 30 dakikada tüm WhatsApp gruplarını
   // DB'de saklanan son mesaj zaman damgasından başlayarak sırayla kontrol et.
-  setInterval(() => {
+  if (botPlatformEnabled("whatsapp")) workerTimerHandles.add(setInterval(() => {
     if (!isWhatsAppReady()) {
       ensureWhatsAppAutoConnect();
       return;
@@ -2526,28 +2556,45 @@ export function startScraperWorker(): void {
     void triggerWhatsAppScan().catch((error) => {
       logger.error({ err: error }, "scraper: 30dk WhatsApp taraması başarısız");
     });
-  }, WA_INCREMENTAL_SCAN_INTERVAL_MS);
+  }, WA_INCREMENTAL_SCAN_INTERVAL_MS));
 
-  if (isBotTokenSet()) {
+  if (botPlatformEnabled("telegram") && isBotTokenSet()) {
     void (async () => {
       const minutes = await getTelegramScanIntervalMinutes();
-    setInterval(async () => {
+    workerTimerHandles.add(setInterval(async () => {
       try { await processBotUpdates(); }
       catch (e) { logger.error(e, "scraper: bot poll error"); }
-      }, minutes * 60_000);
+      }, minutes * 60_000));
     })();
   }
 
   void scheduleScraperInterval();
 
-  setTimeout(async () => {
+  workerTimerHandles.add(setTimeout(async () => {
     try {
-      await ensureTelegramConnected(8);
-      ensureWhatsAppAutoConnect();
+      if (botPlatformEnabled("telegram")) await ensureTelegramConnected(8);
+      if (botPlatformEnabled("whatsapp")) ensureWhatsAppAutoConnect();
       await runScraperCycle();
     }
     catch (e) { logger.error(e, "scraper: initial run error"); }
-  }, 5_000);
+  }, 5_000));
+}
+
+export async function stopScraperWorker(timeoutMs = 20_000): Promise<void> {
+  workerStopping = true;
+  if (scraperIntervalHandle) {
+    clearInterval(scraperIntervalHandle);
+    scraperIntervalHandle = null;
+  }
+  for (const handle of workerTimerHandles) {
+    clearInterval(handle);
+    clearTimeout(handle);
+  }
+  workerTimerHandles.clear();
+  const deadline = Date.now() + timeoutMs;
+  while ((cycleRunning || waSequentialRunning || waIncrementalRunning) && Date.now() < deadline) {
+    await sleep(200);
+  }
 }
 
 export async function refreshScraperInterval(): Promise<void> {
