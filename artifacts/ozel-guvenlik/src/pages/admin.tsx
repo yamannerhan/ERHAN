@@ -3641,6 +3641,33 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         </div>
       </div>
 
+      {savedSources.some((source) => source.lastError || source.lastScanErrors > 0) && (
+        <section className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 md:p-5" aria-labelledby="wa-scan-diagnostics-title">
+          <h4 id="wa-scan-diagnostics-title" className="text-sm font-extrabold text-rose-100">WhatsApp Tarama Tanı Ekranı</h4>
+          <p className="mt-1 text-xs text-rose-200/80">
+            Her grup için son tarama sonucu ve ilanların neden eklenmediği burada görünür.
+          </p>
+          <div className="mt-3 space-y-2">
+            {savedSources.filter((source) => source.lastError || source.lastScanErrors > 0).map((source) => (
+              <details key={source.id} className="rounded-xl border border-rose-300/20 bg-black/20 px-3 py-2 text-xs text-slate-200">
+                <summary className="cursor-pointer font-bold text-rose-200">
+                  {source.name} · {source.lastScanErrors > 0 ? `${source.lastScanErrors} hata` : "Tarama tanısı"}
+                </summary>
+                <div className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-300">
+                  {source.lastError || "Mesaj işleme hatası kaydedildi; sonraki taramada ayrıntı güncellenecek."}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                  <span>Okunan: {source.lastScanMessagesRead}</span>
+                  <span>Eşleşen: {source.lastScanFound}</span>
+                  <span>Eklenen: {source.lastScanAdded}</span>
+                  <span>Çift: {source.lastScanDuplicates}</span>
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* İstatistik özeti */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
@@ -3723,7 +3750,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                     </button>
                   </div>
                 </div>
-                {s.lastError && <div className="mt-1 text-[10px] text-rose-400 truncate">{s.lastError}</div>}
+                {s.lastError && <div className="mt-2 text-[10px] leading-relaxed text-rose-300 break-words">{s.lastError}</div>}
               </div>
             ))}
           </div>

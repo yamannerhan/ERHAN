@@ -22,15 +22,6 @@ import { announceNewListing } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
 import { createDuplicateHash } from "../lib/job-dedup";
 
-// ── Keyword lists ──────────────────────────────────────────────────
-const CHAT_SKIP_KEYWORDS = [
-  "selam", "merhaba", "nasılsın", "iş var mı", "iş arıyorum", "iş arayışı",
-  "özelden yaz", "teşekkür", "tamam", "günaydın", "iyi akşam", "iyi geceler",
-  "kolay gelsin", "iyi günler", "iyi akşamlar", "allaha emanet", "rica ederim",
-  "ne zaman açıklanacak", "sonuçlar", "abla yaz", "atlarız", "hadı hayırlısı",
-  "lazım varsa dm", "iş aramaktan yoruldum", "işverenler dm",
-];
-
 // ── Text utils ─────────────────────────────────────────────────────
 function normalizeText(text: string): string {
   return text
@@ -360,12 +351,17 @@ async function touchListingSeen(listingId: number): Promise<void> {
     .where(eq(listingsTable.id, listingId));
 }
 
-function isChatMessage(text: string): boolean {
-  if (isSecurityJobPosting(text)) return false;
-  if (isSponsoredPost(text) || isJobSeekerPost(text)) return true;
-  if (text.length > 500) return false;
-  const lower = normalizeText(text);
-  return CHAT_SKIP_KEYWORDS.some(kw => lower.includes(kw));
+/**
+ * WhatsApp gruplarında ilanlar sıkça maaş veya telefon yazılmadan yalnızca
+ * "özel güvenlik görevlisi aranıyor" biçiminde paylaşılır. Bu dar ek kural,
+ * bu geçerli ilanları alır; iş arayan ve sponsorlu mesajları dışarıda tutar.
+ */
+function isWhatsAppSecurityJobPosting(text: string): boolean {
+  if (text.length < 35 || isSponsoredPost(text) || isJobSeekerPost(text)) return false;
+  const normalized = normalizeText(text);
+  const securityRole = /(?:özel\s+güvenlik|ögg\b|ogg\b|5188|silahlı\s+güvenlik|silahsız\s+güvenlik|güvenlik\s+(?:görevlisi|personeli|amiri|sorumlusu)|bay\s+güvenlik|bayan\s+güvenlik)/.test(normalized);
+  const hiringSignal = /(?:aranıyor|aranmaktadır|alınacak|alınacaktır|alım\s+yapılacak|personel\s+alımı|eleman\s+alımı|ekip\s+arkadaşı\s+aran|başvurular|başvuru\s+(?:için|icin)|işe\s+alım|istihdam)/.test(normalized);
+  return securityRole && hiringSignal;
 }
 
 function extractTelegramUsername(url: string): string | null {
@@ -500,8 +496,10 @@ async function processMessage(
   postedAt?: Date,
   isInitialScan = false,
 ): Promise<ProcessResult> {
-  if (!text?.trim() || isChatMessage(text)) return "skipped";
-  if (!isSecurityJobPosting(text)) return "skipped";
+  if (!text?.trim()) return "skipped";
+  const matchesSecurityJob = isSecurityJobPosting(text)
+    || (source.platform === "whatsapp" && isWhatsAppSecurityJobPosting(text));
+  if (!matchesSecurityJob) return "skipped";
 
   if (isInitialScan && postedAt) {
     const maxAgeMs = source.platform === "whatsapp" ? WA_INITIAL_SCAN_MS : INITIAL_SCAN_MS;
@@ -1811,6 +1809,8 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   stats.messagesRead = messages.length;
   let maxTs = lastTs;
   let processed = 0;
+  let skippedNonListing = 0;
+  let skippedByRules = 0;
 
   // Derinlik: en eski mesaj hedefe ne kadar yaklaştı; tükenince %100’e çekilir
   const depthMs = Math.max(0, Date.now() - oldestTs);
@@ -1831,6 +1831,8 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
   // Mesajlar zaten eski→yeni sıralı; ilanları bu sırayla işle
   for (const m of messages) {
     if (m.timestamp > maxTs) maxTs = m.timestamp;
+    const matchesSecurityJob = isSecurityJobPosting(m.text) || isWhatsAppSecurityJobPosting(m.text);
+    if (!matchesSecurityJob) skippedNonListing++;
     try {
       const result = await processMessage(
         source,
@@ -1846,6 +1848,9 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       } else if (result === "duplicate" || result === "updated") {
         stats.duplicates++;
         stats.found++;
+      } else if (matchesSecurityJob) {
+        // Yaş, şehir filtresi veya veri kaydı gibi ilan-sonrası kurallar.
+        skippedByRules++;
       }
     } catch (e) {
       stats.errors++;
@@ -1878,6 +1883,11 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     || (messages.length > 0 && fetchRounds >= 20);
 
   liveProgress = markDone ? 100 : Math.min(95, Math.max(liveProgress, depthPct));
+  const diagnostic = stats.found === 0
+    ? `Tarama tanısı: ${messages.length} mesaj okundu; ${skippedNonListing} mesaj ilan eşiğini karşılamadı; ${skippedByRules} ilan filtre/veri kuralıyla atlandı; ${stats.errors} işlem hatası.`
+    : stats.errors > 0
+      ? `Tarama tamamlandı: ${messages.length} mesaj, ${stats.found} ilan eşleşti; ${stats.errors} mesaj işleme hatası.`
+      : null;
 
   await patchSourceProgress(source.id, {
     lastCheckedAt: new Date(),
@@ -1887,7 +1897,7 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     initialScanPhase: markDone ? null : "backward",
     isScanning: false,
     lastError: markDone
-      ? null
+      ? diagnostic
       : `Geçmiş devam ediyor (en eski ~${depthDays}g, ${messages.length} mesaj, ${fetchRounds} tur). Sonraki turda devam.`,
     lastScanMessagesRead: messages.length,
     lastScanFound: stats.found,
