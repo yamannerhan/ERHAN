@@ -4,6 +4,8 @@ import { extractPhoneNumbers } from "../lib/job-parsing";
 const BASE = "https://www.eleman.net";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const REQUEST_TIMEOUT_MS = Math.max(5_000, Number(process.env["ELEMAN_REQUEST_TIMEOUT_MS"] ?? 20_000));
+const REQUEST_RETRIES = Math.min(5, Math.max(1, Number(process.env["ELEMAN_REQUEST_RETRIES"] ?? 3)));
 
 export const ELEMAN_CITY_LIST: Array<{ slug: string; name: string }> = [
   { slug: "istanbul-avrupa", name: "İstanbul Avrupa" }, { slug: "istanbul-anadolu", name: "İstanbul Anadolu" },
@@ -340,23 +342,48 @@ export function parseElemanDetailHtml(html: string, item: ElemanListItem): Elema
   };
 }
 
-async function fetchHtml(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xhtml+xml" } });
-    if (!response.ok) {
-      logger.warn({ status: response.status, url }, "Eleman.net request failed");
-      return null;
-    }
-    return await response.text();
-  } catch (error) {
-    logger.warn({ err: error, url }, "Eleman.net request failed");
-    return null;
+export class ElemanTransportError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = "ElemanTransportError";
   }
+}
+
+async function fetchHtml(url: string): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= REQUEST_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xhtml+xml" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const error = new ElemanTransportError(`Eleman.net HTTP ${response.status}`, response.status);
+        if (![408, 425, 429].includes(response.status) && response.status < 500) throw error;
+        lastError = error;
+      } else {
+        return await response.text();
+      }
+    } catch (error) {
+      lastError = error;
+      const status = error instanceof ElemanTransportError ? error.status : undefined;
+      if (status != null && status < 500 && ![408, 425, 429].includes(status)) throw error;
+    }
+
+    if (attempt < REQUEST_RETRIES) {
+      const delayMs = Math.min(8_000, 500 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+      logger.warn({ attempt, delayMs, status: lastError instanceof ElemanTransportError ? lastError.status : undefined }, "eleman: geçici erişim hatası, tekrar denenecek");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new ElemanTransportError(
+    lastError instanceof Error ? `Eleman.net erişilemedi: ${lastError.message}` : "Eleman.net erişilemedi",
+    lastError instanceof ElemanTransportError ? lastError.status : undefined,
+  );
 }
 
 export async function fetchElemanListPage(citySlug: string | null, page: number): Promise<ElemanListItem[]> {
   const html = await fetchHtml(buildElemanListUrl(citySlug, page));
-  if (!html) return [];
   const sourceCity = ELEMAN_CITY_LIST.find((entry) => entry.slug === citySlug)?.name
     ?.replace(/\s+(?:Avrupa|Anadolu)$/i, "") ?? null;
   return parseElemanListHtml(html).map((item) => ({ ...item, sourceCity }));
@@ -364,7 +391,7 @@ export async function fetchElemanListPage(citySlug: string | null, page: number)
 
 export async function fetchElemanJobDetail(item: ElemanListItem): Promise<ElemanJobDetail | null> {
   const html = await fetchHtml(item.url);
-  return html ? parseElemanDetailHtml(html, item) : null;
+  return parseElemanDetailHtml(html, item);
 }
 
 export async function scrapeElemanCityPages(

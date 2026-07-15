@@ -336,6 +336,24 @@ export async function logout(): Promise<void> {
   await saveSession({ authState: "disconnected", sessionString: null, phone: null, phoneCodeHash: null });
 }
 
+/** Process kapanışı: sunucu oturumunu silmeden bağlantıyı kapatır. */
+export async function shutdownTelegramClient(): Promise<void> {
+  if (keepaliveTimer) {
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  }
+  const activeClient = client;
+  client = null;
+  currentState = "disconnected";
+  if (activeClient) {
+    try {
+      await activeClient.disconnect();
+    } catch (error) {
+      logger.warn({ err: error }, "telegram-client: shutdown disconnect failed");
+    }
+  }
+}
+
 export function getAuthState(): AuthState { return currentState; }
 export function getCurrentPhone(): string | null { return currentPhone; }
 export function isClientConnected(): boolean { return currentState === "connected" && client !== null; }

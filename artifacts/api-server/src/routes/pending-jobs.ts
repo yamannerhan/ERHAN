@@ -106,34 +106,53 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
       companyLogoUrl = brand.logoUrl;
     }
   } catch { /* ignore */ }
-  const [listing] = await db.insert(listingsTable).values({
-    title,
-    company: companyName,
-    city,
-    salary: job.salary ?? undefined,
-    workType: extractWorkType(job.rawText),
-    description: job.description ?? job.rawText,
-    requirements: buildListingRequirements({ gender, location, benefits, projectType, source: `${platformTag} | ${job.sourceUrl ?? ""}` }),
-    status: "active",
-    sourceTag: job.platform,
-    sourceType: "bot_imported",
-    sourceName: job.platform === "telegram" ? "Telegram"
-      : job.platform === "whatsapp" ? "WhatsApp"
-      : job.platform === "eleman" ? "Eleman.net"
-      : (job.platform || "Kaynak"),
-    sourcePublishedAt: job.createdAt ?? new Date(),
-    verifiedPublisher: false,
-    lastCheckedAt: new Date(),
-    sourceUrl: job.sourceUrl ?? null,
-    companyLogoUrl,
-    applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "").slice(0, 1)),
-    autoDeleteOnExpiry: true,
-    expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
-    publishedAt: job.createdAt ?? new Date(),
-    lastSeenAt: new Date(),
-    firstSeenAt: new Date(),
-    ...(coords ?? {}),
-  }).returning();
+  const listing = await db.transaction(async (tx) => {
+    const [claimed] = await tx.update(pendingJobsTable)
+      .set({ status: "publishing" })
+      .where(and(eq(pendingJobsTable.id, id), eq(pendingJobsTable.status, "pending")))
+      .returning({ id: pendingJobsTable.id });
+    if (!claimed) throw new Error("Bu ilan başka bir işlem tarafından işleniyor");
+
+    const [created] = await tx.insert(listingsTable).values({
+      title,
+      company: companyName,
+      city,
+      salary: job.salary ?? undefined,
+      workType: extractWorkType(job.rawText),
+      description: job.description ?? job.rawText,
+      requirements: buildListingRequirements({ gender, location, benefits, projectType, source: `${platformTag} | ${job.sourceUrl ?? ""}` }),
+      status: "active",
+      sourceTag: job.platform,
+      sourceType: "bot_imported",
+      sourceName: job.platform === "telegram" ? "Telegram"
+        : job.platform === "whatsapp" ? "WhatsApp"
+        : job.platform === "eleman" ? "Eleman.net"
+        : (job.platform || "Kaynak"),
+      sourcePublishedAt: job.createdAt ?? new Date(),
+      verifiedPublisher: false,
+      lastCheckedAt: new Date(),
+      sourceUrl: job.sourceUrl ?? null,
+      companyLogoUrl,
+      applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "").slice(0, 1)),
+      autoDeleteOnExpiry: true,
+      expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+      publishedAt: job.createdAt ?? new Date(),
+      lastSeenAt: new Date(),
+      firstSeenAt: new Date(),
+      ...(coords ?? {}),
+    }).returning();
+    if (!created) throw new Error("İlan oluşturulamadı");
+
+    await tx.update(pendingJobsTable)
+      .set({ status: "published" })
+      .where(eq(pendingJobsTable.id, id));
+    if (job.importedPostId) {
+      await tx.update(importedPostsTable)
+        .set({ status: "approved" })
+        .where(eq(importedPostsTable.id, job.importedPostId));
+    }
+    return created;
+  });
   if (listing) {
     const label = job.platform === "telegram" ? "Telegram"
       : job.platform === "whatsapp" ? "WhatsApp"
@@ -142,19 +161,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     await announceNewListing(listing, { adminOnly: true, skipChat: true, sourceLabel: label });
   }
 
-  // Update pending job status
-  await db.update(pendingJobsTable)
-    .set({ status: "published" })
-    .where(eq(pendingJobsTable.id, id));
-
-  // Update imported post status if linked
-  if (job.importedPostId) {
-    await db.update(importedPostsTable)
-      .set({ status: "approved" })
-      .where(eq(importedPostsTable.id, job.importedPostId));
-  }
-
-  res.json({ success: true, listingId: listing?.id });
+  res.json({ success: true, listingId: listing.id });
 });
 
 // ── Reject ────────────────────────────────────────────────────────

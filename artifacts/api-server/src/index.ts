@@ -13,15 +13,14 @@ import {
 import { setRealtimeServer } from "./lib/realtime";
 import {
   startScraperWorker,
+  stopScraperWorker,
   purgeExpiredListings,
   purgeDemoListings,
   reparseImportedListings,
-  ensureExactBotDeduplication,
-  dedupeExistingListings,
 } from "./workers/scraper";
-import { initTelegramClient } from "./services/telegram-client";
-import { initWhatsAppClient } from "./services/whatsapp-client";
-import { db, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
+import { initTelegramClient, shutdownTelegramClient } from "./services/telegram-client";
+import { initWhatsAppClient, stopWhatsAppClient } from "./services/whatsapp-client";
+import { db, pool, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable } from "@workspace/db";
 import { eq, count, sql, asc, and, or, isNotNull } from "drizzle-orm";
 import { trimChatHistory } from "./lib/chat-retention";
 
@@ -30,6 +29,7 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
 
 const httpServer = createServer(app);
+let fallbackServer: ReturnType<typeof createServer> | null = null;
 export const io = new SocketIOServer(httpServer, {
   path: "/ws",
   cors: { origin: "*", methods: ["GET", "POST"] },
@@ -1104,11 +1104,6 @@ async function bootstrapWorkers(): Promise<void> {
     // Kayıtlı WA oturumu varsa otomatik bağlan (imleçler DB'de kalır; Sıfırla gerekmez).
     // WA_AUTO_CONNECT=0 ile boot bağlantısı kapatılabilir.
     void initWhatsAppClient();
-    await ensureExactBotDeduplication()
-      .catch((error) => logger.warn({ err: error }, "Exact duplicate index bootstrap skipped"));
-    void dedupeExistingListings()
-      .then((result) => logger.info(result, "Exact duplicate bot listings cleaned"))
-      .catch((error) => logger.warn({ err: error }, "Exact duplicate cleanup skipped"));
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
     void import("./lib/listing-feature").then((m) => m.startFeatureExpiryWorker()).catch(() => {});
@@ -1149,12 +1144,16 @@ httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   void import("./lib/levels").then((m) => m.ensureGamificationSchema())
     .then(() => logger.info("Gamification schema ready"))
     .catch((e) => logger.warn({ err: e }, "Gamification schema ensure failed"));
-  setTimeout(() => { void bootstrapWorkers(); }, 1500);
+  if (process.env["RUN_BOT_WORKERS"] !== "0") {
+    setTimeout(() => { void bootstrapWorkers(); }, 1500);
+  } else {
+    logger.info("Bot worker başlangıcı bu web processinde devre dışı");
+  }
 });
 
 const railwayFallbackPort = 8080;
 if (port !== railwayFallbackPort) {
-  const fallbackServer = createServer(app);
+  fallbackServer = createServer(app);
   fallbackServer.listen(railwayFallbackPort, "0.0.0.0", (err?: Error) => {
     if (err) {
       logger.warn({ err, port: railwayFallbackPort }, "Railway fallback");
@@ -1163,3 +1162,35 @@ if (port !== railwayFallbackPort) {
     logger.info({ port: railwayFallbackPort, host: "0.0.0.0" }, "Fallback listening");
   });
 }
+
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, "Graceful shutdown başladı");
+  const forceExit = setTimeout(() => {
+    logger.error("Graceful shutdown zaman aşımı");
+    process.exit(1);
+  }, 30_000);
+  forceExit.unref();
+
+  await Promise.allSettled([
+    stopScraperWorker(),
+    shutdownTelegramClient(),
+    stopWhatsAppClient(),
+  ]);
+  await new Promise<void>((resolve) => io.close(() => resolve()));
+  await Promise.all([
+    new Promise<void>((resolve) => httpServer.close(() => resolve())),
+    fallbackServer
+      ? new Promise<void>((resolve) => fallbackServer?.close(() => resolve()))
+      : Promise.resolve(),
+  ]);
+  await pool.end();
+  clearTimeout(forceExit);
+  logger.info("Graceful shutdown tamamlandı");
+  process.exit(0);
+}
+
+process.once("SIGTERM", () => { void gracefulShutdown("SIGTERM"); });
+process.once("SIGINT", () => { void gracefulShutdown("SIGINT"); });
