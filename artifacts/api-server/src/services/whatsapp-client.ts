@@ -542,6 +542,17 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     }
   }
 
+  // Bazı wwebjs sürümlerinde gruplar, getChats sonucundan ayrı tutulur.
+  // Varsa özel grup API'sini de doğrudan birleştir.
+  try {
+    if (typeof client.getGroups === "function") {
+      const groups = await client.getGroups();
+      for (const group of groups as any[]) addChannel(group, "group");
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getGroups failed");
+  }
+
   // Abone olunan kanallar — getChats bazen eksik bırakır
   try {
     if (typeof client.getChannels === "function") {
@@ -559,7 +570,7 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   // ekranda görünen ama istemcinin kaçırdığı kaynaklar da listelenir.
   try {
     const page = (client as any).pupPage;
-    const storeChannels = page ? await page.evaluate(() => {
+    const storeChannels = page ? await page.evaluate(async () => {
       const w = window as any;
       const collect = (collection: any) => {
         if (!collection) return [];
@@ -570,10 +581,14 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
       };
       const chats = collect(w.Store?.Chat);
       const newsletters = collect(w.Store?.Newsletter);
-      return [...chats, ...newsletters].map((item: any) => ({
+      const groupMetadata = collect(w.Store?.GroupMetadata);
+      const injectedChats = typeof w.WWebJS?.getChats === "function"
+        ? await Promise.resolve(w.WWebJS.getChats()).catch(() => [])
+        : [];
+      return [...chats, ...newsletters, ...groupMetadata, ...injectedChats].map((item: any) => ({
         id: item?.id?._serialized ?? item?.id ?? "",
         name: item?.name ?? item?.formattedTitle ?? item?.title ?? "",
-        isGroup: Boolean(item?.isGroup || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
+        isGroup: Boolean(item?.isGroup || item?.participants || item?.groupMetadata || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
         isChannel: Boolean(item?.isChannel || item?.isNewsletter || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@newsletter")),
         participants: item?.participants?.length ?? item?.groupMetadata?.participants?.length ?? item?.subscribersCount ?? 0,
       }));
