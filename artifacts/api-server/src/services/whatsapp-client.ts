@@ -550,12 +550,14 @@ async function harvestStoreMessages(
   byId: Map<string, WhatsAppMessage>,
 ): Promise<{ count: number; oldest: number }> {
   const storeMsgs: Array<{ id: string; text: string; timestamp: number }> = await page.evaluate(
-    (id: string, cut: number) => {
+    async (id: string, cut: number) => {
       const w = window as any;
-      const storeChat =
+      let storeChat =
         w.Store?.Chat?.get?.(id) ||
-        w.Store?.Chat?.find?.(id) ||
         (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+      if (!storeChat && typeof w.Store?.Chat?.find === "function") {
+        try { storeChat = await w.Store.Chat.find(id); } catch { /* ignore */ }
+      }
       if (!storeChat) return [];
       const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
@@ -608,6 +610,7 @@ export async function fetchWhatsAppMessages(
     limit?: number;
     maxAgeDays?: number;
     deep?: boolean;
+    onProgress?: (progress: { round: number; maxRounds: number; messages: number; oldestTs: number }) => void | Promise<void>;
   } = {},
 ): Promise<WhatsAppMessage[]> {
   const result = await fetchWhatsAppMessagesDetailed(groupJid, opts);
@@ -621,6 +624,7 @@ export async function fetchWhatsAppMessagesDetailed(
     limit?: number;
     maxAgeDays?: number;
     deep?: boolean;
+    onProgress?: (progress: { round: number; maxRounds: number; messages: number; oldestTs: number }) => void | Promise<void>;
   } = {},
 ): Promise<WhatsAppFetchResult> {
   if (!client || !isReady) {
@@ -634,14 +638,15 @@ export async function fetchWhatsAppMessagesDetailed(
     await new Promise((r) => setTimeout(r, 2500));
     if (page) {
       try {
-        await page.evaluate((jid: string) => {
+        await page.evaluate(async (jid: string) => {
           const w = window as any;
-          const chat =
-            w.Store?.Chat?.get?.(jid) ||
-            w.Store?.Chat?.find?.(jid);
+          let chat = w.Store?.Chat?.get?.(jid);
+          if (!chat && typeof w.Store?.Chat?.find === "function") {
+            try { chat = await w.Store.Chat.find(jid); } catch { /* ignore */ }
+          }
           if (chat?.presence?.subscribe) chat.presence.subscribe();
           if (typeof chat?.syncHistory === "function") {
-            try { chat.syncHistory(); } catch { /* ignore */ }
+            try { await chat.syncHistory(); } catch { /* ignore */ }
           }
         }, groupJid);
       } catch { /* ignore */ }
@@ -653,7 +658,12 @@ export async function fetchWhatsAppMessagesDetailed(
     chat = await client.getChatById(groupJid);
   } catch (e) {
     logger.warn({ err: e, groupJid }, "wa: getChatById failed");
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+  }
+  if (!chat) {
+    try {
+      const chats = await client.getChats();
+      chat = (chats as any[]).find((candidate) => candidate?.id?._serialized === groupJid);
+    } catch { /* ignore */ }
   }
   if (!chat) {
     return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
@@ -679,6 +689,14 @@ export async function fetchWhatsAppMessagesDetailed(
   let rounds = 0;
   let reachedCutoff = false;
   let historyExhausted = false;
+  const reportProgress = async (round: number, maxRounds: number, oldestTs: number) => {
+    if (!opts.onProgress) return;
+    try {
+      await opts.onProgress({ round, maxRounds, messages: byId.size, oldestTs });
+    } catch (e) {
+      logger.warn({ err: e, groupJid }, "wa: tarama ilerlemesi yazılamadı");
+    }
+  };
 
   const pullFetchMessages = async (limit: number) => {
     try {
@@ -719,10 +737,12 @@ export async function fetchWhatsAppMessagesDetailed(
         // 1) Store API ile daha eski mesajları yükle
         info = await page.evaluate(async (id: string) => {
           const w = window as any;
-          const storeChat =
+          let storeChat =
             w.Store?.Chat?.get?.(id) ||
-            w.Store?.Chat?.find?.(id) ||
             (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+          if (!storeChat && typeof w.Store?.Chat?.find === "function") {
+            try { storeChat = await w.Store.Chat.find(id); } catch { /* ignore */ }
+          }
           if (!storeChat) return { ok: false, count: 0, oldest: Date.now(), done: true, loaded: 0 };
 
           const msgsBefore = storeChat.msgs?.getModelsArray?.()?.length
@@ -801,6 +821,7 @@ export async function fetchWhatsAppMessagesDetailed(
 
       const oldest = Math.min(info.oldest ?? Date.now(), harvested.oldest);
       const count = info.count ?? 0;
+      await reportProgress(i + 1, maxRounds, oldest);
 
       if (i % 5 === 0 || oldest <= cutoff || byId.size !== lastHarvested) {
         logger.info(
@@ -866,6 +887,7 @@ export async function fetchWhatsAppMessagesDetailed(
     if (page) await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
     await pullFetchMessages(Math.min(opts.limit ?? 200, 500));
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
+    await reportProgress(1, 1, finalOldest);
     reachedCutoff = byId.size === 0 || finalOldest <= cutoff;
     historyExhausted = !reachedCutoff && byId.size > 0;
     rounds = 1;
