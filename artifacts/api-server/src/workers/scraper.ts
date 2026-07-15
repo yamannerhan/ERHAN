@@ -509,7 +509,11 @@ async function processMessage(
   }
 
   const explicitLocation = extractExplicitWorkLocation(text);
-  const location = explicitLocation ?? extractLocation(text);
+  // WhatsApp'ta yedekteki çalışan konum davranışını koru. Daha katı açık-konum
+  // tercihi sadece diğer botlarda devam etsin; Telegram/Eleman davranışı değişmez.
+  const location = source.platform === "whatsapp"
+    ? extractLocation(text)
+    : (explicitLocation ?? extractLocation(text));
   if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
     return "skipped";
   }
@@ -1741,49 +1745,14 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     }).catch(() => undefined);
   }, 15_000);
   try {
-    // 1) HIZLI: son 60 gün, deep yok — %2'de takılmayı önler, ilanlar erken gelir
-    let fetched = isInitialScan
-      ? await fetchWhatsAppMessagesDetailed(groupJid, { maxAgeDays: 60, deep: false, limit: 250 })
-      : await fetchWhatsAppMessagesDetailed(groupJid, {
+    // Yedekteki çalışan davranış: ilk taramada WhatsApp'ın verebildiği tüm
+    // geçmişi tek derin turda çek. Telegram/Eleman akışlarından tamamen ayrı.
+    const fetched = await fetchWhatsAppMessagesDetailed(groupJid, isInitialScan
+      ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true }
+      : {
           afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS),
           limit: 1000,
         });
-
-    if (isInitialScan) {
-      await patchSourceProgress(source.id, {
-        initialScanProgress: Math.max(15, source.initialScanProgress ?? 5),
-        lastError: fetched.messages.length > 0
-          ? `${fetched.messages.length} mesaj bulundu — işleniyor…`
-          : "Son mesajlar boş — geçmiş deneniyor…",
-        lastCheckedAt: new Date(),
-      });
-    }
-
-    // 2) Boşsa kısa bekle + tekrar; doluysa derinleştir
-    if (isInitialScan && fetched.messages.length === 0) {
-      logger.warn({ sourceId: source.id, groupJid }, "scraper: wa sığ tur boş — kısa tekrar");
-      await sleep(3_000);
-      fetched = await fetchWhatsAppMessagesDetailed(groupJid, {
-        maxAgeDays: 120,
-        deep: true,
-        limit: 300,
-      });
-    } else if (isInitialScan && fetched.messages.length > 0) {
-      await patchSourceProgress(source.id, {
-        initialScanProgress: 35,
-        lastError: `Geçmiş genişletiliyor (${fetched.messages.length} mesaj)…`,
-        lastCheckedAt: new Date(),
-      });
-      const deep = await fetchWhatsAppMessagesDetailed(groupJid, {
-        maxAgeDays: Math.min(WA_INITIAL_SCAN_DAYS, 180),
-        deep: true,
-        limit: 400,
-      });
-      if (deep.messages.length >= fetched.messages.length) {
-        fetched = deep;
-      }
-    }
-
     messages = fetched.messages;
     reachedCutoff = fetched.reachedCutoff;
     historyExhausted = fetched.historyExhausted;
@@ -1803,25 +1772,24 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
     return stats;
   }
 
-  // İlk taramada 0 mesaj: birkaç boş turdan sonra "done" — %2'de sonsuz döngü olmasın
+  // Yedekteki çalışan davranış: geçici boş sonuçta kanalı tamamlandı sayma.
+  // Geçmiş senkron olduğunda sonraki WhatsApp turu tekrar deneyecek.
   if (isInitialScan && messages.length === 0) {
     clearInterval(heartbeat);
-    const emptyTries = (source.lastScanErrors ?? 0) + 1;
-    const giveUp = emptyTries >= 3;
     await patchSourceProgress(source.id, {
-      lastError: giveUp
-        ? "Bu grupta şu an mesaj yok / geçmiş gelmedi. Yeni mesajlar dinlenecek. «Sıfırla» ile tekrar deneyebilirsiniz."
-        : `Mesaj henüz gelmedi (deneme ${emptyTries}/3). Grup WhatsApp’ta açık olsun; sıradaki turda tekrar denenecek.`,
+      lastError: "Bu turda mesaj çekilemedi — grup sıraya alındı, tekrar denenecek (geçmiş henüz yüklenmemiş olabilir).",
       isScanning: false,
       lastCheckedAt: new Date(),
-      initialScanDone: giveUp,
-      initialScanProgress: giveUp ? 100 : Math.min(25, 5 + emptyTries * 5),
+      initialScanDone: false,
+      initialScanProgress: Math.max(1, source.initialScanProgress ?? 1),
       lastScanMessagesRead: 0,
       lastScanFound: 0,
       lastScanAdded: 0,
-      lastScanErrors: emptyTries,
     });
-    logger.warn({ sourceId: source.id, name: source.name, emptyTries, giveUp, groupJid }, "scraper: wa 0 mesaj");
+    logger.warn(
+      { sourceId: source.id, name: source.name, lastTs, rounds: fetchRounds, groupJid },
+      "scraper: wa 0 mesaj — imleç korundu, tekrar denenecek",
+    );
     return stats;
   }
 
@@ -1963,12 +1931,22 @@ export function onWhatsAppReady(): void {
       const waSources = await db.select().from(sourcesTable)
         .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.active, true)));
       for (const s of waSources) {
+        // Önceki kısa/boş tarama bir kaynağı ilan bulmadan tamamlandı saydıysa
+        // deploy sonrası bir kez yeniden derin WhatsApp kuyruğuna al.
+        const requeueEmpty = s.initialScanDone
+          && (s.totalImported ?? 0) === 0
+          && (s.lastScanMessagesRead ?? 0) === 0;
         await patchSourceProgress(s.id, {
-          lastError: s.initialScanDone
+          lastError: requeueEmpty
+            ? "WhatsApp geçmişi yedek akışla yeniden taranacak…"
+            : s.initialScanDone
             ? "Erişim sağlandı — kaldığı mesajdan dinleniyor"
             : "Erişim sağlandı — geçmiş gidebildiği kadar taranıyor",
           isScanning: false,
           lastCheckedAt: new Date(),
+          initialScanDone: requeueEmpty ? false : s.initialScanDone,
+          initialScanProgress: requeueEmpty ? 1 : s.initialScanProgress,
+          initialScanPhase: requeueEmpty ? "backward" : s.initialScanPhase,
         });
       }
           await db.update(sourcesTable)
