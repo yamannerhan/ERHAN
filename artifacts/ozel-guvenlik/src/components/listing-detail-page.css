@@ -582,3 +582,49 @@ html:not(.dark) .og-ld-apply-btn {
   background: linear-gradient(135deg, #25a8ff, #0878e8);
   border-color: transparent;
 }
+
+/* Açık temada ilan detayındaki tüm içerik net ve yüksek kontrastlı olsun. */
+html:not(.dark) .og-ld-page {
+  --ld-gold: #111827;
+  --ld-gold-dim: rgba(17, 24, 39, 0.22);
+}
+
+html:not(.dark) :is(
+  .og-ld-back,
+  .og-ld-top-btn,
+  .og-ld-title,
+  .og-ld-salary,
+  .og-ld-quick-item,
+  .og-ld-quick-item svg,
+  .og-ld-meta,
+  .og-ld-company-name,
+  .og-ld-section-title,
+  .og-ld-desc,
+  .og-ld-col-title,
+  .og-ld-list,
+  .og-ld-stat-icon,
+  .og-ld-stat-label,
+  .og-ld-stat-value,
+  .og-ld-side-title,
+  .og-ld-side-company-name,
+  .og-ld-side-text,
+  .og-ld-side-link,
+  .og-ld-privacy,
+  .og-ld-report
+) {
+  color: #111827 !important;
+  opacity: 1;
+}
+
+html:not(.dark) :is(.og-ld-featured, .og-ld-verified) {
+  color: #111827 !important;
+  background: #f3f4f6 !important;
+  border-color: rgba(17, 24, 39, 0.22) !important;
+}
+
+html:not(.dark) .og-ld-stat {
+  color: #111827 !important;
+  background: #f8fafc !important;
+  border-color: rgba(17, 24, 39, 0.14) !important;
+  box-shadow: none !important;
+}

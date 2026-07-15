@@ -280,6 +280,23 @@
   pointer-events: none;
 }
 
+/* Açık temada ilan üstü kutular ve metinler net siyah görünsün. */
+html:not(.dark) .og-listings-page :is(
+  .og-lp-stat__val,
+  .og-lp-stat__lbl,
+  .og-lp-section-title,
+  .og-lp-section-title svg,
+  .og-lp-section-meta
+) {
+  color: #111827 !important;
+  opacity: 1;
+}
+
+html:not(.dark) .og-listings-page .og-lp-stat__ico--gold {
+  color: #ffffff !important;
+  background: #111827 !important;
+}
+
 .og-lp-empty {
   text-align: center;
   padding: 32px 16px;

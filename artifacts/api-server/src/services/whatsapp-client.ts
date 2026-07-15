@@ -522,43 +522,36 @@ export async function stopWhatsAppClient(): Promise<void> {
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
   const byId = new Map<string, WhatsAppChannel>();
-  try {
+  const addChannel = (raw: any, fallbackKind?: "group" | "channel") => {
+    const id = String(raw?.id?._serialized ?? raw?.id ?? raw?.serialized ?? "");
+    if (!id) return;
+    const isChannel = fallbackKind === "channel" || !!(raw?.isChannel || raw?.isNewsletter || id.endsWith("@newsletter"));
+    const isGroup = fallbackKind === "group" || !!(raw?.isGroup || id.endsWith("@g.us"));
+    if (!isChannel && !isGroup) return;
+    byId.set(id, {
+      id,
+      name: String(raw?.name || raw?.formattedTitle || raw?.title || id),
+      participants: Number(raw?.participants?.length ?? raw?.groupMetadata?.participants?.length ?? raw?.subscribersCount ?? 0) || 0,
+      kind: isChannel ? "channel" : "group",
+    });
+  };
+
+  const pullChats = async () => {
     const chats = await client.getChats();
     for (const c of chats as any[]) {
-      const id = String(c?.id?._serialized ?? "");
-      if (!id) continue;
-      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
-      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
-      if (!isChannel && !isGroup) continue;
-      byId.set(id, {
-        id,
-        name: String(c.name || c.formattedTitle || id),
-        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
-        kind: isChannel ? "channel" : "group",
-      });
+      addChannel(c);
     }
-  } catch (e) {
-    logger.warn({ err: e }, "wa: getChats failed");
-  }
-
-  // Bazı WhatsApp Web sürümlerinde getChats bozulurken grup kimlikleri
-  // kişi koleksiyonunda kalır. Bunu listeleme için güvenli yedek yap.
+  };
   try {
-    if (typeof client.getContacts === "function") {
-      const contacts = await client.getContacts();
-      for (const contact of contacts as any[]) {
-        const id = String(contact?.id?._serialized ?? "");
-        if (!id || !(contact?.isGroup || id.endsWith("@g.us"))) continue;
-        byId.set(id, {
-          id,
-          name: String(contact?.name || contact?.pushname || contact?.shortName || contact?.formattedName || id),
-          participants: 0,
-          kind: "group",
-        });
-      }
-    }
+    await pullChats();
   } catch (e) {
-    logger.warn({ err: e }, "wa: getContacts group fallback failed");
+    logger.warn({ err: e }, "wa: getChats failed — retry");
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    try {
+      await pullChats();
+    } catch (retryError) {
+      logger.warn({ err: retryError }, "wa: getChats retry failed");
+    }
   }
 
   // Abone olunan kanallar — getChats bazen eksik bırakır
@@ -566,18 +559,40 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     if (typeof client.getChannels === "function") {
       const channels = await client.getChannels();
       for (const c of channels as any[]) {
-        const id = String(c?.id?._serialized ?? "");
-        if (!id) continue;
-        byId.set(id, {
-          id,
-          name: String(c.name || c.formattedTitle || id),
-          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
-          kind: "channel",
-        });
+        addChannel(c, "channel");
       }
     }
   } catch (e) {
     logger.warn({ err: e }, "wa: getChannels failed");
+  }
+
+  // whatsapp-web.js getChats(), özellikle yeni katılınan grup ve kanalları
+  // önbelleğe almadan önce eksik döndürebilir. WA Store doğrudan okununca
+  // ekranda görünen ama istemcinin kaçırdığı kaynaklar da listelenir.
+  try {
+    const page = (client as any).pupPage;
+    const storeChannels = page ? await page.evaluate(() => {
+      const w = window as any;
+      const collect = (collection: any) => {
+        if (!collection) return [];
+        if (typeof collection.getModelsArray === "function") return collection.getModelsArray();
+        if (Array.isArray(collection.models)) return collection.models;
+        if (Array.isArray(collection)) return collection;
+        return [];
+      };
+      const chats = collect(w.Store?.Chat);
+      const newsletters = collect(w.Store?.Newsletter);
+      return [...chats, ...newsletters].map((item: any) => ({
+        id: item?.id?._serialized ?? item?.id ?? "",
+        name: item?.name ?? item?.formattedTitle ?? item?.title ?? "",
+        isGroup: Boolean(item?.isGroup || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
+        isChannel: Boolean(item?.isChannel || item?.isNewsletter || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@newsletter")),
+        participants: item?.participants?.length ?? item?.groupMetadata?.participants?.length ?? item?.subscribersCount ?? 0,
+      }));
+    }) : [];
+    for (const channel of storeChannels) addChannel(channel);
+  } catch (e) {
+    logger.warn({ err: e }, "wa: Store group/channel discovery failed");
   }
 
   return [...byId.values()].sort((a, b) => {
@@ -586,11 +601,6 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   });
 }
 
-/**
- * Grup/kanal keşfi boş döndüğünde gerçek katmanı göstermek için ayrıntılı
- * tanı üretir. Bu fonksiyon yalnızca gözlem yapar, oturum veya tarama
- * imlecini değiştirmez.
- */
 export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscoveryDiagnostics> {
   const diagnostic: WhatsAppDiscoveryDiagnostics = {
     ready: isWhatsAppReady(),
@@ -612,11 +622,11 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
     const chats = await client.getChats();
     diagnostic.chatCount = chats.length;
     diagnostic.groupCount = chats.filter((chat: any) => {
-      const id = String(chat?.id?._serialized ?? "");
+      const id = String(chat?.id?._serialized ?? chat?.id ?? "");
       return Boolean(chat?.isGroup || id.endsWith("@g.us"));
     }).length;
     diagnostic.channelCount = chats.filter((chat: any) => {
-      const id = String(chat?.id?._serialized ?? "");
+      const id = String(chat?.id?._serialized ?? chat?.id ?? "");
       return Boolean(chat?.isChannel || chat?.isNewsletter || id.endsWith("@newsletter"));
     }).length;
     diagnostic.steps.push(`getChats: ${diagnostic.chatCount} sohbet, ${diagnostic.groupCount} grup, ${diagnostic.channelCount} kanal`);
@@ -625,12 +635,10 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
   }
 
   try {
-    if (typeof client.getContacts !== "function") {
-      diagnostic.steps.push("getContacts: bu whatsapp-web.js sürümünde yok");
-    } else {
+    if (typeof client.getContacts === "function") {
       const contacts = await client.getContacts();
       diagnostic.contactGroupCount = contacts.filter((contact: any) => {
-        const id = String(contact?.id?._serialized ?? "");
+        const id = String(contact?.id?._serialized ?? contact?.id ?? "");
         return Boolean(contact?.isGroup || id.endsWith("@g.us"));
       }).length;
       diagnostic.steps.push(`getContacts: ${diagnostic.contactGroupCount} grup kimliği`);
@@ -640,22 +648,8 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
   }
 
   try {
-    if (typeof client.getChannels !== "function") {
-      diagnostic.steps.push("getChannels: bu whatsapp-web.js sürümünde yok");
-    } else {
-      const channels = await client.getChannels();
-      diagnostic.steps.push(`getChannels: ${channels.length} kanal`);
-      diagnostic.channelCount = Math.max(diagnostic.channelCount, channels.length);
-    }
-  } catch (e) {
-    diagnostic.errors.push(`getChannels hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
-  }
-
-  try {
     const page = (client as any).pupPage;
-    if (!page) {
-      diagnostic.steps.push("Puppeteer sayfası bulunamadı");
-    } else {
+    if (page) {
       const store = await page.evaluate(() => {
         const w = window as any;
         const sizeOf = (collection: any) => {
@@ -666,14 +660,12 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
         };
         return {
           chats: sizeOf(w.Store?.Chat),
-          groupMetadata: sizeOf(w.Store?.GroupMetadata),
-          hasWWebJS: Boolean(w.WWebJS),
-          wwebjsKeys: w.WWebJS ? Object.keys(w.WWebJS).slice(0, 30) : [],
+          groups: sizeOf(w.Store?.GroupMetadata),
         };
       });
       diagnostic.storeChatCount = store.chats;
-      diagnostic.storeGroupMetadataCount = store.groupMetadata;
-      diagnostic.steps.push(`WA Store: Chat=${store.chats ?? "yok"}, GroupMetadata=${store.groupMetadata ?? "yok"}, WWebJS=${store.hasWWebJS ? `var (${store.wwebjsKeys.join(", ") || "anahtar yok"})` : "yok"}`);
+      diagnostic.storeGroupMetadataCount = store.groups;
+      diagnostic.steps.push(`WA Store: Chat=${store.chats ?? "yok"}, GroupMetadata=${store.groups ?? "yok"}`);
     }
   } catch (e) {
     diagnostic.errors.push(`WhatsApp Web Store hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
@@ -736,16 +728,23 @@ function waTimestampToMs(value: unknown): number {
 }
 
 function extractWhatsAppText(message: any): string {
-  return String(
-    message?.body
-    ?? message?.caption
-    ?? message?._data?.body
-    ?? message?._data?.caption
-    ?? message?.list?.description
-    ?? message?.hydratedButtonsMessage?.contentText
-    ?? message?.text
-    ?? "",
-  ).trim();
+  const candidates = [
+    message?.body,
+    message?.caption,
+    message?._data?.body,
+    message?._data?.caption,
+    message?.__x_body,
+    message?.content,
+    message?.textData?.text,
+    message?.list?.description,
+    message?.hydratedButtonsMessage?.contentText,
+    message?.text,
+  ];
+  for (const candidate of candidates) {
+    const text = candidate == null ? "" : String(candidate).trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 /** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */
@@ -773,21 +772,31 @@ async function harvestStoreMessages(
       const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
       for (const m of arr) {
-        const mid = m.id?._serialized;
+        const mid = String(m.id?._serialized ?? m.id ?? m._data?.id?._serialized ?? "").trim();
         const rawTimestamp = Number(m.t ?? m.timestamp ?? 0);
         const ts = rawTimestamp > 0 && rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
         if (!mid || !ts || ts <= cut) continue;
-        // body, caption, veya medya açıklaması
-        const text = String(
-          m.body
-          ?? m.caption
-          ?? m._data?.body
-          ?? m._data?.caption
-          ?? m.list?.description
-          ?? m.hydratedButtonsMessage?.contentText
-          ?? m.text
-          ?? "",
-        ).trim();
+        // body boş string olduğunda caption'ı gölgelemesin.
+        const candidates = [
+          m.body,
+          m.caption,
+          m._data?.body,
+          m._data?.caption,
+          m.__x_body,
+          m.content,
+          m.textData?.text,
+          m.list?.description,
+          m.hydratedButtonsMessage?.contentText,
+          m.text,
+        ];
+        let text = "";
+        for (const candidate of candidates) {
+          const value = candidate == null ? "" : String(candidate).trim();
+          if (value) {
+            text = value;
+            break;
+          }
+        }
         if (!text || text.length < 4) continue;
         out.push({ id: mid, text, timestamp: ts });
       }
@@ -932,7 +941,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
     try {
       const batch = (await chat.fetchMessages({ limit })) ?? [];
       for (const m of batch) {
-        const id = m.id?._serialized;
+        const id = String(m.id?._serialized ?? m.id ?? m._data?.id?._serialized ?? "").trim();
         if (!id || byId.has(id)) continue;
         const ts = waTimestampToMs(m.timestamp);
         if (!ts || ts <= cutoff) continue;
@@ -957,10 +966,15 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
     let lastOldest = Date.now();
     // QR/Chromium genelde 30 güne inemez — uzun tur boşa zaman kaybettirir
     const maxRounds = 120;
-    /** İlerleme yoksa bu kadar tur sonra “gidebildiği kadar” kabul et */
-    const STAGNANT_LIMIT = 12;
+    /** Boş/çok kısa geçmişli grup sırayı tutmasın. */
+    const STAGNANT_LIMIT = 3;
 
-    for (let i = 0; i < maxRounds; i++) {
+    if (byId.size === 0) {
+      historyExhausted = true;
+      diagnostics.push("İlk mesaj okuma boş döndü; sonraki gruba geçildi.");
+    }
+
+    for (let i = 0; i < maxRounds && byId.size > 0; i++) {
       rounds = i + 1;
       let info: { ok?: boolean; count?: number; oldest?: number; done?: boolean; loaded?: number } = {};
 
@@ -1021,7 +1035,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
             const t = rawTimestamp > 0 && rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
             if (t > 0 && t < oldest) oldest = t;
           }
-          const noGrowth = count <= msgsBefore && loaded === 0;
+          const noGrowth = count <= msgsBefore;
           return { ok: true, count, oldest, done: noGrowth, loaded };
         }, chatId);
       } catch (e) {
@@ -1080,9 +1094,13 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
         break;
       }
 
-      const progressed = byId.size > lastHarvested || oldest < lastOldest - 30_000 || (info.loaded ?? 0) > 0;
+      const progressed = byId.size > lastHarvested || oldest < lastOldest - 30_000;
       if (!progressed || info.done) {
         if (!progressed) stagnant++;
+        if (info.done && !progressed) {
+          historyExhausted = true;
+          break;
+        }
         // WA QR oturumu daha eski yükleyemiyor — gidebildiği kadar kabul et
         if (stagnant >= STAGNANT_LIMIT) {
           historyExhausted = true;
@@ -1105,12 +1123,14 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       historyExhausted = true;
     }
 
-    // Son bir syncHistory + büyük fetch
-    try {
-      if (typeof chat?.syncHistory === "function") await chat.syncHistory();
-    } catch { /* ignore */ }
-    await pullFetchMessages(5000);
-    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    // Mesaj bulunan grupta son kez yenile; boş grup tekrar beklemesin.
+    if (byId.size > 0) {
+      try {
+        if (typeof chat?.syncHistory === "function") await chat.syncHistory();
+      } catch { /* ignore */ }
+      await pullFetchMessages(1500);
+      await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    }
 
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     if (finalOldest <= cutoff) {

@@ -175,7 +175,7 @@ const STALE_SCAN_LOCK_MS = 90 * 1000;
 const WA_STALE_SCAN_LOCK_MS = 45 * 60 * 1000;
 const MESSAGE_PROCESS_DELAY_MS = 100;
 const WA_MESSAGE_PROCESS_DELAY_MS = 200;
-const WA_GROUP_GAP_MS = 12_000;
+const WA_GROUP_GAP_MS = 1_500;
 const WA_INCREMENTAL_SCAN_INTERVAL_MS = 30 * 60 * 1000;
 const WA_CURSOR_OVERLAP_MS = 2 * 60 * 1000;
 const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
@@ -357,11 +357,14 @@ async function touchListingSeen(listingId: number): Promise<void> {
  * bu geçerli ilanları alır; iş arayan ve sponsorlu mesajları dışarıda tutar.
  */
 function isWhatsAppSecurityJobPosting(text: string): boolean {
-  if (text.length < 35 || isSponsoredPost(text) || isJobSeekerPost(text)) return false;
-  const normalized = normalizeText(text);
-  const securityRole = /(?:özel\s+güvenlik|ögg\b|ogg\b|5188|silahlı\s+güvenlik|silahsız\s+güvenlik|güvenlik\s+(?:görevlisi|personeli|amiri|sorumlusu)|bay\s+güvenlik|bayan\s+güvenlik)/.test(normalized);
-  const hiringSignal = /(?:aranıyor|aranmaktadır|alınacak|alınacaktır|alım\s+yapılacak|personel\s+alımı|eleman\s+alımı|ekip\s+arkadaşı\s+aran|başvurular|başvuru\s+(?:için|icin)|işe\s+alım|istihdam)/.test(normalized);
-  return securityRole && hiringSignal;
+  if (text.trim().length < 20 || isSponsoredPost(text) || isJobSeekerPost(text)) return false;
+  const normalized = normalizeText(text)
+    .replace(/ç/g, "c").replace(/ğ/g, "g").replace(/ı/g, "i")
+    .replace(/ö/g, "o").replace(/ş/g, "s").replace(/ü/g, "u");
+  const securityRole = /(?:ozel\s+guvenlik|ogg\b|5188|silahli\s+guvenlik|silahsiz\s+guvenlik|guvenlik\s+(?:gorevli(?:si|leri)?|personel(?:i|leri)?|eleman(?:i|lari)?|amiri|sorumlusu)|bay\s+guvenlik|bayan\s+guvenlik)/.test(normalized);
+  const hiringSignal = /(?:araniyor|aranmaktadir|aranan|alinacak|alinacaktir|alim\s+yapilacak|personel\s+alimi|eleman\s+alimi|ekip\s+arkadasi|basvurular|basvuru\s*(?:icin|:)|ise\s+alim|istihdam|ihtiyac\s+vardir|ihtiyacimiz\s+vardir|acil\s+(?:bay|bayan|personel)|is\s+ilani)/.test(normalized);
+  const listingDetails = /(?:\b(?:maas|ucret|yevmiye|vardiya|proje|servis|yemek|sgk|ssk)\b|(?:\+?90|0)?5\d{2}[\s().-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2})/.test(normalized);
+  return securityRole && (hiringSignal || listingDetails);
 }
 
 function extractTelegramUsername(url: string): string | null {
@@ -1856,6 +1859,17 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       }
     } catch (e) {
       stats.errors++;
+      // İlan oluşturulmadan kalan pending kayıt sonraki taramayı kalıcı
+      // duplicate'a çevirmesin; yalnız bu WhatsApp mesajını yeniden denet.
+      try {
+        await db.delete(importedPostsTable).where(and(
+          eq(importedPostsTable.sourceId, source.id),
+          eq(importedPostsTable.externalId, `wa_${m.id}`),
+          eq(importedPostsTable.status, "pending"),
+        ));
+      } catch (cleanupError) {
+        logger.warn({ err: cleanupError, sourceId: source.id, messageId: m.id }, "scraper: wa pending cleanup failed");
+      }
       logger.warn({ err: e, sourceId: source.id }, "scraper: wa message process error");
     }
     processed++;
