@@ -18,13 +18,11 @@ export function truncateDescription(text: string, max = 158): string {
 }
 
 export function buildHomeTitle(): string {
-  return "ozelguvenlik.online | Özel Güvenlik İş İlanları";
+  return "Özel Güvenlik İş İlanları | Özel Güvenlik Online";
 }
 
 export function buildHomeDescription(): string {
-  return truncateDescription(
-    "ozelguvenlik.online — Türkiye geneli güncel özel güvenlik iş ilanları. Silahlı ve silahsız bay bayan güvenlik personeli alımları, ücretsiz CV ve hızlı başvuru.",
-  );
+  return "Türkiye genelindeki güncel özel güvenlik iş ilanlarını inceleyin. Silahlı, silahsız, bay ve bayan güvenlik görevlisi ilanlarına ücretsiz ulaşın.";
 }
 
 export function buildListingsTitle(): string {
@@ -90,24 +88,22 @@ export function buildNotFoundDescription(): string {
   );
 }
 
-export function toIsoDate(value: unknown): string {
-  if (!value) return new Date().toISOString();
+export function toIsoDate(value: unknown): string | undefined {
+  if (!value) return undefined;
   const d = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
-export function mapEmploymentType(workType: unknown): string {
+export function mapEmploymentType(workType: unknown): string | undefined {
   const t = safeText(workType, "").toLocaleLowerCase("tr-TR");
+  if (!t) return undefined;
   if (/part|yarı\s*zaman|yarim\s*zaman|günlük|gunluk/.test(t)) return "PART_TIME";
   if (/proje|geçici|gecici|dönemsel|donemsel/.test(t)) return "TEMPORARY";
   if (/sözleşmeli|sozlesmeli|kontrat/.test(t)) return "CONTRACTOR";
   if (/staj|intern/.test(t)) return "INTERN";
-  return "FULL_TIME";
+  if (/tam\s*zaman|full[\s-]*time|sürekli|surekli/.test(t)) return "FULL_TIME";
+  return undefined;
 }
-
-/** Sektördeki tipik aylık brüt aralık — maaş belirtilmemiş ilanlar için (Google baseSalary) */
-const DEFAULT_SALARY_MIN = 25000;
-const DEFAULT_SALARY_MAX = 55000;
 
 export function parseSalaryNumber(salary: unknown): number | null {
   const raw = safeText(salary, "");
@@ -166,10 +162,8 @@ export function buildBaseSalary(opts: {
     max = parsed.max;
   }
 
-  if (min == null && max == null) {
-    min = DEFAULT_SALARY_MIN;
-    max = DEFAULT_SALARY_MAX;
-  } else if (min == null) {
+  if (min == null && max == null) return undefined;
+  if (min == null) {
     min = max;
   } else if (max == null) {
     max = min;
@@ -204,51 +198,54 @@ export function buildJobPostingSchema(listing: {
   workType?: string | null;
   companyLogoUrl?: string | null;
   createdAt?: string | null;
+  publishedAt?: string | null;
+  sourcePublishedAt?: string | null;
   expiresAt?: string | null;
   applyUrl?: string | null;
 }) {
   const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
-  const title = safeText(listing.title, "Güvenlik Personeli Aranıyor");
-  const company = safeText(listing.company, "Belirtilmemiş");
-  const city = safeText(listing.city, "Türkiye");
-  const description = safeText(listing.description, `${city} bölgesinde ${company} özel güvenlik görevlisi alımı.`);
-  const validThrough = listing.expiresAt
-    ? toIsoDate(listing.expiresAt)
-    : toIsoDate(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const title = safeText(listing.title, "");
+  const company = safeText(listing.company, "");
+  const city = safeText(listing.city, "");
+  const description = safeText(listing.description, "");
+  const datePosted = toIsoDate(listing.publishedAt)
+    ?? toIsoDate(listing.sourcePublishedAt)
+    ?? toIsoDate(listing.createdAt);
+  const validThrough = toIsoDate(listing.expiresAt);
+  const employmentType = mapEmploymentType(listing.workType);
+  const baseSalary = buildBaseSalary({
+    salary: listing.salary,
+    salaryMin: listing.salaryMin,
+    salaryMax: listing.salaryMax,
+  });
+  const image = listing.companyLogoUrl
+    ? (listing.companyLogoUrl.startsWith("http")
+        ? listing.companyLogoUrl
+        : `${SEO_BASE_URL}${listing.companyLogoUrl.startsWith("/") ? "" : "/"}${listing.companyLogoUrl}`)
+    : undefined;
 
   return {
     "@context": "https://schema.org",
     "@type": "JobPosting",
-    title,
-    description,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
     identifier: {
       "@type": "PropertyValue",
       name: SEO_SITE_NAME,
       value: String(listing.id),
     },
-    datePosted: toIsoDate(listing.createdAt),
-    validThrough,
-    employmentType: mapEmploymentType(listing.workType),
-    directApply: true,
-    hiringOrganization: {
-      "@type": "Organization",
-      name: company,
-      sameAs: SEO_BASE_URL,
-    },
-    jobLocation: {
-      "@type": "Place",
-      address: {
-        "@type": "PostalAddress",
-        addressLocality: city,
-        addressCountry: "TR",
+    ...(datePosted ? { datePosted } : {}),
+    ...(validThrough ? { validThrough } : {}),
+    ...(employmentType ? { employmentType } : {}),
+    ...(company ? { hiringOrganization: { "@type": "Organization", name: company } } : {}),
+    ...(city ? {
+      jobLocation: {
+        "@type": "Place",
+        address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" },
       },
-    },
-    baseSalary: buildBaseSalary({
-      salary: listing.salary,
-      salaryMin: listing.salaryMin,
-      salaryMax: listing.salaryMax,
-    }),
-    image: listing.companyLogoUrl || SEO_OG_IMAGE,
+    } : {}),
+    ...(baseSalary ? { baseSalary } : {}),
+    ...(image ? { image } : {}),
     url: pageUrl,
   };
 }

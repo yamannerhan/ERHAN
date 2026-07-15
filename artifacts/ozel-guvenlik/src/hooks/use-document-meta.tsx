@@ -3,8 +3,8 @@ import { useEffect } from "react";
 export interface DocumentMeta {
   title?: string;
   description?: string;
-  keywords?: string;
-  canonical?: string;
+  robots?: string;
+  canonical?: string | null;
   ogImage?: string;
   ogType?: string;
   jsonLd?: object | object[];
@@ -47,13 +47,14 @@ export function useDocumentMeta(meta: DocumentMeta) {
 
     if (title) document.title = title;
     if (description) setMetaTag('meta[name="description"]', "name", description);
-    if (meta.keywords) setMetaTag('meta[name="keywords"]', "name", meta.keywords);
-
-    setMetaTag('meta[name="robots"]', "name", "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1");
+    setMetaTag('meta[name="robots"]', "name", meta.robots ?? "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1");
 
     if (meta.canonical) {
       setLinkRel("canonical", meta.canonical);
       setMetaTag('meta[property="og:url"]', "property", meta.canonical);
+    } else if (meta.canonical === null) {
+      document.head.querySelector('link[rel="canonical"]')?.remove();
+      removeMetaTag('meta[property="og:url"]');
     }
     if (meta.ogImage) {
       setMetaTag('meta[property="og:image"]', "property", meta.ogImage);
@@ -103,7 +104,6 @@ export function useDocumentMeta(meta: DocumentMeta) {
     return () => {
       if (meta.title) document.title = originalTitle;
       if (meta.description) removeMetaTag('meta[name="description"]');
-      if (meta.keywords) removeMetaTag('meta[name="keywords"]');
     };
-  }, [meta.title, meta.description, meta.keywords, meta.canonical, meta.ogImage, meta.ogType, meta.jsonLd]);
+  }, [meta.title, meta.description, meta.robots, meta.canonical, meta.ogImage, meta.ogType, meta.jsonLd]);
 }

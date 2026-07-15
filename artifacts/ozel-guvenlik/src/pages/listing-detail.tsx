@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useDocumentMeta } from "@/hooks/use-document-meta";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { getListingImage } from "@/lib/listing-image";
@@ -37,6 +38,7 @@ type ExtListing = {
   sourceUrl?: string | null;
   sourceType?: string | null;
   sourceName?: string | null;
+  sourcePublishedAt?: string | null;
   verifiedPublisher?: boolean | null;
   lastCheckedAt?: string | null;
   lastSeenAt?: string | null;
@@ -173,57 +175,39 @@ export default function ListingDetail() {
   const ext = listing as (typeof listing & ExtListing) | undefined;
 
   const pageUrl = `${SEO_BASE_URL}/ilan/${listingId}`;
-  useEffect(() => {
-    if (!listing) return;
-    const title = buildListingTitle(listing.title, displayCompany(listing.company));
-    const description = buildListingDescription(
-      listing.city, displayCompany(listing.company), listing.workType, listing.salary, listing.description,
-    );
-    const originalTitle = document.title;
-    document.title = title;
-
-    let metaDesc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
-    if (!metaDesc) { metaDesc = document.createElement("meta"); metaDesc.setAttribute("name", "description"); document.head.appendChild(metaDesc); }
-    metaDesc.setAttribute("content", description);
-
-    let can = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
-    if (!can) { can = document.createElement("link"); can.setAttribute("rel", "canonical"); document.head.appendChild(can); }
-    can.setAttribute("href", pageUrl);
-
-    const setOg = (prop: string, val: string) => {
-      let el = document.querySelector(`meta[property="${prop}"]`) as HTMLMetaElement | null;
-      if (!el) { el = document.createElement("meta"); el.setAttribute("property", prop); document.head.appendChild(el); }
-      el.setAttribute("content", val);
-    };
-    setOg("og:title", title);
-    setOg("og:description", description);
-    setOg("og:image", listing.companyLogoUrl || SEO_OG_IMAGE);
-    setOg("og:url", pageUrl);
-
-    const prevLd = document.head.querySelectorAll('script[data-dynamic-ld="1"]');
-    prevLd.forEach((el) => el.remove());
-
-    const jobSchema = buildJobPostingSchema({
-      id: listing.id, title: listing.title, description: listing.description,
-      company: listing.company, city: listing.city, salary: listing.salary,
-      workType: listing.workType, companyLogoUrl: listing.companyLogoUrl,
-      createdAt: listing.createdAt, expiresAt: ext?.expiresAt,
-      applyUrl: listing.applyUrl,
-    });
-    const crumbs = breadcrumbSchema([
-      { name: "Ana Sayfa", item: SEO_BASE_URL },
-      { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
-      { name: listing.title ?? "İlan", item: pageUrl },
-    ]);
-    for (const schema of [jobSchema, crumbs]) {
-      const script = document.createElement("script");
-      script.setAttribute("type", "application/ld+json");
-      script.setAttribute("data-dynamic-ld", "1");
-      script.textContent = JSON.stringify(schema);
-      document.head.appendChild(script);
-    }
-    return () => { document.title = originalTitle; prevLd.forEach((el) => el.remove()); };
-  }, [listing?.id, pageUrl, ext?.expiresAt]);
+  useDocumentMeta({
+    title: listing
+      ? buildListingTitle(listing.title, displayCompany(listing.company))
+      : "İlan Bulunamadı | Özel Güvenlik Online",
+    description: listing
+      ? buildListingDescription(listing.city, displayCompany(listing.company), listing.workType, listing.salary, listing.description)
+      : "Aradığınız ilan yayında değil veya kaldırılmış olabilir.",
+    robots: listing ? undefined : "noindex, follow",
+    canonical: listing ? pageUrl : null,
+    ogImage: listing?.companyLogoUrl || SEO_OG_IMAGE,
+    ogType: "article",
+    jsonLd: listing ? [
+      buildJobPostingSchema({
+        id: listing.id,
+        title: listing.title,
+        description: listing.description,
+        company: listing.company,
+        city: listing.city,
+        salary: listing.salary,
+        workType: listing.workType,
+        companyLogoUrl: listing.companyLogoUrl,
+        createdAt: listing.createdAt,
+        sourcePublishedAt: ext?.sourcePublishedAt,
+        expiresAt: ext?.expiresAt,
+        applyUrl: listing.applyUrl,
+      }),
+      breadcrumbSchema([
+        { name: "Ana Sayfa", item: SEO_BASE_URL },
+        { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+        { name: listing.title ?? "İlan", item: pageUrl },
+      ]),
+    ] : undefined,
+  });
 
   const openEdit = () => {
     if (!listing) return;
@@ -393,6 +377,7 @@ export default function ListingDetail() {
     return (
       <Layout>
         <div className="og-ld-gate">
+          <h1 className="sr-only">{listing.title}</h1>
           <ShieldAlert className="w-12 h-12 text-[#f5c518] mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Üyelere Özel İçerik</h2>
           <p className="text-sm text-muted-foreground mb-6">
