@@ -713,29 +713,52 @@ async function harvestStoreMessages(
     (id: string, cut: number) => {
       const w = window as any;
       const models = w.Store?.Chat?.models || [];
+      const local = String(id).split("@")[0] || "";
       const storeChat =
         w.Store?.Chat?.get?.(id) ||
         w.Store?.Chat?.find?.(id) ||
         models.find((c: any) => c?.id?._serialized === id) ||
-        models.find((c: any) => String(c?.id?._serialized || "").includes(String(id).split("@")[0] || "__none__"));
-      if (!storeChat) return [];
-      const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
+        models.find((c: any) => String(c?.id?._serialized || "").includes(local || "__none__"));
+
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
-      for (const m of arr) {
-        const mid = m.id?._serialized;
-        const rawT = Number(m.t ?? m.timestamp ?? 0);
+      const seen = new Set<string>();
+      const pushMsg = (m: any) => {
+        const mid = String(m?.id?._serialized ?? m?.id ?? "");
+        if (!mid || seen.has(mid)) return;
+        const rawT = Number(m?.t ?? m?.timestamp ?? m?._data?.t ?? 0);
         const ts = rawT > 0 && rawT < 1e12 ? rawT * 1000 : rawT;
-        if (!mid || !ts || ts <= cut) continue;
+        if (!ts || ts <= cut) return;
         const text = String(
-          m.body
-          ?? m.caption
-          ?? m.list?.description
-          ?? m.hydratedButtonsMessage?.contentText
+          m?.body
+          ?? m?.caption
+          ?? m?._data?.body
+          ?? m?._data?.caption
+          ?? m?.list?.description
+          ?? m?.hydratedButtonsMessage?.contentText
           ?? "",
         ).trim();
-        if (!text || text.length < 4) continue;
+        if (!text || text.length < 4) return;
+        seen.add(mid);
         out.push({ id: mid, text, timestamp: ts });
+      };
+
+      if (storeChat) {
+        const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
+        for (const m of arr) pushMsg(m);
       }
+
+      // Chat.msgs boşsa global Msg store'dan sohbet mesajlarını tara
+      try {
+        const all = w.Store?.Msg?.models
+          ?? w.Store?.Msg?.getModelsArray?.()
+          ?? [];
+        for (const m of all) {
+          const from = String(m?.id?.remote ?? m?.from ?? m?.to ?? m?.chatId?._serialized ?? "");
+          if (from !== id && !from.includes(local)) continue;
+          pushMsg(m);
+        }
+      } catch { /* ignore */ }
+
       return out;
     },
     chatId,
@@ -904,37 +927,46 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
     }
   };
 
-  // Senkron gecikmeli gruplarda birkaç tur bekle + çek
-  for (let attempt = 0; attempt < 4 && byId.size === 0; attempt++) {
+  // Hızlı yol: önce son mesajlar (boş grupta uzun deep %2'de takılıyordu)
+  for (let attempt = 0; attempt < 3 && byId.size === 0; attempt++) {
     if (attempt > 0) {
       await syncChatHistory();
       try {
         await (client as any).interface?.openChatWindow?.(chatId);
       } catch { /* ignore */ }
-      await new Promise((r) => setTimeout(r, 2000 + attempt * 1500));
+      await new Promise((r) => setTimeout(r, 1500 + attempt * 1000));
       chat = (await resolveWhatsAppChat(chatId)) || chat;
     }
-    for (const lim of [80, 150, 300, Math.min(opts.limit ?? 300, 500)]) {
+    for (const lim of [50, 100, 200, Math.min(opts.limit ?? 200, 400)]) {
       await pullFetchMessages(lim);
       if (byId.size > 0) break;
-      await new Promise((r) => setTimeout(r, 700));
+      await new Promise((r) => setTimeout(r, 500));
     }
-    if (page && byId.size === 0) {
+    if (page) {
       await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    }
+    // chat.messages / _prefetch yedek
+    if (byId.size === 0) {
+      try {
+        const cached = (chat as any).messages ?? (chat as any)._msgs ?? [];
+        const arr = typeof cached.getModelsArray === "function"
+          ? cached.getModelsArray()
+          : (Array.isArray(cached) ? cached : []);
+        for (const m of arr) ingestMessage(m);
+      } catch { /* ignore */ }
     }
   }
 
   if (opts.deep && page) {
     await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
-    if (byId.size === 0) await pullFetchMessages(500);
+    if (byId.size === 0) await pullFetchMessages(300);
 
     let stagnant = 0;
     let lastHarvested = byId.size;
     let lastOldest = Date.now();
-    // QR/Chromium genelde 30 güne inemez — uzun tur boşa zaman kaybettirir
-    const maxRounds = 120;
-    /** İlerleme yoksa bu kadar tur sonra “gidebildiği kadar” kabul et */
-    const STAGNANT_LIMIT = 12;
+    // Boş başlayan sohbette 120 tur = %2'de takılma. Mesaj yoksa erken çık.
+    const maxRounds = byId.size === 0 ? 10 : 60;
+    const STAGNANT_LIMIT = byId.size === 0 ? 4 : 10;
 
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
