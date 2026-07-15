@@ -3597,13 +3597,26 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             ) : pairingCode ? (
               <div className="space-y-2">
                 <p className="text-xs text-slate-400">Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan → bu kodu gir:</p>
-                <div className="text-3xl font-black tracking-[0.35em] text-emerald-300 text-center py-4 bg-black/40 rounded-xl border border-emerald-500/30 select-all font-mono">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const plain = pairingCode.replace(/-/g, "");
+                    void navigator.clipboard.writeText(plain).then(() => {
+                      toast({ title: "Kod kopyalandı", description: plain.length === 8 ? `${plain.slice(0, 4)}-${plain.slice(4)}` : plain });
+                    }).catch(() => {
+                      toast({ title: "Kopyalanamadı", description: "Kodu elle seçip kopyalayın", variant: "destructive" });
+                    });
+                  }}
+                  className="w-full text-3xl font-black tracking-[0.35em] text-emerald-300 text-center py-4 bg-black/40 rounded-xl border border-emerald-500/30 select-all font-mono hover:bg-black/55 hover:border-emerald-400/50 transition-colors cursor-pointer"
+                  title="Kopyalamak için tıkla"
+                >
                   {pairingCode.length === 8
                     ? `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`
                     : pairingCode}
-                </div>
-                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu telefona girdikten sonra 1–2 dk bekleyin. «Cihaz bağlanılamadı» görürseniz tekrar basmayın — yeni kod alın.</p>
-                <p className="text-[10px] text-slate-500 text-center">Bu sayfayı yenilemeyin. Olmazsa 2 dk sonra bir kez daha deneyin veya QR kullanın.</p>
+                </button>
+                <p className="text-[10px] text-sky-300/90 text-center font-medium">Koda tıklayınca otomatik kopyalanır</p>
+                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra WhatsApp «Giriş yapılıyor» derse 1–2 dk bekleyin. Tekrar basmayın.</p>
+                <p className="text-[10px] text-slate-500 text-center">Bu sayfayı yenilemeyin. Olmazsa QR ile Bağlan deneyin.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
