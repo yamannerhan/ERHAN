@@ -3361,10 +3361,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       };
       const isConn = !!(nextStatus.connected ?? nextStatus.ready);
       const authPending = !!(nextStatus.authAccepted || nextStatus.phase === "authenticating");
-      const isPairing = !!(nextStatus.pairing || pairingMode) && !authPending && !isConn;
+      const isPairing = !!nextStatus.pairing && !authPending && !isConn;
       setConnected(isConn);
       if (isConn) setPairingMode(false);
-      else if (nextStatus.pairing && !authPending) setPairingMode(true);
+      else setPairingMode(isPairing);
       // Onay kodu modunda QR gösterme
       setQr(isPairing ? null : (nextStatus.qr ?? null));
       // Kısa kopmalarda kodun UI'dan kaybolmasını engelle; telefon onayladıysa kodu kaldır
@@ -3429,16 +3429,30 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       const body = usePairing
         ? { phoneNumber: form.phoneNumber.trim() }
         : {};
-      await apiCall("/admin/whatsapp/start", "POST", body);
+      const startResult = await apiCall("/admin/whatsapp/start", "POST", body) as {
+        pairingCode?: string | null;
+        phase?: string;
+        message?: string;
+      };
+      if (startResult.pairingCode) {
+        setPairingCode(startResult.pairingCode);
+        setPairingMode(true);
+      }
       await refresh();
       toast({
-        title: usePairing ? "Onay kodu bekleniyor" : "QR bağlantısı başlatıldı",
-        description: usePairing
-          ? "Kod 30–45 sn sürebilir. Tekrar tekrar basmayın (WhatsApp engeller). Gelmezse QR deneyin."
-          : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut",
+        title: usePairing ? "Onay kodu oluşturuldu" : "QR bağlantısı başlatıldı",
+        description: startResult.message || (usePairing
+          ? "Kodu WhatsApp → Bağlı Cihazlar bölümüne girin."
+          : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut"),
       });
     } catch (error) {
-      toast({ title: "Bağlantı başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
+      await refresh().catch(() => undefined);
+      const typed = error as Error & { status?: number; code?: string; requestId?: string };
+      toast({
+        title: `WhatsApp bağlantı hatası${typed.status ? ` (HTTP ${typed.status})` : ""}`,
+        description: typed.message,
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -5123,8 +5137,27 @@ export default function AdminDashboard() {
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error((err as any).error || "İşlem başarısız");
+      const rawBody = await r.text();
+      let parsed: { error?: string; code?: string; requestId?: string } = {};
+      try {
+        parsed = rawBody ? JSON.parse(rawBody) : {};
+      } catch { /* düz metin hata cevabı */ }
+      const detail = parsed.error || rawBody || r.statusText || "Sunucu hata ayrıntısı döndürmedi";
+      const suffix = [
+        parsed.code ? `kod=${parsed.code}` : "",
+        parsed.requestId ? `istek=${parsed.requestId}` : "",
+      ].filter(Boolean).join(", ");
+      const error = new Error(`${detail}${suffix ? ` (${suffix})` : ""}`) as Error & {
+        status?: number;
+        code?: string;
+        requestId?: string;
+        responseBody?: string;
+      };
+      error.status = r.status;
+      error.code = parsed.code;
+      error.requestId = parsed.requestId;
+      error.responseBody = rawBody;
+      throw error;
     }
     return r.status === 204 ? null : r.json();
   };

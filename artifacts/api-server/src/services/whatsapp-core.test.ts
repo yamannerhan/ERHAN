@@ -6,8 +6,32 @@ import {
   scanSelectedWhatsAppSources,
   selectedWhatsAppSources,
 } from "./whatsapp-core";
+import {
+  normalizeTurkishWhatsAppPhone,
+  startWhatsAppClient,
+  WhatsAppStartError,
+} from "./whatsapp-client";
 
 const nowSeconds = Math.floor(Date.now() / 1000);
+
+test("Türkiye WhatsApp telefon numarası yalnız rakama ve 90 önekine çevrilir", () => {
+  assert.equal(normalizeTurkishWhatsAppPhone("+90 (532) 111-22-33"), "905321112233");
+  assert.equal(normalizeTurkishWhatsAppPhone("0532 111 22 33"), "905321112233");
+  assert.equal(normalizeTurkishWhatsAppPhone("5321112233"), "905321112233");
+  assert.equal(normalizeTurkishWhatsAppPhone("0090 532 111 22 33"), "905321112233");
+});
+
+test("geçersiz Türkiye telefonu client oluşturmadan HTTP 400 sınıfı hata verir", async () => {
+  await assert.rejects(
+    () => startWhatsAppClient({ phoneNumber: "12345" }),
+    (error: unknown) => {
+      assert.ok(error instanceof WhatsAppStartError);
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "INVALID_PHONE");
+      return true;
+    },
+  );
+});
 
 test("mock client.getChannels sonucu kanal kaydı oluşturur", async () => {
   const result = await discoverWhatsAppSources({

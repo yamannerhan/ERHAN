@@ -7,9 +7,10 @@ import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScra
 import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
-  getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession,
+  getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession, WhatsAppStartError,
 } from "../services/whatsapp-client";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -280,27 +281,47 @@ router.get("/admin/whatsapp/status", authMiddleware, requireAdmin, async (_req, 
 });
 
 router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, res) => {
+  const requestId = crypto.randomUUID();
   try {
     const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber.trim() : undefined;
-    if (phoneNumber) {
-      const digits = phoneNumber.replace(/\D/g, "");
-      if (digits.length < 10) {
-        res.status(400).json({ success: false, error: "Geçerli telefon girin (örn: 905xxxxxxxxx)" });
-        return;
-      }
-    }
-    // Arka planda başlat — QR/kod üretimi initialize sırasında gelir
-    void startWhatsAppClient(phoneNumber ? { phoneNumber, force: true } : { force: true }).catch((e) => {
-      console.error("wa start error", e);
-    });
-    res.json({
+    logger.info(
+      { requestId, pairingRequested: Boolean(phoneNumber), endpoint: "/admin/whatsapp/start" },
+      "wa endpoint: bağlantı başlatma isteği",
+    );
+
+    // Endpoint gerçek initialize/pairing sonucunu bekler; arka plana atıp sahte 200 dönmez.
+    const result = await startWhatsAppClient(phoneNumber ? { phoneNumber } : undefined);
+    const responseBody = {
       success: true,
-      message: phoneNumber
-        ? "WhatsApp başlatıldı. Onay kodu hazırlanıyor — birkaç saniye bekleyin."
-        : "WhatsApp başlatıldı. QR kod bekleniyor...",
-    });
-  } catch (e) {
-    res.status(500).json({ success: false, error: String(e) });
+      message: result.message,
+      phase: result.phase,
+      pairingCode: result.pairingCode,
+      qr: result.qr,
+      requestId,
+    };
+    logger.info({ requestId, httpStatus: 200, phase: result.phase }, "wa endpoint: başarılı response");
+    res.status(200).json(responseBody);
+  } catch (error) {
+    const status = error instanceof WhatsAppStartError ? error.statusCode : 500;
+    const code = error instanceof WhatsAppStartError ? error.code : "UNEXPECTED_ERROR";
+    const message = error instanceof Error ? error.message : String(error);
+    const responseBody = {
+      success: false,
+      error: message,
+      code,
+      requestId,
+    };
+    logger.error(
+      {
+        err: error,
+        requestId,
+        httpStatus: status,
+        responseBody,
+        endpoint: "/admin/whatsapp/start",
+      },
+      "wa endpoint: bağlantı başlatılamadı",
+    );
+    res.status(status).json(responseBody);
   }
 });
 

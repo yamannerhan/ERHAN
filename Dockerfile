@@ -17,6 +17,7 @@ RUN pnpm --filter @workspace/ozel-guvenlik build
 RUN pnpm --filter @workspace/api-server build
 
 FROM node:22-bookworm-slim AS runtime
+ARG CHROMIUM_REFRESH=2026-07-16
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate \
     && apt-get update && apt-get install -y --no-install-recommends \
       chromium \

@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { logger } from "../lib/logger";
 
 let client: any = null;
@@ -26,10 +27,32 @@ let readyFallbackTimer: ReturnType<typeof setInterval> | null = null;
 let readyFallbackStartedAt = 0;
 let sessionSoftRestartTried = false;
 let readySyncTriggerTried = false;
+let initializePromise: Promise<void> | null = null;
+let pairingRequestPromise: Promise<string> | null = null;
+let clientPhase: "IDLE" | "INITIALIZING" | "AUTHENTICATED" | "READY" | "DESTROYING" | "FAILED" = "IDLE";
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
 const WA_PAIR_CLIENT_ID = "ozelguvenlik-pair";
+const WWEBJS_VERSION = "1.34.7";
+
+export class WhatsAppStartError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: 400 | 409 | 503 | 500,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = "WhatsAppStartError";
+  }
+}
+
+export type WhatsAppStartResult = {
+  phase: string;
+  pairingCode: string | null;
+  qr: string | null;
+  message: string;
+};
 
 export function hasWhatsAppLocalSession(): boolean {
   try {
@@ -44,7 +67,7 @@ export function hasWhatsAppLocalSession(): boolean {
 }
 
 export function isWhatsAppStarting(): boolean {
-  return starting;
+  return starting || clientPhase === "INITIALIZING" || clientPhase === "AUTHENTICATED";
 }
 
 /** Kayıtlı oturum varsa arka planda yeniden bağlan (sıfırlama gerekmez) */
@@ -93,6 +116,18 @@ function resolveExecutablePath(): string {
   );
 }
 
+function readChromiumVersion(executablePath: string): string | null {
+  try {
+    return execFileSync(executablePath, ["--version"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadWhatsAppLib(): Promise<void> {
   if (ClientCtor && LocalAuthCtor) return;
   const pkg = await import("whatsapp-web.js");
@@ -104,7 +139,7 @@ async function loadWhatsAppLib(): Promise<void> {
   }
 }
 
-function normalizePhone(raw: string): string {
+export function normalizeTurkishWhatsAppPhone(raw: string): string {
   let d = raw.replace(/\D/g, "");
   if (d.startsWith("00")) d = d.slice(2);
   // 05xxxxxxxxx → 905xxxxxxxxx
@@ -115,8 +150,8 @@ function normalizePhone(raw: string): string {
 }
 
 function isValidWaPhone(phone: string): boolean {
-  // Uluslararası, sembolsüz (TR: 905xxxxxxxxx)
-  return /^\d{10,15}$/.test(phone) && !phone.startsWith("0");
+  // Türkiye: 90 + 10 haneli GSM numarası
+  return /^905\d{9}$/.test(phone);
 }
 
 function clearWhatsAppLocalSession(clientId = WA_CLIENT_ID): void {
@@ -147,55 +182,133 @@ function setPairingCode(code: string | null): void {
   logger.info({ codeLen: raw.length }, "wa: pairing code set");
 }
 
-async function requestPairingCodeNow(c: any, phone: string): Promise<string | null> {
-  if (!c || typeof c.requestPairingCode !== "function") return null;
-  try {
-    const code = await c.requestPairingCode(phone, true, 180_000);
-    if (code) {
-      setPairingCode(String(code));
-      return pairingCode;
-    }
-  } catch (e) {
-    logger.warn({ err: e }, "wa: requestPairingCode failed");
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function requestPairingCodeWithRetry(c: any, phone: string): Promise<string> {
+  const methodAvailable = Boolean(c && typeof c.requestPairingCode === "function");
+  logger.info(
+    { sessionId: WA_CLIENT_ID, methodAvailable, wwebjsVersion: WWEBJS_VERSION },
+    "wa: pairing code metodu kontrol edildi",
+  );
+  if (!methodAvailable) {
+    throw new WhatsAppStartError(
+      `whatsapp-web.js ${WWEBJS_VERSION} içinde requestPairingCode metodu kullanılamıyor.`,
+      503,
+      "PAIRING_METHOD_UNAVAILABLE",
+    );
   }
-  return null;
+  if (!c.pupPage || !c.pupBrowser?.isConnected?.()) {
+    throw new WhatsAppStartError(
+      "WhatsApp tarayıcısı henüz hazır değil. Chromium başlatılamadı veya bağlantı koptu.",
+      503,
+      "BROWSER_NOT_READY",
+    );
+  }
+
+  let lastFailure: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      logger.info({ sessionId: WA_CLIENT_ID, attempt }, "wa: requestPairingCode çağrılıyor");
+      const code = await withTimeout(
+        Promise.resolve(c.requestPairingCode(phone, true, 180_000)),
+        15_000,
+        `requestPairingCode ${attempt}. denemede 15 saniye içinde yanıt vermedi`,
+      );
+      const normalizedCode = String(code ?? "").replace(/\s+/g, "").toUpperCase();
+      if (normalizedCode.length < 6) {
+        throw new Error("WhatsApp boş veya geçersiz pairing code döndürdü");
+      }
+      setPairingCode(normalizedCode);
+      logger.info({ sessionId: WA_CLIENT_ID, attempt, codeLength: normalizedCode.length }, "wa: pairing code alındı");
+      return normalizedCode;
+    } catch (error) {
+      lastFailure = error;
+      logger.error({ err: error, sessionId: WA_CLIENT_ID, attempt }, "wa: requestPairingCode başarısız");
+      if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+
+  const detail = lastFailure instanceof Error ? lastFailure.message : String(lastFailure);
+  throw new WhatsAppStartError(
+    `Onay kodu alınamadı: ${detail}`,
+    503,
+    "PAIRING_CODE_FAILED",
+  );
+}
+
+function beginPairingCodeRequest(c: any, phone: string): Promise<string> {
+  if (pairingCode) return Promise.resolve(pairingCode);
+  if (pairingRequestPromise) return pairingRequestPromise;
+  pairingCodeRequested = true;
+  pairingRequestPromise = requestPairingCodeWithRetry(c, phone)
+    .finally(() => {
+      pairingCodeRequested = false;
+      pairingRequestPromise = null;
+    });
+  return pairingRequestPromise;
+}
+
+async function enableQrFallback(c: any, error: unknown): Promise<void> {
+  const detail = error instanceof Error ? error.message : String(error);
+  pairingIntent = false;
+  pendingPhone = null;
+  lastError = `${detail} QR bağlantısı kullanıma açık bırakıldı.`;
+  try {
+    if (typeof c?.cancelPairingCode === "function") {
+      await withTimeout(Promise.resolve(c.cancelPairingCode()), 8_000, "QR moduna geçiş zaman aşımına uğradı");
+      logger.info({ sessionId: WA_CLIENT_ID }, "wa: pairing başarısız; QR moduna dönüldü");
+    }
+  } catch (fallbackError) {
+    logger.error({ err: fallbackError, sessionId: WA_CLIENT_ID }, "wa: QR fallback başarısız");
+  }
 }
 
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
-    // Onay kodu modunda QR'ı ASLA gösterme — kod iste
-    if (pairingIntent && pendingPhone) {
-      logger.info("wa: QR yoksayıldı (onay kodu modu) — pairing code isteniyor");
-      qrDataUrl = null;
-      if (!pairingCode && !pairingCodeRequested) {
-        pairingCodeRequested = true;
-        void requestPairingCodeNow(c, pendingPhone).then((code) => {
-          if (!code) {
-            pairingCodeRequested = false;
-            lastError = "Onay kodu alınamadı. Numarayı 905… formatında kontrol edip tekrar deneyin.";
-          }
-        });
-      }
-      return;
-    }
-
-    logger.info("wa: QR received");
+    if (client !== c) return;
+    logger.info({ sessionId: WA_CLIENT_ID }, "wa: QR received");
     lastError = null;
     pairingCode = null;
     try {
       qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2, errorCorrectionLevel: "M" });
-      logger.info("wa: QR data URL hazır");
+      logger.info({ sessionId: WA_CLIENT_ID }, "wa: QR data URL hazır");
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
+    }
+
+    // Client her zaman QR modunda initialize edilir; kod isteği yalnız bir kez buradan/endpointten paylaşılır.
+    if (pairingIntent && pendingPhone && !pairingCode) {
+      const phone = pendingPhone;
+      void beginPairingCodeRequest(c, phone).catch((error) => {
+        void enableQrFallback(c, error);
+      });
     }
   });
 
   c.on("code", (code: string) => {
+    if (client !== c) return;
+    logger.info({ sessionId: WA_CLIENT_ID, event: "code" }, "wa: pairing_code/code event alındı");
     setPairingCode(code);
   });
 
   c.on("authenticated", () => {
-    logger.info("wa: authenticated");
+    if (client !== c) return;
+    clientPhase = "AUTHENTICATED";
+    logger.info({ sessionId: WA_CLIENT_ID, phase: clientPhase }, "wa: authenticated");
     authAccepted = true;
     pairingCode = null;
     qrDataUrl = null;
@@ -204,6 +317,7 @@ function attachHandlers(c: any): void {
   });
 
   c.on("ready", () => {
+    if (client !== c) return;
     markWhatsAppReady("ready_event");
   });
 
@@ -228,7 +342,9 @@ function attachHandlers(c: any): void {
   });
 
   c.on("disconnected", (reason: string) => {
-    logger.warn(`wa: disconnected - ${reason}`);
+    if (client !== c) return;
+    clientPhase = "FAILED";
+    logger.warn({ sessionId: WA_CLIENT_ID, reason, phase: clientPhase }, "wa: disconnected");
     isReady = false;
     authAccepted = false;
     readySyncTriggerTried = false;
@@ -239,22 +355,30 @@ function attachHandlers(c: any): void {
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Bağlantı koptu: ${reason}`;
-    try { void old?.destroy?.(); } catch { /* ignore */ }
-    scheduleWhatsAppReconnect(reason);
+    void destroyWhatsAppClientInstance(old, `disconnected:${reason}`).finally(() => {
+      clientPhase = "FAILED";
+      scheduleWhatsAppReconnect(reason);
+    });
   });
 
   c.on("auth_failure", (msg: string) => {
-    logger.error(`wa: auth failure - ${msg}`);
+    if (client !== c) return;
+    clientPhase = "FAILED";
+    logger.error({ sessionId: WA_CLIENT_ID, message: msg, phase: clientPhase }, "wa: auth_failure");
     isReady = false;
     authAccepted = false;
     readySyncTriggerTried = false;
     stopReadyFallbackWatcher();
     stopWhatsAppWatchdog();
+    const old = client;
     client = null;
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Kimlik doğrulama hatası: ${msg}`;
-    if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
+    void destroyWhatsAppClientInstance(old, "auth_failure").finally(() => {
+      clientPhase = "FAILED";
+      if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
+    });
   });
 }
 
@@ -264,7 +388,8 @@ function markWhatsAppReady(reason: string): void {
     return;
   }
   if (!client) return;
-  logger.info({ reason }, "wa: connected");
+  clientPhase = "READY";
+  logger.info({ reason, sessionId: WA_CLIENT_ID, phase: clientPhase }, "wa: ready");
   isReady = true;
   authAccepted = true;
   qrDataUrl = null;
@@ -319,6 +444,7 @@ function startReadyFallbackWatcher(): void {
         client = null;
         isReady = false;
         try { await old?.destroy?.(); } catch { /* ignore */ }
+        clientPhase = "IDLE";
         await new Promise((r) => setTimeout(r, 1500));
         try {
           await startWhatsAppClient({ force: true });
@@ -472,35 +598,125 @@ function stopWhatsAppWatchdog(): void {
   }
 }
 
-export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?: boolean }): Promise<void> {
+async function destroyWhatsAppClientInstance(c: any, reason: string): Promise<void> {
+  if (!c) return;
+  clientPhase = "DESTROYING";
+  logger.info({ sessionId: WA_CLIENT_ID, reason }, "wa: eski client temizleniyor");
+  try {
+    c.removeAllListeners?.();
+  } catch { /* ignore */ }
+  try {
+    await withTimeout(Promise.resolve(c.destroy?.()), 10_000, "WhatsApp client destroy zaman aşımı");
+  } catch (error) {
+    logger.warn({ err: error, sessionId: WA_CLIENT_ID, reason }, "wa: client destroy tamamlanamadı");
+  }
+  if (client === c) client = null;
+}
+
+async function createWhatsAppClient(): Promise<any> {
+  try {
+    await loadWhatsAppLib();
+  } catch (error) {
+    throw new WhatsAppStartError(
+      `whatsapp-web.js yüklenemedi: ${error instanceof Error ? error.message : String(error)}`,
+      503,
+      "CLIENT_LIBRARY_UNAVAILABLE",
+    );
+  }
+  let executablePath: string;
+  try {
+    executablePath = resolveExecutablePath();
+  } catch (error) {
+    throw new WhatsAppStartError(
+      error instanceof Error ? error.message : String(error),
+      503,
+      "CHROMIUM_UNAVAILABLE",
+    );
+  }
+  logger.info(
+    {
+      sessionId: WA_CLIENT_ID,
+      executablePath,
+      chromiumVersion: readChromiumVersion(executablePath),
+      wwebjsVersion: WWEBJS_VERSION,
+      clientCreated: false,
+    },
+    "wa: merkezi client factory başlıyor",
+  );
+
+  const created = new ClientCtor({
+    authStrategy: new LocalAuthCtor({ dataPath: AUTH_PATH, clientId: WA_CLIENT_ID }),
+    puppeteer: {
+      headless: true,
+      executablePath,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-extensions",
+        "--mute-audio",
+      ],
+    },
+    restartOnAuthFail: false,
+  });
+  attachHandlers(created);
+  logger.info(
+    { sessionId: WA_CLIENT_ID, clientCreated: true, pairingMethodAvailable: typeof created.requestPairingCode === "function" },
+    "wa: client oluşturuldu",
+  );
+  return created;
+}
+
+export async function startWhatsAppClient(
+  opts?: { phoneNumber?: string; force?: boolean },
+): Promise<WhatsAppStartResult> {
   const pairingMode = !!(opts?.phoneNumber?.trim());
-  const force = opts?.force === true || pairingMode;
-
-  if (isReady && client && !force) return;
-  if (starting && !force) return;
-
-  if (force && (client || isReady || starting)) {
-    stopWhatsAppWatchdog();
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    const old = client;
-    client = null;
-    isReady = false;
-    starting = false;
-    try { await old?.destroy?.(); } catch { /* ignore */ }
-    await new Promise((r) => setTimeout(r, 1000));
+  const normalizedPhone = pairingMode
+    ? normalizeTurkishWhatsAppPhone(opts!.phoneNumber!)
+    : null;
+  if (pairingMode && (!normalizedPhone || !isValidWaPhone(normalizedPhone))) {
+    throw new WhatsAppStartError(
+      `Geçersiz Türkiye telefon numarası. 0532..., 532... veya 90532... formatını kullanın.`,
+      400,
+      "INVALID_PHONE",
+    );
   }
 
-  if (starting) return;
+  if (starting || initializePromise || clientPhase === "INITIALIZING" || clientPhase === "AUTHENTICATED") {
+    throw new WhatsAppStartError(
+      `WhatsApp session ${WA_CLIENT_ID} zaten başlatılıyor (${clientPhase}). Mevcut işlemin tamamlanmasını bekleyin.`,
+      409,
+      "SESSION_STARTING",
+    );
+  }
+  if (client && (isReady || clientPhase === "READY")) {
+    throw new WhatsAppStartError(
+      `WhatsApp session ${WA_CLIENT_ID} zaten bağlı.`,
+      409,
+      "SESSION_READY",
+    );
+  }
+
+  // Kilit await öncesinde alınır; iki HTTP isteği aynı anda ikinci client oluşturamaz.
   starting = true;
+
+  // Yalnız bozuk/eski client temizlenir; aktif client üstüne ikinci initialize asla yapılmaz.
+  if (client) {
+    const stale = client;
+    await destroyWhatsAppClientInstance(stale, opts?.force ? "forced_stale_restart" : "stale_before_start");
+    isReady = false;
+  }
+
+  clientPhase = "INITIALIZING";
   manualStop = false;
   qrDataUrl = null;
   pairingCode = null;
+  pairingRequestPromise = null;
   pairingCodeRequested = false;
   pairingIntent = pairingMode;
-  // Soft restart (force, telefonsuz) oturumu yeniden yükler — authAccepted sıfırlanır
   if (pairingMode || !hasWhatsAppLocalSession()) {
     authAccepted = false;
     sessionSoftRestartTried = false;
@@ -508,100 +724,106 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
   }
   stopReadyFallbackWatcher();
   lastError = pairingMode
-    ? "Onay kodu hazırlanıyor… QR kullanılmayacak."
+    ? "WhatsApp client başlatılıyor; onay kodu hazırlanacak…"
     : (hasWhatsAppLocalSession() ? "Kayıtlı oturumla bağlanılıyor…" : null);
-
-  if (pairingMode) {
-    pendingPhone = normalizePhone(opts!.phoneNumber!);
-    if (!isValidWaPhone(pendingPhone)) {
-      starting = false;
-      pairingIntent = false;
-      lastError = `Geçersiz numara: ${pendingPhone}. Örn: 905xxxxxxxxx (ülke kodu ile)`;
-      throw new Error(lastError);
-    }
-    // Eski oturum QR'a düşürüyor — pairing için hem ana hem pair session temizle
-    clearWhatsAppLocalSession(WA_CLIENT_ID);
-    clearWhatsAppLocalSession(WA_PAIR_CLIENT_ID);
-  } else {
-    pendingPhone = null;
-    pairingIntent = false;
-  }
+  pendingPhone = normalizedPhone;
+  if (!pairingMode) pairingIntent = false;
 
   try {
-    await loadWhatsAppLib();
-
-    if (client) {
-      try { await client.destroy(); } catch { /* ignore */ }
-      client = null;
-      isReady = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (pairingMode) {
+      // Yeni telefon eşleşmesi, aktif client olmadığı doğrulandıktan sonra temiz session ile başlar.
+      clearWhatsAppLocalSession(WA_CLIENT_ID);
+      clearWhatsAppLocalSession(WA_PAIR_CLIENT_ID);
     }
 
-    const executablePath = resolveExecutablePath();
-    // Aynı clientId: pairing sonrası oturum auto-reconnect ile bulunsun
-    logger.info({ executablePath, pairingMode, phone: pendingPhone }, "wa: Chromium yolu");
-
-    const clientOpts: Record<string, unknown> = {
-      authStrategy: new LocalAuthCtor({ dataPath: AUTH_PATH, clientId: WA_CLIENT_ID }),
-      puppeteer: {
-        headless: true,
-        executablePath,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--disable-extensions",
-          "--mute-audio",
-        ],
-      },
-      restartOnAuthFail: false,
-    };
-
-    // Dolu phoneNumber → kod; boş/yok → QR. Pairing'de mutlaka phoneNumber ver.
-    if (pairingMode && pendingPhone) {
-      clientOpts.pairWithPhoneNumber = {
-        phoneNumber: String(pendingPhone),
-        showNotification: true,
-        intervalMs: 180_000,
-      };
+    const created = await createWhatsAppClient();
+    client = created;
+    logger.info({ sessionId: WA_CLIENT_ID, initializeStarted: true, phase: clientPhase }, "wa: initialize başladı");
+    try {
+      initializePromise = withTimeout(
+        Promise.resolve(created.initialize()),
+        45_000,
+        "WhatsApp client.initialize 45 saniye içinde tamamlanmadı",
+      );
+      await initializePromise;
+    } catch (error) {
+      throw new WhatsAppStartError(
+        `WhatsApp client.initialize başarısız: ${error instanceof Error ? error.message : String(error)}`,
+        503,
+        "INITIALIZE_FAILED",
+      );
+    }
+    if (client !== created) {
+      throw new WhatsAppStartError("WhatsApp client başlatma sırasında değişti.", 503, "CLIENT_REPLACED");
     }
 
-    client = new ClientCtor(clientOpts);
-    attachHandlers(client);
+    const browserOpen = Boolean(created.pupBrowser?.isConnected?.());
+    const pageOpen = Boolean(created.pupPage && !created.pupPage.isClosed?.());
+    logger.info(
+      { sessionId: WA_CLIENT_ID, initializeCompleted: true, browserOpen, pageOpen },
+      "wa: initialize tamamlandı; browser kontrol edildi",
+    );
+    if (!browserOpen || !pageOpen) {
+      throw new WhatsAppStartError(
+        `Chromium hazır değil (browserOpen=${browserOpen}, pageOpen=${pageOpen}).`,
+        503,
+        "BROWSER_NOT_READY",
+      );
+    }
 
-    await client.initialize();
-
-    // initialize sonrası kod yoksa zorla iste ve bekle
-    if (pairingMode && pendingPhone && !isReady && !pairingCode) {
+    if (pairingMode && pendingPhone && !isReady) {
       lastError = "Onay kodu isteniyor…";
-      pairingCodeRequested = true;
-      const code = await requestPairingCodeNow(client, pendingPhone);
-      if (!code) {
-        // Birkaç sn daha code event bekledikten sonra hata
-        for (let i = 0; i < 20 && !pairingCode && !isReady; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      }
-      if (!pairingCode && !isReady) {
-        lastError = "Onay kodu gelmedi. 905xxxxxxxxx formatında tekrar deneyin (QR kapalı).";
-        logger.warn({ phone: pendingPhone }, "wa: pairing code gelmedi");
-      } else if (pairingCode) {
-        lastError = null;
+      try {
+        const code = pairingCode ?? await beginPairingCodeRequest(created, pendingPhone);
+        return {
+          phase: "pairing",
+          pairingCode: code,
+          qr: null,
+          message: "Onay kodu başarıyla oluşturuldu.",
+        };
+      } catch (error) {
+        await enableQrFallback(created, error);
+        throw error;
       }
     }
+
+    return {
+      phase: isReady ? "ready" : "qr",
+      pairingCode: null,
+      qr: qrDataUrl,
+      message: isReady ? "WhatsApp zaten bağlandı." : "QR bağlantısı başlatıldı.",
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     lastError = msg.includes("ENOENT") || msg.includes("Chromium")
       ? `Chrome/Chromium bulunamadı. Deploy'da chromium kurulu olmalı. (${msg.slice(0, 200)})`
       : msg.slice(0, 500);
-    client = null;
-    isReady = false;
-    logger.error({ err: e }, "wa: start failed");
+    const keepQrFallback = pairingMode
+      && Boolean(client?.pupBrowser?.isConnected?.());
+    if (!keepQrFallback) {
+      const failedClient = client;
+      if (failedClient) await destroyWhatsAppClientInstance(failedClient, "start_failed");
+      isReady = false;
+      clientPhase = "FAILED";
+    }
+    logger.error(
+      {
+        err: e,
+        sessionId: WA_CLIENT_ID,
+        phase: clientPhase,
+        browserOpen: Boolean(client?.pupBrowser?.isConnected?.()),
+        pairingMethodAvailable: typeof client?.requestPairingCode === "function",
+      },
+      "wa: start failed",
+    );
     throw e;
   } finally {
     starting = false;
+    initializePromise = null;
   }
 }
 
@@ -680,6 +902,12 @@ export function getWhatsAppStatus() {
     phone: pendingPhone,
     error: lastError,
     chromePath,
+    chromiumVersion: chromePath ? readChromiumVersion(chromePath) : null,
+    browserOpen: Boolean(client?.pupBrowser?.isConnected?.()),
+    pairingMethodAvailable: typeof client?.requestPairingCode === "function",
+    wwebjsVersion: WWEBJS_VERSION,
+    sessionId: WA_CLIENT_ID,
+    clientPhase,
   };
 }
 
@@ -691,6 +919,8 @@ export async function stopWhatsAppClient(): Promise<void> {
   readySyncTriggerTried = false;
   stopReadyFallbackWatcher();
   pairingCodeRequested = false;
+  pairingRequestPromise = null;
+  initializePromise = null;
   pendingPhone = null;
   stopWhatsAppWatchdog();
   if (reconnectTimer) {
@@ -700,13 +930,13 @@ export async function stopWhatsAppClient(): Promise<void> {
   reconnectAttempts = 0;
   if (!client) {
     isReady = false;
+    clientPhase = "IDLE";
     return;
   }
-  try {
-    await client.destroy();
-  } catch { /* ignore */ }
-  client = null;
+  const current = client;
+  await destroyWhatsAppClientInstance(current, "manual_stop");
   isReady = false;
+  clientPhase = "IDLE";
   qrDataUrl = null;
   pairingCode = null;
 }
