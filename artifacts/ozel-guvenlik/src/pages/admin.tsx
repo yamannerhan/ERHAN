@@ -4230,7 +4230,7 @@ function AdminSidebar({
         />
       )}
       <aside
-        className={`fixed lg:sticky top-0 left-0 h-screen w-[260px] z-50 lg:z-auto flex flex-col border-r border-white/[0.05] transition-transform duration-300 ${
+        className={`og-admin-sidebar fixed lg:sticky top-0 left-0 h-screen w-[260px] z-50 lg:z-auto flex flex-col border-r border-white/[0.05] transition-transform duration-300 ${
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
         style={{
@@ -4418,8 +4418,8 @@ function AdminTopBar({
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-[#0a0e1c]/80 backdrop-blur-xl border-b border-white/[0.05] px-4 lg:px-6 py-3">
-      <div className="flex items-center gap-3">
+    <header className="og-admin-topbar sticky top-0 z-30 bg-[#0a0e1c]/80 backdrop-blur-xl border-b border-white/[0.05] px-4 lg:px-6 py-3">
+      <div className="og-admin-topbar-row flex items-center gap-3">
         <button
           onClick={onMenuToggle}
           className="lg:hidden w-9 h-9 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center justify-center text-slate-300"
@@ -4439,7 +4439,7 @@ function AdminTopBar({
           </button>
         </WouterLink>
 
-        <div className="flex-1 max-w-md relative">
+        <div className="og-admin-topbar-search flex-1 max-w-md relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
           <input
             value={search}
@@ -4449,7 +4449,7 @@ function AdminTopBar({
           />
         </div>
 
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="og-admin-topbar-actions flex items-center gap-1.5 ml-auto">
           <button
             type="button"
             onClick={toggleTheme}
@@ -5398,7 +5398,7 @@ export default function AdminDashboard() {
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "2-digit" });
 
   return (
-    <div className="min-h-screen bg-[#0a0e1c] text-slate-100 flex">
+    <div className="og-admin-shell min-h-screen bg-[#0a0e1c] text-slate-100 flex">
       <AdminSidebar
         active={activeTab}
         onSelect={setActiveTab}

@@ -54,7 +54,7 @@ export default function Login() {
 
   return (
     <Layout>
-      <div className="og-main flex items-center justify-center p-4 pb-20">
+      <div className="og-main og-auth-page flex items-center justify-center p-4 pb-20">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-primary/30 shadow-[0_0_20px_rgba(79,70,229,0.3)]">
@@ -66,7 +66,7 @@ export default function Login() {
             <p className="text-muted-foreground mt-2">Hesabınıza giriş yapın</p>
           </div>
 
-          <div className="glass-card rounded-2xl p-6">
+          <div className="og-auth-card glass-card rounded-2xl p-6">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField
@@ -81,6 +81,7 @@ export default function Login() {
                           className="glass-card border-white/10"
                           autoCapitalize="none"
                           autoCorrect="off"
+                          autoComplete="username"
                           {...field}
                           data-testid="input-email"
                         />
@@ -98,6 +99,7 @@ export default function Login() {
                       <FormControl>
                         <Input
                           type="password"
+                          autoComplete="current-password"
                           placeholder="******"
                           className="glass-card border-white/10"
                           {...field}
