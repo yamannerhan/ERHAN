@@ -1744,15 +1744,23 @@ async function checkWhatsAppSource(source: typeof sourcesTable.$inferSelect): Pr
       ? { maxAgeDays: WA_INITIAL_SCAN_DAYS, deep: true, limit: 300 }
       : { afterTimestampMs: Math.max(0, lastTs - WA_CURSOR_OVERLAP_MS), limit: 1000 });
 
-    // İlk tur boşsa sığ tekrar (deep bazen Store'u boşa yorar)
+    // İlk tur boşsa: senkron için bekle + sığ/derin tekrar
     if (isInitialScan && fetched.messages.length === 0) {
-      logger.warn({ sourceId: source.id, groupJid }, "scraper: wa derin tur boş — sığ tekrar");
-      await sleep(2_000);
+      logger.warn({ sourceId: source.id, groupJid }, "scraper: wa derin tur boş — senkron bekleniyor");
+      await sleep(5_000);
       fetched = await fetchWhatsAppMessagesDetailed(groupJid, {
-        maxAgeDays: 90,
+        maxAgeDays: 180,
         deep: false,
-        limit: 300,
+        limit: 400,
       });
+      if (fetched.messages.length === 0) {
+        await sleep(4_000);
+        fetched = await fetchWhatsAppMessagesDetailed(groupJid, {
+          maxAgeDays: 90,
+          deep: true,
+          limit: 400,
+        });
+      }
     }
 
     messages = fetched.messages;
@@ -1962,30 +1970,8 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   if (waSequentialRunning) return;
   waSequentialRunning = true;
   try {
-    // Yanlışlıkla "boş tur / sınırlı geçmiş" ile bitmiş grupları yeniden kuyruğa al
-    try {
-      const requeued = await db.update(sourcesTable)
-        .set({
-          initialScanDone: false,
-          initialScanProgress: 1,
-          initialScanPhase: "backward",
-          isScanning: false,
-          lastError: "WhatsApp yeniden tarama kuyruğunda…",
-        })
-        .where(and(
-          eq(sourcesTable.platform, "whatsapp"),
-          eq(sourcesTable.active, true),
-          eq(sourcesTable.initialScanDone, true),
-          sql`COALESCE(${sourcesTable.totalImported}, 0) = 0`,
-          sql`COALESCE(${sourcesTable.lastScanMessagesRead}, 0) = 0`,
-        ))
-        .returning({ id: sourcesTable.id });
-      if (requeued.length > 0) {
-        logger.warn({ count: requeued.length }, "scraper: wa boş bitmiş kaynaklar yeniden kuyrukta");
-      }
-    } catch (e) {
-      logger.warn({ err: e }, "scraper: wa requeue failed");
-    }
+    // Not: 0 mesajla "done" olanları her turda yeniden kuyruğa alma —
+    // %1–2'de takılı döngü yapıyordu. Manuel «Sıfırla / Tekrar Tara» yeterli.
 
     const emptyBySource = new Map<number, number>();
     let idleLoops = 0;

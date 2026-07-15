@@ -149,40 +149,37 @@ function setPairingCode(code: string | null): void {
   if (!code) return;
   const raw = String(code).replace(/\s+/g, "").toUpperCase();
   if (raw.length < 6) return;
+  if (pairingCode === raw) return;
   pairingCode = raw;
   qrDataUrl = null;
-  lastError = null;
+  lastError = "Telefonda kodu girin — giriş bitene kadar bu ekranı kapatmayın…";
   logger.info({ codeLen: raw.length }, "wa: pairing code set");
 }
 
-async function requestPairingCodeNow(c: any, phone: string): Promise<string | null> {
-  if (!c || typeof c.requestPairingCode !== "function") return null;
+/** Kod geldikten sonra: yenileme + inject tekrar requestPairingCode yapmasın (bağlantı kopar) */
+function stabilizePairingSession(c: any): void {
   try {
-    const code = await c.requestPairingCode(phone, true, 180_000);
-    if (code) {
-      setPairingCode(String(code));
-      return pairingCode;
+    if (c?.options?.pairWithPhoneNumber) {
+      c.options.pairWithPhoneNumber.phoneNumber = "";
     }
-  } catch (e) {
-    logger.warn({ err: e }, "wa: requestPairingCode failed");
-  }
-  return null;
+  } catch { /* ignore */ }
+  void c?.pupPage?.evaluate?.(() => {
+    const w = window as unknown as { codeInterval?: ReturnType<typeof setInterval> };
+    if (w.codeInterval) {
+      clearInterval(w.codeInterval);
+      w.codeInterval = undefined;
+    }
+  }).catch(() => undefined);
 }
 
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
-    // Onay kodu modunda QR'ı ASLA gösterme — kod iste
+    // Onay kodu modunda QR gösterme / ikinci kod isteği YOK (çift istek = «bağlantıda sorun»)
     if (pairingIntent && pendingPhone) {
-      logger.info("wa: QR yoksayıldı (onay kodu modu) — pairing code isteniyor");
+      logger.info("wa: QR yoksayıldı (onay kodu modu)");
       qrDataUrl = null;
-      if (!pairingCode && !pairingCodeRequested) {
-        pairingCodeRequested = true;
-        void requestPairingCodeNow(c, pendingPhone).then((code) => {
-          if (!code) {
-            pairingCodeRequested = false;
-            lastError = "Onay kodu alınamadı. Numarayı 905… formatında kontrol edip tekrar deneyin.";
-          }
-        });
+      if (pairingCode) {
+        lastError = "Telefonda kodu girin — bekleyin…";
       }
       return;
     }
@@ -200,24 +197,21 @@ function attachHandlers(c: any): void {
 
   c.on("loading_screen", (percent: string, message: string) => {
     logger.info(`wa: loading ${percent}% ${message}`);
+    if (pairingIntent) {
+      lastError = `Giriş yapılıyor… %${percent}`;
+    }
   });
 
   c.on("code", (code: string) => {
     setPairingCode(code);
-    // Kod yenileme aralığını durdur — giriş sırasında yeni kod isteği bağlantıyı bozar
-    void c.pupPage?.evaluate?.(() => {
-      const w = window as unknown as { codeInterval?: ReturnType<typeof setInterval> };
-      if (w.codeInterval) {
-        clearInterval(w.codeInterval);
-        w.codeInterval = undefined;
-      }
-    }).catch(() => undefined);
+    stabilizePairingSession(c);
   });
 
   c.on("authenticated", () => {
     logger.info("wa: authenticated");
+    stabilizePairingSession(c);
     lastError = pairingIntent
-      ? "Giriş yapılıyor — oturum açılıyor, 1–2 dk bekleyin…"
+      ? "Giriş yapılıyor — oturum kaydediliyor, bekleyin…"
       : null;
   });
 
@@ -232,6 +226,10 @@ function attachHandlers(c: any): void {
     lastError = null;
     reconnectAttempts = 0;
     manualStop = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
     startWhatsAppWatchdog();
     void import("../workers/scraper").then((m) => {
       if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
@@ -246,18 +244,34 @@ function attachHandlers(c: any): void {
     const wasPairing = pairingIntent && !!pendingPhone;
     const savedPhone = pendingPhone;
     const savedCode = pairingCode;
-    const old = client;
-    client = null;
     qrDataUrl = null;
 
-    // Pairing sırasında QR'sız auto-reconnect bağlantıyı bitiriyor — yapma
+    // Kod / giriş sırasında client'ı öldürme → telefonda «bağlantıda sorun oluştu»
+    if (wasPairing && savedPhone && savedCode) {
+      pairingIntent = true;
+      pendingPhone = savedPhone;
+      pairingCode = savedCode;
+      const browser = client?.pupBrowser as { isConnected?: () => boolean } | undefined;
+      const alive = !!client?.pupPage && browser?.isConnected?.() !== false;
+      if (alive) {
+        lastError = "Giriş yapılıyor — bekleyin, tekrar basmayın…";
+        logger.info({ reason: reasonStr }, "wa: pairing disconnect yok sayıldı (client canlı)");
+        return;
+      }
+      const old = client;
+      client = null;
+      lastError = "Giriş kesildi. «Onay Kodu ile Bağlan»a bir kez daha basın (yeni kod).";
+      try { void old?.destroy?.(); } catch { /* ignore */ }
+      return;
+    }
+
+    const old = client;
+    client = null;
     if (wasPairing && savedPhone) {
       pairingIntent = true;
       pendingPhone = savedPhone;
-      if (savedCode) pairingCode = savedCode;
-      lastError = savedCode
-        ? "Giriş kesildi. Aynı kodu tekrar denemeyin — «Onay Kodu ile Bağlan»a bir kez basın."
-        : `Bağlantı koptu (${reasonStr}). «Onay Kodu ile Bağlan»a tekrar basın.`;
+      pairingCode = null;
+      lastError = `Bağlantı koptu (${reasonStr}). «Onay Kodu ile Bağlan»a tekrar basın.`;
       try { void old?.destroy?.(); } catch { /* ignore */ }
       return;
     }
@@ -272,10 +286,12 @@ function attachHandlers(c: any): void {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
     stopWhatsAppWatchdog();
+    const old = client;
     client = null;
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Kimlik doğrulama hatası: ${msg}`;
+    try { void old?.destroy?.(); } catch { /* ignore */ }
     if (pairingIntent) return;
     if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
   });
@@ -426,13 +442,15 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
       authTimeoutMs: 180_000,
     };
 
-    // Dolu phoneNumber → kod; boş/yok → QR. Pairing'de mutlaka phoneNumber ver.
+    // SADECE pairWithPhoneNumber — manuel requestPairingCode çift istek yapıp
+    // telefonda «bağlantıda sorun oluştu» verir.
     if (pairingMode && pendingPhone) {
       clientOpts.pairWithPhoneNumber = {
         phoneNumber: String(pendingPhone),
         showNotification: true,
-        intervalMs: 180_000,
+        intervalMs: 600_000,
       };
+      pairingCodeRequested = true;
     }
 
     client = new ClientCtor(clientOpts);
@@ -440,23 +458,17 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
 
     await client.initialize();
 
-    // Önce pairWithPhoneNumber'ın code event'ini bekle; yoksa tek yedek istek
-    if (pairingMode && pendingPhone && !isReady && !pairingCode) {
-      for (let i = 0; i < 12 && !pairingCode && !isReady; i++) {
+    if (pairingMode && pendingPhone && !isReady) {
+      for (let i = 0; i < 40 && !pairingCode && !isReady; i++) {
         await new Promise((r) => setTimeout(r, 1000));
-      }
-      if (!pairingCode && !isReady) {
-        lastError = "Onay kodu isteniyor…";
-        pairingCodeRequested = true;
-        await requestPairingCodeNow(client, pendingPhone);
-        for (let i = 0; i < 15 && !pairingCode && !isReady; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
+        if (i === 5 || i === 15) {
+          lastError = `Onay kodu bekleniyor… (${pendingPhone})`;
         }
       }
       if (!pairingCode && !isReady) {
-        lastError = "Onay kodu gelmedi. 905xxxxxxxxx formatında tekrar deneyin (QR kapalı).";
+        lastError = "Onay kodu gelmedi. Bir kez daha «Onay Kodu ile Bağlan»a basın.";
         logger.warn({ phone: pendingPhone }, "wa: pairing code gelmedi");
-      } else if (pairingCode) {
+      } else if (pairingCode && !isReady) {
         lastError = "Telefonda kodu girin — giriş bitene kadar bekleyin…";
       }
     }
@@ -831,15 +843,33 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
     } catch { /* ignore */ }
   }
 
-  try {
-    if (typeof chat.syncHistory === "function") {
-      const synced = await chat.syncHistory();
-      logger.info({ groupJid: chatId, synced }, "wa: syncHistory");
-      await new Promise((r) => setTimeout(r, 1500));
+  const syncChatHistory = async () => {
+    try {
+      if (typeof chat.syncHistory === "function") {
+        const synced = await chat.syncHistory();
+        logger.info({ groupJid: chatId, synced }, "wa: syncHistory");
+      }
+    } catch (e) {
+      logger.warn({ err: e, groupJid: chatId }, "wa: syncHistory failed");
     }
-  } catch (e) {
-    logger.warn({ err: e, groupJid: chatId }, "wa: syncHistory failed");
-  }
+    if (page) {
+      try {
+        await page.evaluate((jid: string) => {
+          const w = window as any;
+          const storeChat =
+            w.Store?.Chat?.get?.(jid) ||
+            w.Store?.Chat?.find?.(jid) ||
+            (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === jid);
+          if (typeof storeChat?.syncHistory === "function") {
+            try { storeChat.syncHistory(); } catch { /* ignore */ }
+          }
+        }, chatId);
+      } catch { /* ignore */ }
+    }
+  };
+
+  await syncChatHistory();
+  await new Promise((r) => setTimeout(r, 2500));
 
   const byId = new Map<string, WhatsAppMessage>();
   let rounds = 0;
@@ -874,11 +904,24 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
     }
   };
 
-  // Önce sığ çekim — en azından son mesajlar gelsin
-  for (const lim of [50, 100, 200, Math.min(opts.limit ?? 300, 500)]) {
-    await pullFetchMessages(lim);
-    if (byId.size > 0) break;
-    await new Promise((r) => setTimeout(r, 800));
+  // Senkron gecikmeli gruplarda birkaç tur bekle + çek
+  for (let attempt = 0; attempt < 4 && byId.size === 0; attempt++) {
+    if (attempt > 0) {
+      await syncChatHistory();
+      try {
+        await (client as any).interface?.openChatWindow?.(chatId);
+      } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 2000 + attempt * 1500));
+      chat = (await resolveWhatsAppChat(chatId)) || chat;
+    }
+    for (const lim of [80, 150, 300, Math.min(opts.limit ?? 300, 500)]) {
+      await pullFetchMessages(lim);
+      if (byId.size > 0) break;
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    if (page && byId.size === 0) {
+      await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    }
   }
 
   if (opts.deep && page) {
@@ -943,7 +986,8 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
           const count = arr.length || msgsBefore;
           let oldest = Date.now();
           for (const m of arr) {
-            const t = (m.t ?? m.timestamp ?? 0) * 1000;
+            const rawT = Number(m.t ?? m.timestamp ?? 0);
+            const t = rawT > 0 && rawT < 1e12 ? rawT * 1000 : rawT;
             if (t > 0 && t < oldest) oldest = t;
           }
           const noGrowth = count <= msgsBefore && loaded === 0;
