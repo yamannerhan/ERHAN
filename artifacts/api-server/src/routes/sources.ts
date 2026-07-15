@@ -6,7 +6,7 @@ import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScra
 import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
-  hasWhatsAppLocalSession,
+  getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession,
 } from "../services/whatsapp-client";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
 
@@ -310,7 +310,8 @@ router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, 
     return;
   }
   const groups = await fetchWhatsAppGroups();
-  res.json({ groups });
+  const diagnostics = await getWhatsAppDiscoveryDiagnostics();
+  res.json({ groups, diagnostics });
 });
 
 router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (req, res) => {

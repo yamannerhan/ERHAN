@@ -3311,6 +3311,11 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [pairingMode, setPairingMode] = useState(false);
   const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
+  const [discoveryDiagnostics, setDiscoveryDiagnostics] = useState<{
+    ready: boolean; chatCount: number; groupCount: number; channelCount: number;
+    storeChatCount: number | null; storeGroupMetadataCount: number | null;
+    errors: string[]; steps: string[];
+  } | null>(null);
   const [errorLog, setErrorLog] = useState<string>("");
   const [lastScanAt, setLastScanAt] = useState<string>("Henüz taranmadı");
   const [savedSources, setSavedSources] = useState<Array<{
@@ -3358,7 +3363,11 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
 
       if (isConn) {
         const groupList = await apiCall("/admin/whatsapp/groups", "GET");
-        const parsed = groupList as { groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }> };
+        const parsed = groupList as {
+          groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
+          diagnostics?: typeof discoveryDiagnostics;
+        };
+        setDiscoveryDiagnostics(parsed.diagnostics ?? null);
         setGroups(prev => {
           const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
           return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
@@ -3771,6 +3780,20 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             Seçilenleri Kaydet
           </button>
         </div>
+        {discoveryDiagnostics && (
+          <details className={`mb-3 rounded-xl border p-3 text-xs ${discoveryDiagnostics.errors.length > 0 || discoveryDiagnostics.groupCount === 0 ? "border-amber-400/40 bg-amber-500/10" : "border-emerald-400/25 bg-emerald-500/10"}`}>
+            <summary className="cursor-pointer font-bold text-white">
+              Grup keşif tanısı · Sohbet {discoveryDiagnostics.chatCount} · Grup {discoveryDiagnostics.groupCount} · Kanal {discoveryDiagnostics.channelCount}
+            </summary>
+            <div className="mt-2 space-y-1 text-slate-300">
+              {discoveryDiagnostics.steps.map((step, index) => <p key={`${step}-${index}`}>• {step}</p>)}
+              {discoveryDiagnostics.errors.map((error, index) => <p key={`${error}-${index}`} className="break-words text-rose-300">• {error}</p>)}
+              {discoveryDiagnostics.groupCount === 0 && discoveryDiagnostics.errors.length === 0 && (
+                <p className="text-amber-200">• WhatsApp Web grup indeksini henüz vermedi. «Durumu Yenile» ile bu ekranı tekrar kontrol edin.</p>
+              )}
+            </div>
+          </details>
+        )}
         <div className="space-y-2 max-h-[420px] overflow-y-auto">
           {groups.length === 0 ? (
             <p className="text-xs text-slate-500 text-center py-8">

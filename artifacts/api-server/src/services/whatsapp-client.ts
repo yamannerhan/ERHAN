@@ -89,6 +89,17 @@ export interface WhatsAppMessage {
   timestamp: number;
 }
 
+export type WhatsAppDiscoveryDiagnostics = {
+  ready: boolean;
+  chatCount: number;
+  groupCount: number;
+  channelCount: number;
+  storeChatCount: number | null;
+  storeGroupMetadataCount: number | null;
+  errors: string[];
+  steps: string[];
+};
+
 function resolveExecutablePath(): string {
   for (const p of CHROME_CANDIDATES) {
     try {
@@ -552,6 +563,85 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
     return a.name.localeCompare(b.name, "tr");
   });
+}
+
+/**
+ * Grup/kanal keşfi boş döndüğünde gerçek katmanı göstermek için ayrıntılı
+ * tanı üretir. Bu fonksiyon yalnızca gözlem yapar, oturum veya tarama
+ * imlecini değiştirmez.
+ */
+export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscoveryDiagnostics> {
+  const diagnostic: WhatsAppDiscoveryDiagnostics = {
+    ready: isWhatsAppReady(),
+    chatCount: 0,
+    groupCount: 0,
+    channelCount: 0,
+    storeChatCount: null,
+    storeGroupMetadataCount: null,
+    errors: [],
+    steps: [],
+  };
+  if (!client || !isReady) {
+    diagnostic.errors.push("WhatsApp istemcisi hazır değil.");
+    return diagnostic;
+  }
+
+  try {
+    const chats = await client.getChats();
+    diagnostic.chatCount = chats.length;
+    diagnostic.groupCount = chats.filter((chat: any) => {
+      const id = String(chat?.id?._serialized ?? "");
+      return Boolean(chat?.isGroup || id.endsWith("@g.us"));
+    }).length;
+    diagnostic.channelCount = chats.filter((chat: any) => {
+      const id = String(chat?.id?._serialized ?? "");
+      return Boolean(chat?.isChannel || chat?.isNewsletter || id.endsWith("@newsletter"));
+    }).length;
+    diagnostic.steps.push(`getChats: ${diagnostic.chatCount} sohbet, ${diagnostic.groupCount} grup, ${diagnostic.channelCount} kanal`);
+  } catch (e) {
+    diagnostic.errors.push(`getChats hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
+  }
+
+  try {
+    if (typeof client.getChannels !== "function") {
+      diagnostic.steps.push("getChannels: bu whatsapp-web.js sürümünde yok");
+    } else {
+      const channels = await client.getChannels();
+      diagnostic.steps.push(`getChannels: ${channels.length} kanal`);
+      diagnostic.channelCount = Math.max(diagnostic.channelCount, channels.length);
+    }
+  } catch (e) {
+    diagnostic.errors.push(`getChannels hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
+  }
+
+  try {
+    const page = (client as any).pupPage;
+    if (!page) {
+      diagnostic.steps.push("Puppeteer sayfası bulunamadı");
+    } else {
+      const store = await page.evaluate(() => {
+        const w = window as any;
+        const sizeOf = (collection: any) => {
+          if (!collection) return null;
+          if (typeof collection.getModelsArray === "function") return collection.getModelsArray().length;
+          if (Array.isArray(collection.models)) return collection.models.length;
+          return null;
+        };
+        return {
+          chats: sizeOf(w.Store?.Chat),
+          groupMetadata: sizeOf(w.Store?.GroupMetadata),
+          hasWWebJS: Boolean(w.WWebJS),
+        };
+      });
+      diagnostic.storeChatCount = store.chats;
+      diagnostic.storeGroupMetadataCount = store.groupMetadata;
+      diagnostic.steps.push(`WA Store: Chat=${store.chats ?? "yok"}, GroupMetadata=${store.groupMetadata ?? "yok"}, WWebJS=${store.hasWWebJS ? "var" : "yok"}`);
+    }
+  } catch (e) {
+    diagnostic.errors.push(`WhatsApp Web Store hatası: ${e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300)}`);
+  }
+
+  return diagnostic;
 }
 
 async function resolveWhatsAppChat(groupJid: string): Promise<any | null> {
