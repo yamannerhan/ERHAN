@@ -687,11 +687,18 @@ export async function fetchWhatsAppMessagesDetailed(
   }
 
   let chat: any;
-  try {
-    chat = await client.getChatById(groupJid);
-  } catch (e) {
-    logger.warn({ err: e, groupJid }, "wa: getChatById failed");
-    diagnostics.push(`getChatById başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+  // WhatsApp Web ready olduktan sonra sohbet indeksinin dolması birkaç saniye
+  // sürebilir. İlk getChatById hatasında boş tarama yerine yeniden dene.
+  for (let attempt = 0; attempt < 3 && !chat; attempt++) {
+    try {
+      chat = await client.getChatById(groupJid);
+    } catch (e) {
+      if (attempt === 2) {
+        logger.warn({ err: e, groupJid }, "wa: getChatById failed");
+        diagnostics.push(`getChatById başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
   }
   if (!chat) {
     try {
@@ -783,6 +790,11 @@ export async function fetchWhatsAppMessagesDetailed(
           let storeChat =
             w.Store?.Chat?.get?.(id) ||
             (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+          // Yeni WA Web sürümlerinde Store doğrudan erişilebilir olmayabilir.
+          // wwebjs'in enjekte ettiği WWebJS sohbet çözücüsünü de dene.
+          if (!storeChat && typeof w.WWebJS?.getChat === "function") {
+            try { storeChat = await w.WWebJS.getChat(id); } catch { /* ignore */ }
+          }
           if (!storeChat && typeof w.Store?.Chat?.find === "function") {
             try { storeChat = await w.Store.Chat.find(id); } catch { /* ignore */ }
           }
