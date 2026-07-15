@@ -226,6 +226,13 @@
   flex-wrap: wrap;
   pointer-events: none;
 }
+
+@media (max-width: 639px) {
+  .og-lp-card-badges {
+    top: 6px;
+    left: 6px;
+  }
+}
 .og-lp-badge {
   font-size: 8px;
   font-weight: 800;

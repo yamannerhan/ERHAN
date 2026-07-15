@@ -49,6 +49,8 @@ html.og-chat-open .og-bottom-nav,
   width: 100%;
   max-width: none;
   margin: 0 auto;
+  padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
+  box-sizing: border-box;
 }
 
 .og-bottom-nav-shell {

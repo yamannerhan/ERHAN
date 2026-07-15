@@ -3640,12 +3640,142 @@ html.og-chat-open .og-chat-fab {
   }
 }
 
-/* iOS Safari input zoom â€” yalnÄ±zca 390px altÄ± (Xiaomi 13T ~393 dokunulmaz) */
-@media (max-width: 389px) {
+/* iOS Safari input zoom — telefon ve tablet form alanları */
+@media (max-width: 1024px) {
   input,
   select,
   textarea {
-    font-size: 16px;
+    font-size: 16px !important;
+  }
+}
+
+/* Mobil/tablet viewport güvenlik katmanı — masaüstü (1025px+) etkilenmez. */
+@media (max-width: 1024px) {
+  :is(.og-main, .og-admin-shell) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :is(.og-job__title, .og-job__company-name, .og-job__salary-amount, .og-ld-title, .og-ld-desc) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  [role="dialog"],
+  [role="listbox"],
+  [role="menu"] {
+    max-width: calc(100vw - max(1rem, var(--safe-left)) - max(1rem, var(--safe-right))) !important;
+    max-height: calc(100dvh - max(1rem, var(--safe-top)) - max(1rem, var(--safe-bottom))) !important;
+  }
+
+  .og-chat-icon-btn {
+    min-width: 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .og-chat-tab {
+    min-height: 40px;
+  }
+
+  .og-auth-page {
+    padding-inline: max(12px, var(--safe-left), var(--safe-right)) !important;
+    padding-bottom: calc(var(--app-bottom-pad) + 1rem) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .og-auth-card {
+    padding: 18px !important;
+  }
+}
+
+@media (max-width: 359px) {
+  .og-auth-name-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .og-header-inner,
+  .og-header-brand-link,
+  .og-header-actions {
+    min-width: 0;
+  }
+
+  .og-header-actions .og-icon-btn,
+  .og-header-actions .og-pwa-install-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .og-chat-fab {
+    right: max(1rem, var(--safe-right)) !important;
+  }
+
+  .og-lp-pill,
+  .og-lp-sort,
+  .og-auth-card button {
+    min-height: 44px;
+  }
+
+  .og-job__bookmark {
+    position: relative;
+  }
+
+  .og-job__bookmark::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
+  .og-admin-shell {
+    overflow-x: clip;
+  }
+
+  .og-admin-sidebar {
+    width: min(260px, calc(100vw - 2rem)) !important;
+    height: 100dvh !important;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .og-admin-topbar {
+    padding-inline: max(10px, var(--safe-left), var(--safe-right)) !important;
+    padding-top: max(10px, var(--safe-top)) !important;
+  }
+
+  .og-admin-topbar-row {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+
+  .og-admin-topbar-search {
+    order: 3;
+    flex: 1 0 100%;
+    min-width: 0;
+    max-width: none !important;
+  }
+
+  .og-admin-topbar-actions {
+    min-width: 0;
+    margin-left: auto;
+  }
+
+  .og-admin-topbar-row > button,
+  .og-admin-topbar-actions button {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .og-admin-sidebar nav button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 399px) {
+  .og-admin-shell form .grid.grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 
@@ -3698,9 +3828,11 @@ html.og-chat-open,
 html.og-chat-open body {
   overflow: hidden;
   overscroll-behavior: none;
-  touch-action: none;
 }
 html.og-chat-open .og-chat-win {
+  touch-action: pan-y;
+}
+.og-chat-msgs {
   touch-action: pan-y;
 }
 .og-chat-hdr {

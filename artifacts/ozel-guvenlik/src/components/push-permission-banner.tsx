@@ -36,7 +36,7 @@ export function PushPermissionBanner() {
   };
 
   return (
-    <div className="fixed left-3 right-3 z-[90] bottom-[calc(76px+env(safe-area-inset-bottom))] sm:left-auto sm:right-4 sm:bottom-6 sm:max-w-sm">
+    <div className="fixed left-3 right-3 z-[90] bottom-[calc(154px+env(safe-area-inset-bottom))] sm:left-auto sm:right-4 sm:bottom-6 sm:max-w-sm">
       <div
         className="rounded-2xl border border-amber-400/30 p-3.5 shadow-2xl backdrop-blur-xl"
         style={{ background: "linear-gradient(145deg,rgba(20,24,38,0.96),rgba(30,22,12,0.94))" }}

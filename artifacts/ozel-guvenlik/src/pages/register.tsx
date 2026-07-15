@@ -66,7 +66,7 @@ export default function Register() {
 
   return (
     <Layout>
-      <div className="og-main flex items-center justify-center p-4 pb-20">
+      <div className="og-main og-auth-page flex items-center justify-center p-4 pb-20">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-primary/30 shadow-[0_0_20px_rgba(79,70,229,0.3)]">
@@ -78,10 +78,10 @@ export default function Register() {
             <p className="text-xs text-muted-foreground mt-1">Sohbette sadece adınız görünür</p>
           </div>
 
-          <div className="glass-card rounded-2xl p-6">
+          <div className="og-auth-card glass-card rounded-2xl p-6">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="og-auth-name-grid grid grid-cols-2 gap-3">
                   <FormField
                     control={form.control}
                     name="firstName"
@@ -89,7 +89,7 @@ export default function Register() {
                       <FormItem>
                         <FormLabel>Ad</FormLabel>
                         <FormControl>
-                          <Input placeholder="Ahmet" className="glass-card border-white/10" {...field} />
+                          <Input autoComplete="given-name" placeholder="Ahmet" className="glass-card border-white/10" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -102,7 +102,7 @@ export default function Register() {
                       <FormItem>
                         <FormLabel>Soyad</FormLabel>
                         <FormControl>
-                          <Input placeholder="Yılmaz" className="glass-card border-white/10" {...field} />
+                          <Input autoComplete="family-name" placeholder="Yılmaz" className="glass-card border-white/10" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -119,6 +119,7 @@ export default function Register() {
                       <FormControl>
                         <Input
                           placeholder="guvenlik_uzmanı"
+                          autoComplete="username"
                           className="glass-card border-white/10"
                           {...field}
                           data-testid="input-username"
@@ -137,6 +138,9 @@ export default function Register() {
                       <FormLabel>E-Posta</FormLabel>
                       <FormControl>
                         <Input
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
                           placeholder="ornek@email.com"
                           className="glass-card border-white/10"
                           {...field}
@@ -157,6 +161,7 @@ export default function Register() {
                       <FormControl>
                         <Input
                           type="password"
+                          autoComplete="new-password"
                           placeholder="En az 6 karakter"
                           className="glass-card border-white/10"
                           {...field}
@@ -177,6 +182,7 @@ export default function Register() {
                       <FormControl>
                         <Input
                           type="password"
+                          autoComplete="new-password"
                           placeholder="Şifrenizi tekrar girin"
                           className="glass-card border-white/10"
                           {...field}

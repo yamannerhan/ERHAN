@@ -38,9 +38,16 @@
 }
 
 .og-header-mode-toggle .og-mode-toggle__btn {
+  position: relative;
   min-height: 28px;
   padding: 6px 9px;
   font-size: 9px;
+}
+
+.og-header-mode-toggle .og-mode-toggle__btn::before {
+  content: "";
+  position: absolute;
+  inset: -8px -3px;
 }
 
 @media (max-width: 420px) {

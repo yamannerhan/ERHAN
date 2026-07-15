@@ -8,6 +8,12 @@
   min-width: 0;
 }
 
+@media (max-width: 599px) {
+  .og-ref-quick-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .og-ref-quick-card {
   position: relative;
   display: flex;
