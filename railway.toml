@@ -6,4 +6,4 @@ dockerfilePath = "Dockerfile"
 startCommand = "node scripts/start.mjs"
 restartPolicyType = "ON_FAILURE"
 # healthcheck bilerek kapali — once API ayaga kalksin; Chromium OOM / yavas boot sorununu onler
-# Railway redeploy: canlı destek ve moderatör yetki sürümü
+# Railway redeploy: WhatsApp resmi API ve kaynak tarama sürümü
