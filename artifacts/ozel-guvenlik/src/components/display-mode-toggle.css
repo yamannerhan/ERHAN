@@ -28,6 +28,29 @@
   box-shadow: 0 3px 8px rgba(8, 120, 232, 0.25);
 }
 
+.og-header-mode-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.og-header-mode-toggle .og-mode-toggle {
+  padding: 2px;
+}
+
+.og-header-mode-toggle .og-mode-toggle__btn {
+  min-height: 28px;
+  padding: 6px 9px;
+  font-size: 9px;
+}
+
+@media (max-width: 420px) {
+  .og-header-mode-toggle .og-mode-toggle__btn {
+    min-height: 26px;
+    padding: 5px 7px;
+    font-size: 8px;
+  }
+}
+
 .og-home-mode-row {
   display: flex;
   justify-content: space-between;

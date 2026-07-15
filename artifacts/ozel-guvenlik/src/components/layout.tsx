@@ -27,6 +27,7 @@ import { asArray, normalizeAppPath } from "@/lib/safe";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { LiteChatFab } from "./lite-chat-fab";
 import { countLiteUnread, findFirstLiteUnread } from "@/lib/lite-notifications";
+import { DisplayModeToggle } from "./display-mode-toggle";
 
 const ChatBubble = lazy(() => import("./chat-bubble").then((m) => ({ default: m.ChatBubble })));
 
@@ -481,6 +482,12 @@ export function Layout({
             )}
 
             {!customHeader && <PwaInstall />}
+
+            {!customHeader && (
+              <div className="og-header-mode-toggle">
+                <DisplayModeToggle />
+              </div>
+            )}
 
             {/* Bell */}
             <div ref={panelRef} className="relative">

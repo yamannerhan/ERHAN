@@ -514,6 +514,9 @@ export default function Home() {
         />
         </div>
         <HomeNewsCards announcements={announcements} />
+        <div className="mobile-home mt-4">
+          <LiveSupportBar />
+        </div>
         {/* ── Filter Pills ─────────────────────────────────── */}
         <section className="og-pills og-home-filter-pills hide-scrollbar" aria-hidden="true">
           {QUICK_CITY_PILLS.map(p => {
@@ -642,9 +645,6 @@ export default function Home() {
               ))}
             </div>
           )}
-          <div className="mobile-home mt-4">
-            <LiveSupportBar />
-          </div>
         </div>
         </div>
       </div>
