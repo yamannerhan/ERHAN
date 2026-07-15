@@ -149,15 +149,41 @@ function clearWhatsAppLocalSession(clientId = WA_CLIENT_ID): void {
   }
 }
 
+function isPairingCodeFresh(maxMs = 180_000): boolean {
+  return !!(pairingCode && pairingCodeAt && Date.now() - pairingCodeAt < maxMs);
+}
+
+/** Kod geldikten sonra yenileme/yeniden istek handshake'i bozmasın */
+async function lockPairingAfterCode(c: any): Promise<void> {
+  try {
+    if (c?.options?.pairWithPhoneNumber) {
+      // framenavigated → inject() tekrar requestPairingCode çağırmasın
+      c.options.pairWithPhoneNumber.phoneNumber = "";
+    }
+  } catch { /* ignore */ }
+  try {
+    await c?.pupPage?.evaluate?.(() => {
+      const w = window as unknown as { codeInterval?: ReturnType<typeof setInterval> };
+      if (w.codeInterval) {
+        clearInterval(w.codeInterval);
+        w.codeInterval = undefined;
+      }
+    });
+  } catch { /* ignore */ }
+}
+
 function setPairingCode(code: string | null): void {
   if (!code) return;
   const raw = String(code).replace(/\s+/g, "").toUpperCase();
   if (raw.length < 6) return;
+  // Aynı oturumda yeni kod gelirse (nadir) güncelle; kısa sürede spam'i yut
+  if (pairingCode === raw) return;
   pairingCode = raw;
   pairingCodeAt = Date.now();
   qrDataUrl = null;
-  lastError = "Telefonda kodu girin — bağlantı bekleniyor…";
+  lastError = "Telefonda kodu girin — bu ekranı kapatmayın, tekrar basmayın…";
   logger.info({ codeLen: raw.length, codePreview: `${raw.slice(0, 2)}**${raw.slice(-2)}` }, "wa: pairing code set");
+  if (client) void lockPairingAfterCode(client);
 }
 
 function clearPairingCode(reason: string): void {
@@ -183,22 +209,20 @@ function pairingErrorMessage(err: unknown): string {
 
 function scheduleWhatsAppPairingReconnect(phone: string, reason: string): void {
   if (manualStop || pairingReconnectScheduled || isReady) return;
-  // Kod varken yeniden başlatma = rate-limit + “başarısız”. Kullanıcı kodu girsin.
-  if (pairingCode && Date.now() - pairingCodeAt < 150_000) {
-    lastError = "Telefonda kodu girin — bağlantı bekleniyor… Yeniden denemeyin.";
-    logger.info({ reason, phone }, "wa: pairing reconnect atlandı (kod geçerli)");
+  // Kod beklenirken yeniden başlatma = telefonda «cihaz bağlanılamadı»
+  if (isPairingCodeFresh()) {
+    lastError = "Telefonda kodu girin — sunucu bekliyor. Tekrar basmayın.";
+    logger.info({ reason, phone }, "wa: pairing reconnect atlandı (kod bekleniyor)");
     return;
   }
   pairingReconnectScheduled = true;
-  // Agresif 4sn retry rate-limit yapıyor
-  const delay = 20_000;
+  const delay = 25_000;
   logger.info({ reason, delay, phone }, "wa: pairing ile yeniden bağlanma");
-  lastError = "Bağlantı koptu — 20 sn sonra onay kodu yenilenecek…";
+  lastError = "Bağlantı koptu — 25 sn sonra onay kodu yenilenecek…";
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     pairingReconnectScheduled = false;
-    if (manualStop || isReady) return;
-    if (pairingCode && Date.now() - pairingCodeAt < 150_000) return;
+    if (manualStop || isReady || isPairingCodeFresh()) return;
     void startWhatsAppClient({ phoneNumber: phone, force: true }).catch((e) => {
       logger.warn({ err: e }, "wa: pairing reconnect failed");
       lastError = pairingErrorMessage(e);
@@ -241,14 +265,28 @@ function attachHandlers(c: any): void {
 
   c.on("code", (code: string) => {
     setPairingCode(code);
+    void lockPairingAfterCode(c);
+  });
+
+  c.on("change_state", (state: string) => {
+    logger.info({ state }, "wa: state");
+    if (pairingIntent && /PAIRING|OPENING|CONNECTED|TIMEOUT/i.test(String(state))) {
+      lastError = `Telefon bağlanıyor (${state}) — bekleyin, tekrar basmayın…`;
+    }
   });
 
   c.on("authenticated", () => {
     logger.info("wa: authenticated");
+    // Auth oldu — artık yeni pairing kodu isteme / session silme
+    void lockPairingAfterCode(c);
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    pairingReconnectScheduled = false;
     lastError = pairingIntent
-      ? "Telefon doğrulandı — oturum açılıyor, bekleyin…"
+      ? "Telefon doğrulandı — oturum açılıyor, 1–2 dk bekleyin…"
       : null;
-    // Hazır olana kadar kodu tut (UI "gitti" sanmasın); ready'de temizlenir
   });
 
   c.on("ready", () => {
@@ -263,6 +301,10 @@ function attachHandlers(c: any): void {
     lastError = null;
     reconnectAttempts = 0;
     manualStop = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
     startWhatsAppWatchdog();
     void import("../workers/scraper").then((m) => {
       if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
@@ -272,36 +314,50 @@ function attachHandlers(c: any): void {
   c.on("disconnected", (reason: string) => {
     const reasonStr = String(reason ?? "unknown");
     logger.warn(`wa: disconnected - ${reasonStr}`);
+    const wasReady = isReady;
     isReady = false;
     stopWhatsAppWatchdog();
     const wasPairing = pairingIntent && !!pendingPhone;
     const savedPhone = pendingPhone;
-    const savedCode = pairingCode;
-    const old = client;
-    client = null;
     qrDataUrl = null;
 
-    // Pairing sırasında kodu silme — kullanıcı telefonuna giriyor olabilir
-    if (wasPairing && savedPhone) {
+    // KRİTİK: Kod girilirken client.destroy = telefonda «cihaz bağlanılamadı»
+    if (wasPairing && savedPhone && isPairingCodeFresh()) {
       pairingIntent = true;
       pendingPhone = savedPhone;
-      if (savedCode) {
-        pairingCode = savedCode;
-        lastError = `Kod hâlâ geçerli olabilir — telefona girin. Yeniden bağlanılıyor… (${reasonStr})`;
-      } else {
-        lastError = `Bağlantı koptu, onay kodu yenileniyor… (${reasonStr})`;
-      }
+      lastError = "Doğrulama sürüyor — kodu girdiyseniz bekleyin. Tekrar basmayın / sayfayı yenilemeyin…";
+      logger.info({ reason: reasonStr }, "wa: pairing disconnect — client YOK EDİLMEDİ");
+      const kept = client;
+      setTimeout(() => {
+        if (isReady || manualStop) return;
+        if (!pairingIntent || !pendingPhone) return;
+        const browser = kept?.pupBrowser as { isConnected?: () => boolean } | undefined;
+        const pageAlive = !!kept?.pupPage;
+        const browserAlive = !browser || browser.isConnected?.() !== false;
+        if (client === kept && pageAlive && browserAlive) {
+          lastError = "Hâlâ bekleniyor — WhatsApp’ta kodu girin veya «Bağlandı» olana kadar bekleyin…";
+          return;
+        }
+        logger.warn({ reason: reasonStr }, "wa: pairing client gerçekten öldü");
+        clearPairingCode(`pairing_dead:${reasonStr}`);
+        try { if (client === kept) client = null; void kept?.destroy?.(); } catch { /* ignore */ }
+        scheduleWhatsAppPairingReconnect(savedPhone, `dead:${reasonStr}`);
+      }, 30_000);
+      return;
+    }
+
+    // Auth sonrası ready öncesi kısa kopma — session ile toparlanabilir
+    if (wasPairing && savedPhone && !wasReady && !isPairingCodeFresh()) {
+      const old = client;
+      client = null;
+      lastError = `Bağlantı koptu (${reasonStr}) — onay kodu yenilenecek…`;
       try { void old?.destroy?.(); } catch { /* ignore */ }
-      // LOGOUT / CONFLICT ise pairing ile yeniden başlat; kodu yeni istekte yenile
-      const hard = /LOGOUT|CONFLICT|UNPAIRED|AUTH/i.test(reasonStr);
-      if (hard) {
-        clearPairingCode(`disconnect:${reasonStr}`);
-        pairingCodeRequested = false;
-      }
       scheduleWhatsAppPairingReconnect(savedPhone, reasonStr);
       return;
     }
 
+    const old = client;
+    client = null;
     clearPairingCode(`disconnect:${reasonStr}`);
     lastError = `Bağlantı koptu: ${reasonStr}`;
     try { void old?.destroy?.(); } catch { /* ignore */ }
@@ -314,13 +370,16 @@ function attachHandlers(c: any): void {
     stopWhatsAppWatchdog();
     const wasPairing = pairingIntent && !!pendingPhone;
     const savedPhone = pendingPhone;
+    const old = client;
     client = null;
     qrDataUrl = null;
     clearPairingCode("auth_failure");
     pairingCodeRequested = false;
-    lastError = `Kimlik doğrulama hatası: ${msg}`;
-    if (wasPairing && savedPhone && !manualStop) {
-      scheduleWhatsAppPairingReconnect(savedPhone, `auth_failure:${msg}`);
+    lastError = `Kimlik doğrulama hatası: ${msg}. «QR ile Bağlan» deneyin.`;
+    try { void old?.destroy?.(); } catch { /* ignore */ }
+    // Auth fail'de hemen tekrar pairing = rate-limit; kullanıcıya bırak
+    if (wasPairing && savedPhone) {
+      lastError = `Doğrulama başarısız (${msg}). 2 dk bekleyip tekrar deneyin veya QR kullanın.`;
       return;
     }
     if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
@@ -486,16 +545,21 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
         ],
       },
       restartOnAuthFail: false,
-      authTimeoutMs: 120_000,
+      authTimeoutMs: 180_000,
+      deviceName: "Ozel Guvenlik",
+      browserName: "Chrome",
+      // Başka sekme çakışmasında oturumu al
+      takeoverOnConflict: true,
+      takeoverTimeoutMs: 5_000,
     };
 
-    // Resmi yol: SADECE pairWithPhoneNumber. Manuel requestPairingCode = çift istek,
-    // Evaluation failed / rate-limit → UI'da «Onay kodu isteği başarısız».
+    // Resmi yol: SADECE pairWithPhoneNumber.
+    // intervalMs yüksek: kod yenilenince telefonda «cihaz bağlanılamadı» olur.
     if (pairingMode && pendingPhone) {
       clientOpts.pairWithPhoneNumber = {
         phoneNumber: pendingPhone,
         showNotification: true,
-        intervalMs: 180_000,
+        intervalMs: 600_000,
       };
       pairingCodeRequested = true;
     }

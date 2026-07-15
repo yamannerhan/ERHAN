@@ -3602,8 +3602,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                     ? `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`
                     : pairingCode}
                 </div>
-                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra bu ekranda «Bağlı» olana kadar bekleyin. Kod kaybolsa bile tekrar basmayın.</p>
-                <p className="text-[10px] text-slate-500 text-center">Kod ~1–2 dk geçerli. Gelmezse birkaç saniye bekleyip bir kez daha «Onay Kodu ile Bağlan»a basın.</p>
+                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu telefona girdikten sonra 1–2 dk bekleyin. «Cihaz bağlanılamadı» görürseniz tekrar basmayın — yeni kod alın.</p>
+                <p className="text-[10px] text-slate-500 text-center">Bu sayfayı yenilemeyin. Olmazsa 2 dk sonra bir kez daha deneyin veya QR kullanın.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
