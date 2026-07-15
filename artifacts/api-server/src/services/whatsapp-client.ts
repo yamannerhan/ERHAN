@@ -510,47 +510,23 @@ export async function stopWhatsAppClient(): Promise<void> {
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
   const byId = new Map<string, WhatsAppChannel>();
-  const addChannel = (raw: any, fallbackKind?: "group" | "channel") => {
-    const id = String(raw?.id?._serialized ?? raw?.id ?? raw?.serialized ?? "");
-    if (!id) return;
-    const isChannel = fallbackKind === "channel" || !!(raw?.isChannel || raw?.isNewsletter || id.endsWith("@newsletter"));
-    const isGroup = fallbackKind === "group" || !!(raw?.isGroup || id.endsWith("@g.us"));
-    if (!isChannel && !isGroup) return;
-    byId.set(id, {
-      id,
-      name: String(raw?.name || raw?.formattedTitle || raw?.title || id),
-      participants: Number(raw?.participants?.length ?? raw?.groupMetadata?.participants?.length ?? raw?.subscribersCount ?? 0) || 0,
-      kind: isChannel ? "channel" : "group",
-    });
-  };
-
-  const pullChats = async () => {
+  try {
     const chats = await client.getChats();
     for (const c of chats as any[]) {
-      addChannel(c);
-    }
-  };
-  try {
-    await pullChats();
-  } catch (e) {
-    logger.warn({ err: e }, "wa: getChats failed — retry");
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    try {
-      await pullChats();
-    } catch (retryError) {
-      logger.warn({ err: retryError }, "wa: getChats retry failed");
-    }
-  }
-
-  // Bazı wwebjs sürümlerinde gruplar, getChats sonucundan ayrı tutulur.
-  // Varsa özel grup API'sini de doğrudan birleştir.
-  try {
-    if (typeof client.getGroups === "function") {
-      const groups = await client.getGroups();
-      for (const group of groups as any[]) addChannel(group, "group");
+      const id = String(c?.id?._serialized ?? "");
+      if (!id) continue;
+      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
+      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
+      if (!isChannel && !isGroup) continue;
+      byId.set(id, {
+        id,
+        name: String(c.name || c.formattedTitle || id),
+        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
+        kind: isChannel ? "channel" : "group",
+      });
     }
   } catch (e) {
-    logger.warn({ err: e }, "wa: getGroups failed");
+    logger.warn({ err: e }, "wa: getChats failed");
   }
 
   // Abone olunan kanallar — getChats bazen eksik bırakır
@@ -558,44 +534,18 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     if (typeof client.getChannels === "function") {
       const channels = await client.getChannels();
       for (const c of channels as any[]) {
-        addChannel(c, "channel");
+        const id = String(c?.id?._serialized ?? "");
+        if (!id) continue;
+        byId.set(id, {
+          id,
+          name: String(c.name || c.formattedTitle || id),
+          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
+          kind: "channel",
+        });
       }
     }
   } catch (e) {
     logger.warn({ err: e }, "wa: getChannels failed");
-  }
-
-  // whatsapp-web.js getChats(), özellikle yeni katılınan grup ve kanalları
-  // önbelleğe almadan önce eksik döndürebilir. WA Store doğrudan okununca
-  // ekranda görünen ama istemcinin kaçırdığı kaynaklar da listelenir.
-  try {
-    const page = (client as any).pupPage;
-    const storeChannels = page ? await page.evaluate(async () => {
-      const w = window as any;
-      const collect = (collection: any) => {
-        if (!collection) return [];
-        if (typeof collection.getModelsArray === "function") return collection.getModelsArray();
-        if (Array.isArray(collection.models)) return collection.models;
-        if (Array.isArray(collection)) return collection;
-        return [];
-      };
-      const chats = collect(w.Store?.Chat);
-      const newsletters = collect(w.Store?.Newsletter);
-      const groupMetadata = collect(w.Store?.GroupMetadata);
-      const injectedChats = typeof w.WWebJS?.getChats === "function"
-        ? await Promise.resolve(w.WWebJS.getChats()).catch(() => [])
-        : [];
-      return [...chats, ...newsletters, ...groupMetadata, ...injectedChats].map((item: any) => ({
-        id: item?.id?._serialized ?? item?.id ?? "",
-        name: item?.name ?? item?.formattedTitle ?? item?.title ?? "",
-        isGroup: Boolean(item?.isGroup || item?.participants || item?.groupMetadata || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@g.us")),
-        isChannel: Boolean(item?.isChannel || item?.isNewsletter || String(item?.id?._serialized ?? item?.id ?? "").endsWith("@newsletter")),
-        participants: item?.participants?.length ?? item?.groupMetadata?.participants?.length ?? item?.subscribersCount ?? 0,
-      }));
-    }) : [];
-    for (const channel of storeChannels) addChannel(channel);
-  } catch (e) {
-    logger.warn({ err: e }, "wa: Store group/channel discovery failed");
   }
 
   return [...byId.values()].sort((a, b) => {
