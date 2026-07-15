@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, chatBannersTable } from "@workspace/db";
 import { and, asc, eq, isNull, or, sql, gte, lte } from "drizzle-orm";
 import { authMiddleware, requireAdmin, optionalAuthMiddleware } from "../middlewares/auth";
+import { safePublicUrl } from "../lib/safe-url";
 
 const router = Router();
 
@@ -136,6 +137,12 @@ router.post("/admin/chat-banners", authMiddleware, requireAdmin, async (req, res
       res.status(400).json({ error: "Başlık gerekli" });
       return;
     }
+    const requestedLink = body.linkUrl ? String(body.linkUrl).trim() : "";
+    const linkUrl = safePublicUrl(requestedLink);
+    if (requestedLink && !linkUrl) {
+      res.status(400).json({ error: "Link yalnız site içi / yol veya HTTPS olabilir" });
+      return;
+    }
     const [row] = await db.insert(chatBannersTable).values({
       title,
       description: String(body.description ?? "").trim(),
@@ -143,7 +150,7 @@ router.post("/admin/chat-banners", authMiddleware, requireAdmin, async (req, res
       iconColor: String(body.iconColor ?? "#F5C518"),
       titleColor: String(body.titleColor ?? "#F5C518"),
       linkType: body.linkType ? String(body.linkType) : null,
-      linkUrl: body.linkUrl ? String(body.linkUrl).trim() : null,
+      linkUrl,
       sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
       startsAt: body.startsAt ? new Date(body.startsAt) : null,
       endsAt: body.endsAt ? new Date(body.endsAt) : null,
@@ -177,7 +184,15 @@ router.put("/admin/chat-banners/:id", authMiddleware, requireAdmin, async (req, 
     if (body.iconColor != null) patch.iconColor = String(body.iconColor);
     if (body.titleColor != null) patch.titleColor = String(body.titleColor);
     if (body.linkType !== undefined) patch.linkType = body.linkType ? String(body.linkType) : null;
-    if (body.linkUrl !== undefined) patch.linkUrl = body.linkUrl ? String(body.linkUrl).trim() : null;
+    if (body.linkUrl !== undefined) {
+      const requestedLink = body.linkUrl ? String(body.linkUrl).trim() : "";
+      const linkUrl = safePublicUrl(requestedLink);
+      if (requestedLink && !linkUrl) {
+        res.status(400).json({ error: "Link yalnız site içi / yol veya HTTPS olabilir" });
+        return;
+      }
+      patch.linkUrl = linkUrl;
+    }
     if (body.sortOrder != null) patch.sortOrder = Number(body.sortOrder);
     if (body.startsAt !== undefined) patch.startsAt = body.startsAt ? new Date(body.startsAt) : null;
     if (body.endsAt !== undefined) patch.endsAt = body.endsAt ? new Date(body.endsAt) : null;

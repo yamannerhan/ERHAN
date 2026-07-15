@@ -7,9 +7,13 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeEnv, requireDatabaseUrl } from "./lib/env.mjs";
+import { normalizeEnv, requireDatabaseUrl, requireProductionSecurity } from "./lib/env.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const localEnvPath = path.join(rootDir, ".env");
+if (fs.existsSync(localEnvPath) && typeof process.loadEnvFile === "function") {
+  process.loadEnvFile(localEnvPath);
+}
 
 function log(msg) {
   console.log(`[bootstrap] ${msg}`);
@@ -24,6 +28,7 @@ normalizeEnv((msg) => log(msg.replace("[env] ", "")));
 
 try {
   requireDatabaseUrl();
+  requireProductionSecurity();
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e));
 }

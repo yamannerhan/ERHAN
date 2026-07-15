@@ -69,51 +69,49 @@ export interface SeoCityContent {
 
 function makeCitySeo(name: string): SeoCityContent {
   const slug = toSlug(name);
-  const loc = name.includes("Yakası") ? name : `${name} bölgesinde`;
-  const isDistrict = SEO_DISTRICTS.includes(name);
-  const prefix = isDistrict ? `${name} Özel Güvenlik` : `${name} Özel Güvenlik`;
+  const loc = name.includes("Yakası") ? name : name;
   return {
-    title: `${prefix} İş İlanları | Güncel Güvenlik Personeli Alımları`,
-    description: `${loc} silahlı, silahsız, AVM, fabrika, site, hastane ve plaza güvenliği bay bayan özel güvenlik görevlisi iş ilanları. Güncel maaşlı personel alımları ve ücretsiz başvuru.`,
-    keywords: `${slug} ozel guvenlik is ilanlari, ${slug} guvenlik gorevlisi alimi, ${slug} bay bayan guvenlik, ${slug} silahli guvenlik, ${slug} silahsiz guvenlik`,
+    title: `${name} Özel Güvenlik İş İlanları | Güncel Güvenlik Personeli Alımları`,
+    description: `${loc} olarak doğrulanmış güncel özel güvenlik ilanlarını, çalışma koşullarını ve başvuru bilgilerini inceleyin.`,
+    keywords: `${slug} ozel guvenlik is ilanlari, ${slug} guvenlik gorevlisi`,
   };
 }
 
 const OVERRIDES: Record<string, SeoCityContent> = {
   "İstanbul": {
     title: "İstanbul Özel Güvenlik İş İlanları | Güncel Güvenlik Personeli Alımları",
-    description: "İstanbul Anadolu ve Avrupa Yakası'nda silahlı, silahsız, AVM, fabrika, site, plaza, hastane ve otel güvenliği bay bayan özel güvenlik görevlisi iş ilanları. Güncel maaşlar ve anında başvuru.",
-    keywords: "istanbul ozel guvenlik is ilanlari, istanbul anadolu yakasi guvenlik, istanbul avrupa yakasi guvenlik, istanbul silahli guvenlik, istanbul silahsiz guvenlik, istanbul avm guvenlik, istanbul fabrika guvenlik, istanbul site guvenlik, istanbul hastane guvenlik, istanbul ozel guvenlik maaslari"
+    description: "İstanbul olarak doğrulanmış güncel özel güvenlik ilanlarını, çalışma koşullarını ve doğrudan başvuru bilgilerini inceleyin.",
+    keywords: "istanbul ozel guvenlik is ilanlari, istanbul guvenlik gorevlisi"
   },
   "Ankara": {
     title: "Ankara Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı",
-    description: "Ankara'da kamu kurumları, AVM, fabrika, site ve plaza güvenliği için bay bayan silahlı & silahsız özel güvenlik görevlisi alımları. Güncel ücretler ve tüm pozisyonlar.",
-    keywords: "ankara ozel guvenlik is ilanlari, ankara guvenlik gorevlisi alimi, ankara silahli guvenlik, ankara silahsiz guvenlik, ankara avm guvenlik, ankara fabrika guvenlik"
+    description: "Ankara olarak doğrulanmış güncel güvenlik görevlisi ilanlarını ve başvuru koşullarını inceleyin.",
+    keywords: "ankara ozel guvenlik is ilanlari, ankara guvenlik gorevlisi"
   },
   "İzmir": {
     title: "İzmir Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı",
-    description: "İzmir'de AVM, fabrika, liman, site ve turizm tesisleri için bay bayan silahlı & silahsız özel güvenlik görevlisi iş ilanları. Yüksek maaşlı pozisyonlar.",
-    keywords: "izmir ozel guvenlik is ilanlari, izmir guvenlik gorevlisi, izmir silahli guvenlik, izmir silahsiz guvenlik, izmir avm guvenlik, izmir fabrika guvenlik, izmir turizm guvenlik"
+    description: "İzmir olarak doğrulanmış güncel güvenlik görevlisi ilanlarını ve başvuru koşullarını inceleyin.",
+    keywords: "izmir ozel guvenlik is ilanlari, izmir guvenlik gorevlisi"
   },
   "Kocaeli": {
     title: "Kocaeli Özel Güvenlik İş İlanları | Gebze, İzmit, GOSB, TOSB",
-    description: "Kocaeli Gebze, İzmit, Darıca, Çayırova, Dilovası, GOSB ve TOSB'de fabrika, OSB ve lojistik güvenliği için bay bayan özel güvenlik görevlisi alımları.",
-    keywords: "kocaeli ozel guvenlik is ilanlari, gebze guvenlik is ilanlari, izmit guvenlik is ilanlari, gosb guvenlik ilanlari, tosb guvenlik ilanlari, kocaeli silahli guvenlik, kocaeli silahsiz guvenlik"
+    description: "Kocaeli, Gebze, İzmit ve çevresinde konumu doğrulanmış güncel güvenlik ilanlarını inceleyin.",
+    keywords: "kocaeli ozel guvenlik is ilanlari, kocaeli guvenlik gorevlisi"
   },
   "Gebze": {
     title: "Gebze Özel Güvenlik İş İlanları | GOSB, TOSB, Fabrika Güvenliği",
-    description: "Gebze GOSB, TOSB, Gebkim, İMES ve fabrika bölgelerinde bay bayan silahlı & silahsız özel güvenlik görevlisi alımları. Güncel maaşlı ilanlar.",
-    keywords: "gebze ozel guvenlik is ilanlari, gosb guvenlik ilanlari, tosb guvenlik ilanlari, gebze fabrika guvenlik, gebze silahli guvenlik, gebze silahsiz guvenlik"
+    description: "Gebze, GOSB ve TOSB konumlu güncel güvenlik görevlisi ilanlarını ve başvuru bilgilerini inceleyin.",
+    keywords: "gebze ozel guvenlik is ilanlari, gebze guvenlik gorevlisi"
   },
   "İstanbul Anadolu Yakası": {
     title: "İstanbul Anadolu Yakası Özel Güvenlik İş İlanları",
-    description: "Kadıköy, Ataşehir, Ümraniye, Üsküdar, Maltepe, Kartal, Pendik ve Tuzla'da bay bayan özel güvenlik görevlisi alımları. AVM, fabrika ve site güvenliği.",
-    keywords: "istanbul anadolu yakasi ozel guvenlik, kadikoy guvenlik is ilanlari, atasehir guvenlik, umraniye guvenlik, uskudar guvenlik, maltepe guvenlik, kartal guvenlik"
+    description: "İstanbul Anadolu Yakası olarak doğrulanmış güncel güvenlik ilanlarını ve başvuru bilgilerini inceleyin.",
+    keywords: "istanbul anadolu yakasi ozel guvenlik is ilanlari"
   },
   "İstanbul Avrupa Yakası": {
     title: "İstanbul Avrupa Yakası Özel Güvenlik İş İlanları",
-    description: "Şişli, Beşiktaş, Mecidiyeköy, Bakırköy, Beylikdüzü, Esenyurt ve Başakşehir'de bay bayan özel güvenlik görevlisi alımları. AVM, hastane ve plaza güvenliği.",
-    keywords: "istanbul avrupa yakasi ozel guvenlik, sisli guvenlik is ilanlari, besiktas guvenlik, mecidiyekoy guvenlik, bakirkoy guvenlik, beylikduzu guvenlik, esenyurt guvenlik"
+    description: "İstanbul Avrupa Yakası olarak doğrulanmış güncel güvenlik ilanlarını ve başvuru bilgilerini inceleyin.",
+    keywords: "istanbul avrupa yakasi ozel guvenlik is ilanlari"
   },
 };
 

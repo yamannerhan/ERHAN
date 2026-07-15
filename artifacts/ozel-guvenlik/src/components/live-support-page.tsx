@@ -138,6 +138,7 @@ export function LiveSupportPageContent() {
     if (!user || isStaff) return;
     const s: Socket = io(window.location.origin, {
       path: "/ws",
+      auth: { token: localStorage.getItem("auth_token") ?? "" },
       transports: ["polling", "websocket"],
       secure: window.location.protocol === "https:",
       withCredentials: true,

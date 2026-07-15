@@ -13,13 +13,12 @@ export function emitRealtime(event: string, data: unknown): void {
   realtimeServer?.emit(event, data);
 }
 
-/** Belirli kullanıcı odasına + genel yayın (eski istemciler için). */
+/** Yalnız belirli kullanıcı odasına yayın. */
 export function emitRealtimeToUser(userId: number, event: string, data: unknown): void {
   if (!realtimeServer) return;
   if (typeof realtimeServer.to === "function") {
     realtimeServer.to(`user:${userId}`).emit(event, data);
   }
-  realtimeServer.emit(event, data);
 }
 
 /** Belirli odaya yayın (ör. support:ticket:12). */
@@ -28,5 +27,4 @@ export function emitRealtimeToRoom(room: string, event: string, data: unknown): 
   if (typeof realtimeServer.to === "function") {
     realtimeServer.to(room).emit(event, data);
   }
-  realtimeServer.emit(event, data);
 }

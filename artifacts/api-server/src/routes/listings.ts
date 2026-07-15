@@ -39,7 +39,8 @@ import {
   resolveIstanbulSideFromQuery,
   sideLiteralPatterns,
 } from "../lib/istanbul-side";
-import { emitRealtime, emitRealtimeToUser } from "../lib/realtime";
+import { emitRealtimeToRoom, emitRealtimeToUser } from "../lib/realtime";
+import { uploadRateLimit } from "../middlewares/security";
 
 // ── Listing image upload setup ──────────────────────────────────────────────
 const LISTING_IMAGES_DIR = path.join(process.cwd(), "uploads", "listing-images");
@@ -47,7 +48,7 @@ fs.mkdirSync(LISTING_IMAGES_DIR, { recursive: true });
 
 const listingImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/bmp"];
     cb(null, allowed.includes(file.mimetype));
@@ -179,6 +180,15 @@ function normalizedColumn(column: unknown) {
   return sql`lower(translate(${column}, 'ÇĞİIÖŞÜçğıiöşü', 'CGIIOSUcgiiiosu'))`;
 }
 
+function nonGenericLocationCondition() {
+  const normalized = sql`trim(regexp_replace(${normalizedColumn(listingsTable.city)}, '[^a-z0-9]+', ' ', 'g'))`;
+  return and(
+    sql`${normalized} NOT IN ('turkiye', 'turkiye geneli', 'tum turkiye', 'genel', 'ulke geneli')`,
+    sql`${normalized} NOT LIKE 'turkiye geneli %'`,
+    sql`${normalized} NOT LIKE 'tum turkiye %'`,
+  );
+}
+
 function locationTermCondition(pattern: string) {
   const variants = locationSearchVariants(pattern);
   // Kısa terimler (des, imes…) açıklamada "adres" gibi kelimelere yanlış denk gelmesin — sadece city alanında ara
@@ -261,8 +271,8 @@ async function cityFilterCondition(city: string) {
         ];
       });
 
-    if (otherProvinceClauses.length === 0) return positive;
-    return and(positive, sql`NOT (${or(...otherProvinceClauses)})`);
+    if (otherProvinceClauses.length === 0) return and(positive, nonGenericLocationCondition());
+    return and(positive, nonGenericLocationCondition(), sql`NOT (${or(...otherProvinceClauses)})`);
   }
 
   const province = extractProvinceName(city) ?? city;
@@ -333,8 +343,8 @@ async function cityFilterCondition(city: string) {
       ];
     });
 
-  if (otherProvinceClauses.length === 0) return positive;
-  return and(positive, sql`NOT (${or(...otherProvinceClauses)})`);
+  if (otherProvinceClauses.length === 0) return and(positive, nonGenericLocationCondition());
+  return and(positive, nonGenericLocationCondition(), sql`NOT (${or(...otherProvinceClauses)})`);
 }
 
 function pickAutoImage(title: string, description: string | null): string {
@@ -757,9 +767,9 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
 });
 
 // ── Listing image upload ────────────────────────────────────────────────────
-router.post("/listings/image-upload", authMiddleware, listingImageUpload.single("image"), async (req, res): Promise<void> => {
+router.post("/listings/image-upload", authMiddleware, uploadRateLimit, listingImageUpload.single("image"), async (req, res): Promise<void> => {
   if (!req.file) { res.status(400).json({ error: "Resim dosyası gerekli (jpg, png, webp)" }); return; }
-  const logo = await sharp(req.file.buffer)
+  const logo = await sharp(req.file.buffer, { limitInputPixels: 25_000_000 })
     .resize(512, 512, {
       fit: "cover",
       position: "centre",
@@ -1287,8 +1297,8 @@ router.post("/listings/:id/report", authMiddleware, async (req, res): Promise<vo
     createdAt: result.message.createdAt.toISOString(),
     status: result.ticket.status,
   };
-  emitRealtime("support:message", supportPayload);
-  emitRealtime("support:ticket-update", {
+  emitRealtimeToRoom(`support:ticket:${result.ticket.id}`, "support:message", supportPayload);
+  emitRealtimeToRoom("support:staff", "support:ticket-update", {
     ticketId: result.ticket.id,
     status: result.ticket.status,
     lastMessageAt: now.toISOString(),

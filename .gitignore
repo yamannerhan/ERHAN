@@ -40,8 +40,22 @@ testem.log
 Thumbs.db
 
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*.sql.gz
+*.dump
+*.backup
+backups/
+sessions/
+**/sessions/
+*.session
 
 .local/
 

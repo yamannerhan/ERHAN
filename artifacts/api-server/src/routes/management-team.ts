@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, managementTeamTable } from "@workspace/db";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { authMiddleware, requireAdmin, optionalAuthMiddleware } from "../middlewares/auth";
+import { safePublicUrl } from "../lib/safe-url";
 
 const router = Router();
 
@@ -140,9 +141,11 @@ router.post("/admin/management-team", authMiddleware, requireAdmin, async (req, 
       res.status(400).json({ error: "Görünen ad gerekli" });
       return;
     }
-    const avatarPath = typeof body.avatarPath === "string" ? body.avatarPath : null;
-    if (avatarPath && avatarPath.startsWith("data:") && avatarPath.length > 2_800_000) {
-      res.status(400).json({ error: "Fotoğraf çok büyük (max ~2MB)" });
+    const rawAvatarPath = typeof body.avatarPath === "string" ? body.avatarPath : null;
+    const avatarPath = safePublicUrl(rawAvatarPath, { allowImageData: true });
+    const profileUrl = safePublicUrl(body.profileUrl);
+    if ((rawAvatarPath && !avatarPath) || (body.profileUrl && !profileUrl)) {
+      res.status(400).json({ error: "Fotoğraf/link yalnız site içi yol, güvenli image data veya HTTPS olabilir" });
       return;
     }
 
@@ -154,7 +157,7 @@ router.post("/admin/management-team", authMiddleware, requireAdmin, async (req, 
       avatarPath,
       nameColor: String(body.nameColor ?? "#F5C518"),
       badgeColor: String(body.badgeColor ?? "#94A3B8"),
-      profileUrl: body.profileUrl ? String(body.profileUrl).trim() : null,
+      profileUrl,
       isOnlineVisible: body.isOnlineVisible !== false,
       isVisible: body.isVisible !== false,
       isActive: body.isActive !== false,
@@ -186,16 +189,25 @@ router.put("/admin/management-team/:id", authMiddleware, requireAdmin, async (re
     if (body.roleName != null) patch.roleName = String(body.roleName).trim();
     if (body.title !== undefined) patch.title = body.title ? String(body.title).trim() : null;
     if (body.avatarPath !== undefined) {
-      const avatarPath = body.avatarPath ? String(body.avatarPath) : null;
-      if (avatarPath && avatarPath.startsWith("data:") && avatarPath.length > 2_800_000) {
-        res.status(400).json({ error: "Fotoğraf çok büyük (max ~2MB)" });
+      const rawAvatarPath = body.avatarPath ? String(body.avatarPath) : null;
+      const avatarPath = safePublicUrl(rawAvatarPath, { allowImageData: true });
+      if (rawAvatarPath && !avatarPath) {
+        res.status(400).json({ error: "Geçersiz fotoğraf URL'si" });
         return;
       }
       patch.avatarPath = avatarPath;
     }
     if (body.nameColor != null) patch.nameColor = String(body.nameColor);
     if (body.badgeColor != null) patch.badgeColor = String(body.badgeColor);
-    if (body.profileUrl !== undefined) patch.profileUrl = body.profileUrl ? String(body.profileUrl).trim() : null;
+    if (body.profileUrl !== undefined) {
+      const rawProfileUrl = body.profileUrl ? String(body.profileUrl).trim() : null;
+      const profileUrl = safePublicUrl(rawProfileUrl);
+      if (rawProfileUrl && !profileUrl) {
+        res.status(400).json({ error: "Profil linki yalnız site içi yol veya HTTPS olabilir" });
+        return;
+      }
+      patch.profileUrl = profileUrl;
+    }
     if (body.isOnlineVisible != null) patch.isOnlineVisible = !!body.isOnlineVisible;
     if (body.isVisible != null) patch.isVisible = !!body.isVisible;
     if (body.isActive != null) patch.isActive = !!body.isActive;

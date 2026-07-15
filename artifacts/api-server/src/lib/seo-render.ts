@@ -7,6 +7,14 @@
 import { db, listingsTable } from "@workspace/db";
 import { and, desc, eq, ilike } from "drizzle-orm";
 import { indexableListingCondition } from "./seo-listing-policy";
+import {
+  ALL_LOCATIONS,
+  SEO_DISTRICTS,
+  listingMatchesSeoLocation,
+  slugToCity,
+  toSlug,
+} from "./seo-location";
+export { ALL_LOCATIONS, SEO_DISTRICTS, SEO_PROVINCES, slugToCity, toSlug } from "./seo-location";
 
 export const SEO_BASE_URL = "https://ozelguvenlik.online";
 export const SEO_DISPLAY_URL = "ozelguvenlik.online";
@@ -75,41 +83,6 @@ function toIsoDate(value: unknown): string | undefined {
   if (!value) return undefined;
   const date = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
-export const SEO_PROVINCES = [
-  "Adana","Adıyaman","Afyonkarahisar","Ağrı","Amasya","Ankara","Antalya","Artvin","Aydın",
-  "Balıkesir","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum",
-  "Denizli","Diyarbakır","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun",
-  "Gümüşhane","Hakkari","Hatay","Isparta","Mersin","İstanbul","İzmir","Kars","Kastamonu","Kayseri",
-  "Kırklareli","Kırşehir","Kocaeli","Konya","Kütahya","Malatya","Manisa","Kahramanmaraş","Mardin",
-  "Muğla","Muş","Nevşehir","Niğde","Ordu","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas",
-  "Tekirdağ","Tokat","Trabzon","Tunceli","Şanlıurfa","Uşak","Van","Yozgat","Zonguldak","Aksaray",
-  "Bayburt","Karaman","Kırıkkale","Batman","Şırnak","Bartın","Ardahan","Iğdır","Yalova",
-  "Karabük","Kilis","Osmaniye","Düzce",
-];
-
-export const SEO_DISTRICTS = [
-  "Gebze","Darıca","Çayırova","Dilovası","İzmit","GOSB","TOSB",
-  "İstanbul Anadolu Yakası","İstanbul Avrupa Yakası",
-];
-
-export const ALL_LOCATIONS = [...SEO_PROVINCES, ...SEO_DISTRICTS];
-
-export function toSlug(txt: string): string {
-  return txt
-    .toLocaleLowerCase("tr-TR")
-    .replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s")
-    .replace(/ı/g, "i").replace(/ö/g, "o").replace(/ç/g, "c")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-const slugMap = new Map<string, string>();
-for (const c of ALL_LOCATIONS) slugMap.set(toSlug(c), c);
-
-export function slugToCity(slug: string): string | null {
-  return slugMap.get(slug) ?? null;
 }
 
 function escapeHtml(s: string): string {
@@ -199,21 +172,10 @@ function buildHomeMeta(): SeoMeta {
 }
 
 function buildCityLongContentServer(city: string): string {
-  const slug = toSlug(city);
-  const hash = slug.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const sectors = ["AVM güvenliği", "fabrika güvenliği", "site güvenliği", "plaza güvenliği", "hastane güvenliği"];
-  const s = sectors[hash % sectors.length]!;
   return `
-<h2>${escapeHtml(city)} Özel Güvenlik Sektörü Hakkında</h2>
-<p>${escapeHtml(city)} bölgesinde özel güvenlik sektörü her yıl büyümektedir. Silahlı ve silahsız özel güvenlik görevlisi, güvenlik amiri ve vardiya sorumlusu pozisyonlarında bay ve bayan personel alımları düzenli olarak yapılmaktadır. ${escapeHtml(city)} özel güvenlik iş ilanları arasında ${escapeHtml(s)} öne çıkan alanlardandır.</p>
-<h2>${escapeHtml(city)} Silahlı ve Silahsız Güvenlik İş İlanları</h2>
-<p>${escapeHtml(city)} silahlı güvenlik iş ilanları kimlikli silahlı personel gerektirir. Silahsız güvenlik iş ilanları AVM, site, fabrika ve plaza güvenliğinde daha yaygındır. Her iki pozisyonda da geçerli özel güvenlik kimlik kartı ve temiz sabıka kaydı şarttır.</p>
-<h2>${escapeHtml(city)} Bay Bayan Personel Alımları</h2>
-<p>${escapeHtml(city)} bölgesinde bay ve bayan güvenlik görevlisi alımları ayrı veya karma pozisyonlar halinde yayınlanır. Kadın güvenlik personeline AVM ve hastane güvenliğinde yoğun talep vardır. Erkek adaylar için askerlik durumu önemlidir.</p>
-<h2>${escapeHtml(city)} Özel Güvenlik Maaşları</h2>
-<p>${escapeHtml(city)} özel güvenlik maaşları pozisyon tipine göre değişir. Silahlı pozisyonlar genellikle daha yüksek ücret sunar. Yemek, servis ve SGK imkânlarını ilan metninde kontrol edin.</p>
-<h2>${escapeHtml(city)} İş Arama İpuçları</h2>
-<p>${escapeHtml(city)} özel güvenlik iş ilanlarını günlük takip edin. Ücretsiz CV oluşturma aracı ile başvurularınızı güçlendirin. Birden fazla ilana başvurarak süreci hızlandırın.</p>`;
+<h2>İlanları değerlendirirken</h2>
+<p>Pozisyonun kimlik kartı, vardiya, ücret, yol ve yemek koşullarını ilan detayından kontrol edin. Başvuru yöntemi ve iletişim bilgileri yalnız ilanın kendi sayfasında yer alır.</p>
+<p>${escapeHtml(city)} dışındaki fırsatlar için <a href="${SEO_BASE_URL}/ilanlar">tüm aktif ilanlara</a> dönebilirsiniz.</p>`;
 }
 
 /* ───────────── CITY ───────────── */
@@ -221,28 +183,28 @@ function makeCitySeo(city: string): { title: string; description: string } {
   const overrides: Record<string, { title: string; description: string }> = {
     "İstanbul": {
       title: "İstanbul Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı 2026",
-      description: "İstanbul Anadolu ve Avrupa Yakası'nda silahlı, silahsız, AVM, fabrika, site, plaza, hastane ve otel güvenliği bay bayan özel güvenlik görevlisi iş ilanları.",
+      description: "İstanbul olarak doğrulanmış güncel özel güvenlik ilanlarını, çalışma koşullarını ve doğrudan başvuru bilgilerini inceleyin.",
     },
     "Ankara": {
       title: "Ankara Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı",
-      description: "Ankara'da kamu kurumları, AVM, fabrika, site ve plaza güvenliği için bay bayan silahlı & silahsız özel güvenlik görevlisi alımları.",
+      description: "Ankara olarak doğrulanmış güncel güvenlik görevlisi ilanlarını ve başvuru koşullarını inceleyin.",
     },
     "İzmir": {
       title: "İzmir Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı",
-      description: "İzmir'de AVM, fabrika, liman, site ve turizm tesisleri için bay bayan silahlı & silahsız özel güvenlik görevlisi iş ilanları.",
+      description: "İzmir olarak doğrulanmış güncel güvenlik görevlisi ilanlarını ve başvuru koşullarını inceleyin.",
     },
     "Kocaeli": {
       title: "Kocaeli Özel Güvenlik İş İlanları | Gebze, İzmit, GOSB, TOSB",
-      description: "Kocaeli Gebze, İzmit, Darıca, Çayırova, Dilovası, GOSB ve TOSB'de fabrika, OSB ve lojistik güvenliği için bay bayan özel güvenlik görevlisi alımları.",
+      description: "Kocaeli, Gebze, İzmit ve çevresinde konumu doğrulanmış güncel güvenlik ilanlarını inceleyin.",
     },
     "Gebze": {
       title: "Gebze Özel Güvenlik İş İlanları | GOSB, TOSB, Fabrika Güvenliği",
-      description: "Gebze GOSB, TOSB, Gebkim, İMES ve fabrika bölgelerinde bay bayan silahlı & silahsız özel güvenlik görevlisi alımları.",
+      description: "Gebze, GOSB ve TOSB konumlu güncel güvenlik görevlisi ilanlarını ve başvuru bilgilerini inceleyin.",
     },
   };
   return overrides[city] ?? {
     title: `${city} Özel Güvenlik İş İlanları | Bay Bayan Personel Alımı`,
-    description: `${city} bölgesinde silahlı, silahsız, AVM, fabrika, site, hastane ve plaza güvenliği bay bayan özel güvenlik görevlisi iş ilanları. Güncel maaşlı personel alımları.`,
+    description: `${city} olarak doğrulanmış güncel özel güvenlik ilanlarını, çalışma koşullarını ve başvuru bilgilerini inceleyin.`,
   };
 }
 
@@ -250,7 +212,7 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
   const { title, description } = makeCitySeo(city);
   const pageUrl = `${SEO_BASE_URL}/${slug}`;
 
-  let cityListings: { id: number; title: string; company: string }[] = [];
+  let cityListings: { id: number; title: string; company: string; city: string; updatedAt: Date; applyUrl: string | null }[] = [];
   try {
     const rows = await db
       .select({
@@ -258,17 +220,18 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
         title: listingsTable.title,
         company: listingsTable.company,
         city: listingsTable.city,
+        updatedAt: listingsTable.updatedAt,
+        applyUrl: listingsTable.applyUrl,
       })
       .from(listingsTable)
-      .where(and(indexableListingCondition(), ilike(listingsTable.city, `%${city}%`)))
+      .where(indexableListingCondition())
       .orderBy(desc(listingsTable.updatedAt))
-      .limit(50);
-    cityListings = rows.slice(0, 20);
+    cityListings = rows.filter((row) => listingMatchesSeoLocation(row.city, city)).slice(0, 20);
   } catch { /* ignore */ }
 
   const listingLinks = cityListings.length
     ? `<h2>${escapeHtml(city)} Aktif İlanlar</h2><ul>${cityListings
-        .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a></li>`)
+        .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a> <small>(${escapeHtml(l.city)})</small></li>`)
         .join("")}</ul>`
     : `<p>${escapeHtml(city)} için şu an yayında ilan yok; yeni ilanlar eklendiğinde burada listelenir.</p>`;
 
@@ -277,6 +240,18 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     .slice(0, 30)
     .map(c => `<a href="${SEO_BASE_URL}/${toSlug(c)}">${escapeHtml(c)}</a>`)
     .join(" · ");
+  const districtLinks = SEO_DISTRICTS
+    .filter((district) => {
+      if (city === "Kocaeli") return !district.startsWith("İstanbul");
+      if (city === "İstanbul") return district.startsWith("İstanbul");
+      return false;
+    })
+    .map((district) => `<a href="${SEO_BASE_URL}/${toSlug(district)}">${escapeHtml(district)}</a>`)
+    .join(" · ");
+  const latestUpdate = cityListings[0]?.updatedAt;
+  const updateText = latestUpdate
+    ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "long", timeZone: "Europe/Istanbul" }).format(latestUpdate)
+    : null;
 
   return {
     title,
@@ -306,21 +281,9 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     bodyHtml: `
 <header><h1>${escapeHtml(city)} Özel Güvenlik İş İlanları — Bay Bayan Personel Alımı</h1></header>
 <main>
-<p><strong>${escapeHtml(city)}</strong> bölgesinde özel güvenlik görevlisi iş ilanları her gün güncellenmektedir. Silahlı ve silahsız özel güvenlik personeli, AVM güvenlik görevlisi, fabrika güvenlik elemanı, site güvenliği, plaza güvenliği, hastane güvenliği, otel güvenliği ve OSB güvenlik pozisyonlarında <strong>bay bayan</strong> ${escapeHtml(city)} güvenlik iş ilanları platformumuzda yayınlanmaktadır.</p>
-<p>${escapeHtml(city)} özel güvenlik sektöründe deneyimli ya da yeni mezun olan adaylar için tam zamanlı, yarı zamanlı ve part-time pozisyonlar bulunmaktadır. ${escapeHtml(description)}</p>
-<h2>${escapeHtml(city)} Özel Güvenlik Maaşları ve Şartları</h2>
-<p>${escapeHtml(city)} bölgesindeki özel güvenlik görevlisi maaşları, çalışılan tesis tipi (AVM, fabrika, site, plaza, hastane, otel) ve vardiya düzenine göre değişmektedir. Genel olarak bay bayan silahsız güvenlik görevlisi pozisyonlarında asgari ücret ile yemek, yol ve servis imkanları sunulmaktadır. Silahlı özel güvenlik görevlisi pozisyonlarında maaşlar daha yüksektir. ${escapeHtml(city)} özel güvenlik iş ilanlarına başvurmak için geçerli özel güvenlik kimlik kartı (silahlı veya silahsız), askerlik durumu (erkek adaylar için) ve sabıka kaydı temiz olmalıdır.</p>
-<h2>${escapeHtml(city)} Bay Bayan Güvenlik Pozisyonları</h2>
-<p>Platformumuzda ${escapeHtml(city)} bölgesi için aşağıdaki pozisyonlarda iş ilanları yayınlanmaktadır:</p>
-<ul>
-  <li><a href="${SEO_BASE_URL}/silahli-guvenlik-is-ilanlari">${escapeHtml(city)} Silahlı Özel Güvenlik İş İlanları</a></li>
-  <li><a href="${SEO_BASE_URL}/silahsiz-guvenlik-is-ilanlari">${escapeHtml(city)} Silahsız Özel Güvenlik İş İlanları</a></li>
-  <li><a href="${SEO_BASE_URL}/avm-guvenlik-is-ilanlari">${escapeHtml(city)} AVM Güvenlik İş İlanları</a></li>
-  <li><a href="${SEO_BASE_URL}/fabrika-guvenlik-is-ilanlari">${escapeHtml(city)} Fabrika Güvenlik İş İlanları</a></li>
-  <li><a href="${SEO_BASE_URL}/site-guvenlik-is-ilanlari">${escapeHtml(city)} Site Güvenlik İş İlanları</a></li>
-</ul>
-<h2>${escapeHtml(city)} Özel Güvenlik İş Bulma Avantajları</h2>
-<p>Özel Güvenlik Online platformu, ${escapeHtml(city)} özel güvenlik sektöründe iş arayan tüm adaylara ücretsiz hizmet sunar: yapay zeka destekli iş asistanı, ücretsiz dijital CV oluşturma, anlık ilan bildirimleri, mobil uyumlu arayüz, doğrudan firma iletişimi ve favori ilan listesi gibi özelliklerle ${escapeHtml(city)} bölgesindeki özel güvenlik görevlisi alımlarına en hızlı şekilde başvurabilirsiniz.</p>
+<p>${escapeHtml(description)}</p>
+<p>Bu sayfada yalnız konum alanı ${escapeHtml(city)} veya bu konuma bağlı doğrulanabilir ilçe bilgisi taşıyan aktif ilanlar gösterilir.${updateText ? ` Son ilan güncellemesi: <time datetime="${latestUpdate!.toISOString()}">${escapeHtml(updateText)}</time>.` : ""}</p>
+${districtLinks ? `<h2>İlçe ve bölge bağlantıları</h2><nav>${districtLinks}</nav>` : ""}
 ${listingLinks}
 ${buildCityLongContentServer(city)}
 <h2>Diğer İllerdeki İlanlar</h2>

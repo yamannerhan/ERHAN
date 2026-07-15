@@ -4,10 +4,7 @@ import type { Request } from "express";
 
 function extractIp(req?: Request): string | null {
   if (!req) return null;
-  const forwarded = req.headers["x-forwarded-for"];
-  const raw = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim()
-    || req.ip
-    || "";
+  const raw = req.ip || "";
   return raw.replace(/^::ffff:/, "") || null;
 }
 

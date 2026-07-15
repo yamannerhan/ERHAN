@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db, usersTable, notificationsTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { authMiddleware, signToken } from "../middlewares/auth";
+import { loginRateLimit, passwordRateLimit, registerRateLimit } from "../middlewares/security";
 import { io, makeBotMsg, saveChatMessage } from "../index";
 import { emitRealtimeToUser } from "../lib/realtime";
 
@@ -39,7 +40,7 @@ function userJson(user: any) {
   };
 }
 
-router.post("/auth/register", async (req, res): Promise<void> => {
+router.post("/auth/register", registerRateLimit, async (req, res): Promise<void> => {
   const { username, email, password, firstName, lastName } =
     req.body as { username?: string; email?: string; password?: string; firstName?: string; lastName?: string };
 
@@ -47,19 +48,25 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Tüm alanlar zorunludur" });
     return;
   }
-  if (username.length < 3) {
-    res.status(400).json({ error: "Kullanıcı adı en az 3 karakter olmalıdır" });
+  const normalizedUsername = username.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (normalizedUsername.length < 3 || normalizedUsername.length > 40 || normalizedEmail.length > 254) {
+    res.status(400).json({ error: "Kullanıcı adı veya e-posta biçimi geçersiz" });
     return;
   }
-  if (password.length < 6) {
-    res.status(400).json({ error: "Şifre en az 6 karakter olmalıdır" });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    res.status(400).json({ error: "Geçerli bir e-posta adresi girin" });
+    return;
+  }
+  if (password.length < 10 || password.length > 128) {
+    res.status(400).json({ error: "Şifre 10-128 karakter olmalıdır" });
     return;
   }
 
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, normalizedEmail));
   if (existing) { res.status(400).json({ error: "Bu e-posta adresi zaten kayıtlı" }); return; }
 
-  const [existingUsername] = await db.select().from(usersTable).where(eq(usersTable.username, username));
+  const [existingUsername] = await db.select().from(usersTable).where(eq(usersTable.username, normalizedUsername));
   if (existingUsername) { res.status(400).json({ error: "Bu kullanıcı adı zaten alınmış" }); return; }
 
   // displayName = sadece ad (sohbette görünür)
@@ -69,8 +76,8 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const [user] = await db.insert(usersTable).values({
-    username,
-    email,
+    username: normalizedUsername,
+    email: normalizedEmail,
     passwordHash,
     role: "user",
     displayName,
@@ -81,10 +88,10 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   // ── Sohbete hoşgeldin mesajı ──────────────────────────────────
   try {
-    const name = displayName || username;
-    const welcomeMsg = `🎉 **${name}** @${username} aramıza katıldı! Hoşgeldin, iyi eğlenceler dileriz! 👋`;
+    const name = displayName || normalizedUsername;
+    const welcomeMsg = `🎉 **${name}** @${normalizedUsername} aramıza katıldı! Hoşgeldin, iyi eğlenceler dileriz! 👋`;
     const saved = await saveChatMessage(0, welcomeMsg);
-    io.emit("chat:welcome", { message: welcomeMsg, username });
+    io.emit("chat:welcome", { message: welcomeMsg, username: normalizedUsername });
     if (saved) {
       io.emit("chat:message", makeBotMsg(welcomeMsg, null, saved.id, saved.createdAt.toISOString()));
     }
@@ -94,7 +101,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   // Admin'den kişisel hoşgeldin bildirimi (uygulama kapalıysa push da gider)
   try {
-    const name = displayName || username;
+    const name = displayName || normalizedUsername;
     const title = "Hoş geldin!";
     const message = `Merhaba ${name}, Özel Güvenlik ailesine katıldığın için teşekkürler. İyi eğlenceler!`;
     await db.insert(notificationsTable).values({
@@ -123,7 +130,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   res.status(201).json({ user: userJson(user), token: token });
 });
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+router.post("/auth/login", loginRateLimit, async (req, res): Promise<void> => {
   const { email, password } = req.body as { email?: string; password?: string };
 
   if (!email || !password) {
@@ -131,54 +138,11 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  const adminEmail = process.env["ADMIN_EMAIL"] || "erhanyaman001@gmail.com";
-  const adminUsername = process.env["ADMIN_USERNAME"] || "admin";
-  const adminPassword = process.env["ADMIN_PASSWORD"] || "yamann01";
-  const isAdminLogin = (email.toLowerCase() === adminEmail.toLowerCase() || email.toLowerCase() === adminUsername.toLowerCase()) && password === adminPassword;
-
-  if (isAdminLogin) {
-    const passwordHash = await bcrypt.hash(adminPassword, 10);
-    const [existingAdmin] = await db
-      .select()
-      .from(usersTable)
-      .where(or(eq(usersTable.email, adminEmail), eq(usersTable.username, adminUsername)))
-      .limit(1);
-
-    let adminUser = existingAdmin;
-    if (adminUser) {
-      const [updatedAdmin] = await db.update(usersTable).set({
-        username: adminUsername,
-        email: adminEmail,
-        passwordHash,
-        role: "admin",
-        displayName: "Admin",
-        fullName: "Admin",
-        isBanned: false,
-        banReason: null,
-        banExpiresAt: null,
-      }).where(eq(usersTable.id, adminUser.id)).returning();
-      adminUser = updatedAdmin;
-    } else {
-      const [createdAdmin] = await db.insert(usersTable).values({
-        username: adminUsername,
-        email: adminEmail,
-        passwordHash,
-        role: "admin",
-        displayName: "Admin",
-        fullName: "Admin",
-      }).returning();
-      adminUser = createdAdmin;
-    }
-
-    const token = signToken(adminUser.id, adminUser.role);
-    res.json({ user: userJson(adminUser), token });
-    return;
-  }
-
+  const identifier = email.trim().toLowerCase();
   const [user] = await db
     .select()
     .from(usersTable)
-    .where(or(eq(usersTable.email, email), eq(usersTable.username, email)));
+    .where(or(eq(usersTable.email, identifier), eq(usersTable.username, email.trim())));
 
   if (!user) { res.status(401).json({ error: "E-posta/kullanıcı adı veya şifre hatalı" }); return; }
 
@@ -210,7 +174,7 @@ router.get("/auth/me", authMiddleware, (req, res): void => {
 });
 
 // Change password — available to all authenticated users
-router.post("/auth/change-password", authMiddleware, async (req, res): Promise<void> => {
+router.post("/auth/change-password", authMiddleware, passwordRateLimit, async (req, res): Promise<void> => {
   const { currentPassword, newPassword } =
     req.body as { currentPassword?: string; newPassword?: string };
 
@@ -218,8 +182,8 @@ router.post("/auth/change-password", authMiddleware, async (req, res): Promise<v
     res.status(400).json({ error: "Mevcut ve yeni şifre zorunludur" });
     return;
   }
-  if (newPassword.length < 6) {
-    res.status(400).json({ error: "Yeni şifre en az 6 karakter olmalıdır" });
+  if (newPassword.length < 10 || newPassword.length > 128) {
+    res.status(400).json({ error: "Yeni şifre 10-128 karakter olmalıdır" });
     return;
   }
 

@@ -306,6 +306,7 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
 
     const s = io(window.location.origin, {
       path: "/ws",
+      auth: { token: getToken() },
       transports: ["polling", "websocket"],
       upgrade: true,
       secure: window.location.protocol === "https:",

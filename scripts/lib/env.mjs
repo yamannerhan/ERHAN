@@ -39,12 +39,11 @@ export function normalizeEnv(log = console.log) {
     process.env.DATABASE_PRIVATE_URL ??
     process.env.RAILWAY_DATABASE_URL;
 
-  if (!process.env.SESSION_SECRET) {
-    process.env.SESSION_SECRET = crypto.randomBytes(32).toString("hex");
-    log("[env] SESSION_SECRET otomatik uretildi.");
-  }
-
   process.env.JWT_SECRET ??= process.env.SESSION_SECRET;
+  if (!process.env.JWT_SECRET && process.env.NODE_ENV !== "production") {
+    process.env.JWT_SECRET = crypto.randomBytes(32).toString("hex");
+    log("[env] Yalnız development için geçici JWT_SECRET üretildi.");
+  }
 
   process.env.PUPPETEER_SKIP_DOWNLOAD ??= "true";
   process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD ??= "true";
@@ -68,6 +67,18 @@ export function requireDatabaseUrl() {
     throw new Error(
       "DATABASE_URL gerekli. Postgres baglayin (Railway: Variables -> Add Reference -> Postgres.DATABASE_URL).",
     );
+  }
+}
+
+export function requireProductionSecurity() {
+  if (process.env.NODE_ENV !== "production") return;
+  const secret = process.env.JWT_SECRET?.trim() ?? "";
+  if (secret.length < 32) {
+    throw new Error("Production için kalıcı ve en az 32 karakter JWT_SECRET gerekli.");
+  }
+  const origins = process.env.APP_ORIGINS?.trim();
+  if (!origins) {
+    process.env.APP_ORIGINS = "https://ozelguvenlik.online,https://www.ozelguvenlik.online";
   }
 }
 
