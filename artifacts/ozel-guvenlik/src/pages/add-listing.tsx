@@ -131,6 +131,7 @@ export default function AddListing() {
     isVerified?: boolean;
   } | null | undefined>(undefined);
   const [knownCompanies, setKnownCompanies] = useState<{ id: number; name: string; logoUrl: string | null }[]>([]);
+  const [customCompanyMode, setCustomCompanyMode] = useState(false);
 
   const form = useForm<ListingFormValues>({
     resolver: zodResolver(listingSchema),
@@ -498,38 +499,47 @@ export default function AddListing() {
               <label className="og-cl-label" htmlFor="cl-company">Firma Adı</label>
               <div className="og-cl-input-wrap">
                 <Building2 className="og-cl-field-ico" aria-hidden />
-                <input
+                <select
                   id="cl-company"
-                  className="og-cl-input"
-                  value={watched.company || ""}
-                  onChange={e => form.setValue("company", e.target.value)}
-                  placeholder="Genser Güvenlik Sistemleri A.Ş."
-                  list="og-known-companies"
-                />
-                <datalist id="og-known-companies">
+                  className="og-cl-select"
+                  value={knownCompanies.some((k) => k.name === watched.company)
+                    ? watched.company
+                    : watched.company
+                      ? "__custom__"
+                      : ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === "__custom__") {
+                      setCustomCompanyMode(true);
+                      form.setValue("company", "");
+                      form.setValue("companyLogoUrl", "");
+                      setImagePreview("");
+                      return;
+                    }
+                    setCustomCompanyMode(false);
+                    const selected = knownCompanies.find((k) => k.name === value);
+                    form.setValue("company", value);
+                    form.setValue("companyLogoUrl", selected?.logoUrl || "");
+                    setImagePreview(selected?.logoUrl || "");
+                  }}
+                >
+                  <option value="">Firma seçin</option>
                   {knownCompanies.map((k) => (
-                    <option key={k.id} value={k.name} />
+                    <option key={k.id} value={k.name}>{k.name}</option>
                   ))}
-                </datalist>
+                  <option value="__custom__">Diğer firma (elle yaz)</option>
+                </select>
               </div>
-              {knownCompanies.length > 0 && (
-                <div className="og-cl-pills" style={{ marginTop: 8 }}>
-                  {knownCompanies.slice(0, 8).map((k) => (
-                    <button
-                      key={k.id}
-                      type="button"
-                      className="og-cl-pill"
-                      onClick={() => {
-                        form.setValue("company", k.name);
-                        if (k.logoUrl) {
-                          form.setValue("companyLogoUrl", k.logoUrl);
-                          setImagePreview(k.logoUrl);
-                        }
-                      }}
-                    >
-                      {k.name}
-                    </button>
-                  ))}
+              {(customCompanyMode
+                || (!!watched.company && !knownCompanies.some((k) => k.name === watched.company))) && (
+                <div className="og-cl-input-wrap" style={{ marginTop: 8 }}>
+                  <Building2 className="og-cl-field-ico" aria-hidden />
+                  <input
+                    className="og-cl-input"
+                    value={watched.company || ""}
+                    onChange={(e) => form.setValue("company", e.target.value)}
+                    placeholder="Firma adını yazın"
+                  />
                 </div>
               )}
             </div>
