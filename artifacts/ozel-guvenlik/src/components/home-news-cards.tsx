@@ -12,19 +12,19 @@ const SAMPLE_NEWS = [
     id: -1,
     content: "Özel Güvenlik Kimlik Yenileme İşlemleri 2026",
     relative: "1 saat önce",
-    imageUrl: "/news/security-id-renewal.png",
+    imageName: "security-id-renewal",
   },
   {
     id: -2,
     content: "2026 Yılı ÖGG Maaşları ve Çalışma Koşulları",
     relative: "3 saat önce",
-    imageUrl: "/news/security-salaries.png",
+    imageName: "security-salaries",
   },
   {
     id: -3,
     content: "Güncel Özel Güvenlik Sınav Takvimi Açıklandı",
     relative: "5 saat önce",
-    imageUrl: "/news/security-exam.png",
+    imageName: "security-exam",
   },
 ] as const;
 
@@ -45,7 +45,7 @@ export function HomeNewsCards({ announcements }: { announcements: HomeAnnounceme
     ...liveItems.map((item, index) => ({
         ...item,
         relative: relativeDate(item.createdAt),
-        imageUrl: SAMPLE_NEWS[index]?.imageUrl ?? SAMPLE_NEWS[0].imageUrl,
+        imageName: SAMPLE_NEWS[index]?.imageName ?? SAMPLE_NEWS[0].imageName,
       })),
     ...SAMPLE_NEWS.slice(liveItems.length),
   ].slice(0, 3);
@@ -68,7 +68,26 @@ export function HomeNewsCards({ announcements }: { announcements: HomeAnnounceme
             className="og-home-news__card"
           >
             <span className="og-home-news__visual" aria-hidden>
-              <img src={item.imageUrl} alt="" />
+              <picture>
+                <source
+                  type="image/avif"
+                  srcSet={`/news/${item.imageName}-320.avif 320w, /news/${item.imageName}-640.avif 640w`}
+                  sizes="(min-width: 1024px) 33vw, 100vw"
+                />
+                <source
+                  type="image/webp"
+                  srcSet={`/news/${item.imageName}-320.webp 320w, /news/${item.imageName}-640.webp 640w`}
+                  sizes="(min-width: 1024px) 33vw, 100vw"
+                />
+                <img
+                  src={`/news/${item.imageName}.png`}
+                  alt=""
+                  width={640}
+                  height={280}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </picture>
               <span>HABER</span>
             </span>
             <strong>{item.content!.trim()}</strong>

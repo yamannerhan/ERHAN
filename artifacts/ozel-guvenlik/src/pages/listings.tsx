@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toSlug } from "@/lib/seo-cities";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDisplayMode } from "@/contexts/DisplayModeContext";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { JobListingCard } from "@/components/job-listing-card";
@@ -104,10 +105,12 @@ function ListingStatusBadges({ listing }: { listing: { title?: string | null; de
 
 export default function Listings({ initialCity, initialSearch }: { initialCity?: string; initialSearch?: string }) {
   const { user } = useAuth();
+  const { isDesktop } = useDisplayMode();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const savedState = getSavedListingsState();
   const [search, setSearch] = useState(initialSearch ?? savedState.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch ?? savedState.search);
   const [city, setCity] = useState(initialCity ?? savedState.city);
   const [page, setPage] = useState(initialCity || initialSearch ? 1 : savedState.page);
   const [cityFilters, setCityFilters] = useState<{ city: string; count: number }[]>([]);
@@ -131,8 +134,14 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   useEffect(() => {
     if (initialSearch == null) return;
     setSearch(initialSearch);
+    setDebouncedSearch(initialSearch);
     setPage(1);
   }, [initialSearch]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(search), 350);
+    return () => window.clearTimeout(id);
+  }, [search]);
 
   const sideFilter = activeSubFilter ?? resolveIstanbulSideFromLabel(city);
 
@@ -154,7 +163,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const { data, isLoading, isFetching, refetch } = useGetListings({
     page,
     limit: 20,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     city: effectiveCity,
     sort: sortMode,
   } as Parameters<typeof useGetListings>[0]);
@@ -164,6 +173,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     limit: 20,
     featured: true,
     sort: sortMode,
+    includeTotal: false,
   } as Parameters<typeof useGetListings>[0]);
 
   const canQuickEditCity = user?.role === "admin" || user?.role === "moderator";
@@ -471,7 +481,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
         {/* Tüm ilanlar */}
         <section ref={listingsTopRef}>
           {/* Mobil kart listesi */}
-          <div className="mobile-home">
+          {!isDesktop && <div className="mobile-home">
             <div className="og-lp-section-head">
               <h2 className="og-lp-section-title">Tüm İlanlar</h2>
               <span className="og-lp-section-meta">{statActive.toLocaleString("tr-TR")} ilan</span>
@@ -502,10 +512,10 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
                 displayListings.map((listing, idx) => renderListingCard(listing, idx))
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Masaüstü tablo — anasayfa ile aynı */}
-          {!isLoading && displayListings.length > 0 && (
+          {isDesktop && !isLoading && displayListings.length > 0 && (
             <DesktopListingsTable
               listings={displayListings}
               totalCount={statActive}
@@ -516,12 +526,12 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
               onToggleSave={handleToggleFav}
             />
           )}
-          {isLoading && (
+          {isDesktop && isLoading && (
             <div className="desktop-home desktop-listings-table" aria-hidden>
               <div className="og-list-skeleton" style={{ minHeight: 200 }} />
             </div>
           )}
-          {!isLoading && displayListings.length === 0 && (
+          {isDesktop && !isLoading && displayListings.length === 0 && (
             <div className="desktop-home og-lp-empty">
               <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
               <p>Bu filtreye uygun ilan bulunamadı</p>

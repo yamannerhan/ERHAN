@@ -1,5 +1,6 @@
 import express, { type Express, type Request, type Response } from "express";
 import cors from "cors";
+import compression from "compression";
 import pinoHttp from "pino-http";
 import path from "path";
 import fs from "fs";
@@ -20,6 +21,16 @@ import {
 } from "./lib/seo-sitemap";
 
 const app: Express = express();
+const HOME_HERO_PRELOAD = [
+  '<link rel="preload" as="image"',
+  ' href="/banners/career-hero-1024.avif"',
+  ' imagesrcset="/banners/career-hero-512.avif 512w, /banners/career-hero-1024.avif 1024w"',
+  ' imagesizes="100vw" type="image/avif" fetchpriority="high" />',
+].join("");
+
+function injectHomeHeroPreload(html: string): string {
+  return html.replace("</head>", `  ${HOME_HERO_PRELOAD}\n</head>`);
+}
 
 function sendXml(res: Response, xml: string): void {
   const body = Buffer.from(xml, "utf-8");
@@ -93,6 +104,7 @@ app.use(
   }),
 );
 app.use(cors({ origin: true, credentials: true }));
+app.use(compression({ threshold: 1024 }));
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
@@ -166,17 +178,13 @@ if (clientIndexHtml) {
   logger.info({ clientDistPath }, "Serving frontend static files");
   app.use("/assets", express.static(path.join(clientDistPath, "assets"), {
     setHeaders: (res) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }
   }));
   app.use(express.static(clientDistPath, { 
     index: false,
     setHeaders: (res) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
+      res.setHeader("Cache-Control", "public, max-age=86400");
     }
   }));
 } else {
@@ -188,10 +196,13 @@ app.get("/", (_req, res) => {
     void (async () => {
       try {
         const meta = await getSeoMetaForPath("/");
-        const html = meta ? injectSeoIntoHtml(clientIndexHtml!, meta) : clientIndexHtml!;
+        const seoHtml = meta ? injectSeoIntoHtml(clientIndexHtml!, meta) : clientIndexHtml!;
+        const html = injectHomeHeroPreload(seoHtml);
+        res.setHeader("Cache-Control", "private, no-store");
         res.status(200).type("html").send(html);
       } catch {
-        res.status(200).type("html").send(clientIndexHtml!);
+        res.setHeader("Cache-Control", "private, no-store");
+        res.status(200).type("html").send(injectHomeHeroPreload(clientIndexHtml!));
       }
     })();
     return;
@@ -213,6 +224,7 @@ app.use((req, res, next) => {
     void (async () => {
       try {
         const meta = await getSeoMetaForPath(req.originalUrl);
+        res.setHeader("Cache-Control", "private, no-store");
         if (!meta) {
           res.status(404).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
           return;

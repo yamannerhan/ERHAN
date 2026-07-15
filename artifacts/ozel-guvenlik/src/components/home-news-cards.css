@@ -79,11 +79,15 @@
     linear-gradient(135deg, #0759aa, #25a8ff);
 }
 
-.og-home-news__visual > img {
+.og-home-news__visual > picture,
+.og-home-news__visual > picture > img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.og-home-news__visual > picture > img {
   object-fit: cover;
 }
 
