@@ -25,6 +25,7 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 let readyFallbackTimer: ReturnType<typeof setInterval> | null = null;
 let readyFallbackStartedAt = 0;
 let sessionSoftRestartTried = false;
+let readySyncTriggerTried = false;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
@@ -230,6 +231,7 @@ function attachHandlers(c: any): void {
     logger.warn(`wa: disconnected - ${reason}`);
     isReady = false;
     authAccepted = false;
+    readySyncTriggerTried = false;
     stopReadyFallbackWatcher();
     stopWhatsAppWatchdog();
     const old = client;
@@ -245,6 +247,7 @@ function attachHandlers(c: any): void {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
     authAccepted = false;
+    readySyncTriggerTried = false;
     stopReadyFallbackWatcher();
     stopWhatsAppWatchdog();
     client = null;
@@ -272,6 +275,7 @@ function markWhatsAppReady(reason: string): void {
   lastError = null;
   reconnectAttempts = 0;
   sessionSoftRestartTried = false;
+  readySyncTriggerTried = false;
   manualStop = false;
   stopReadyFallbackWatcher();
   startWhatsAppWatchdog();
@@ -305,8 +309,8 @@ function startReadyFallbackWatcher(): void {
       const elapsed = Date.now() - readyFallbackStartedAt;
       await tryPromoteConnectedToReady("fallback_poll");
 
-      // 25 sn sonra oturumu koruyarak yeniden başlat — hasSynced kaçmış olabilir
-      if (!isReady && elapsed >= 25_000 && !sessionSoftRestartTried && hasWhatsAppLocalSession()) {
+      // Oturumun diske yazılması için yeterli süre ver; erken destroy eşleşmeyi bozabilir.
+      if (!isReady && elapsed >= 75_000 && !sessionSoftRestartTried && hasWhatsAppLocalSession()) {
         sessionSoftRestartTried = true;
         lastError = "Senkron takıldı — kayıtlı oturumla yeniden bağlanılıyor…";
         logger.warn("wa: ready gelmedi — soft session restart");
@@ -325,7 +329,7 @@ function startReadyFallbackWatcher(): void {
         return;
       }
 
-      if (!isReady && elapsed >= 90_000) {
+      if (!isReady && elapsed >= 150_000) {
         lastError = "WhatsApp telefonda bağlandı ama uygulama hazır olamadı. Bir kez daha «Bağlan» deneyin.";
         logger.error("wa: ready fallback timeout (90s)");
         stopReadyFallbackWatcher();
@@ -336,36 +340,68 @@ function startReadyFallbackWatcher(): void {
 
 async function tryPromoteConnectedToReady(reason: string): Promise<void> {
   if (isReady || !client || manualStop) return;
+  const activeClient = client;
   try {
-    const state = String(await client.getState?.() ?? "").toUpperCase();
+    const state = String(await activeClient.getState?.() ?? "").toUpperCase();
+    if (client !== activeClient) return;
     if (state && state !== "CONNECTED") {
       if (authAccepted) lastError = `WhatsApp durumu: ${state} — bekleniyor…`;
       return;
     }
 
-    const page = (client as any).pupPage;
-    let storeOk = false;
+    const page = (activeClient as any).pupPage;
+    let webState = { apiReady: false, hasSynced: false, canTriggerSync: false };
     if (page?.evaluate) {
-      storeOk = Boolean(await page.evaluate(() => {
+      webState = await page.evaluate(() => {
         const w = window as any;
+        let hasSynced = false;
         try {
           const sock = w.require?.("WAWebSocketModel")?.Socket;
-          if (sock?.hasSynced === true) return true;
+          hasSynced = sock?.hasSynced === true;
         } catch { /* ignore */ }
-        return Boolean(
-          w.Store?.Chat
-          || w.WWebJS
-          || w.Store?.Conn
-          || w.require?.("WAWebChatCollection"),
-        );
-      }));
+        return {
+          // getChats çağrısı ancak inject edilen gerçek API hazırsa güvenlidir.
+          apiReady: Boolean(
+            typeof w.WWebJS?.getChats === "function"
+            && typeof w.WWebJS?.getContacts === "function"
+            && w.Store?.Chat,
+          ),
+          hasSynced,
+          canTriggerSync: typeof w.onAppStateHasSyncedEvent === "function",
+        };
+      });
+    }
+    if (client !== activeClient) return;
+
+    const elapsed = readyFallbackStartedAt > 0 ? Date.now() - readyFallbackStartedAt : 0;
+    if (
+      state === "CONNECTED"
+      && webState.hasSynced
+      && !webState.apiReady
+      && webState.canTriggerSync
+      && elapsed >= 8_000
+      && !readySyncTriggerTried
+    ) {
+      readySyncTriggerTried = true;
+      lastError = "WhatsApp senkronlandı — Web API hazırlanıyor…";
+      logger.warn({ reason }, "wa: hasSynced callback yedekten tetikleniyor");
+      await page.evaluate(() => {
+        const w = window as any;
+        Promise.resolve(w.onAppStateHasSyncedEvent?.()).catch(() => undefined);
+      });
+      return;
     }
 
-    // CONNECTED + store hazırsa, veya uzun süredir authAccepted + CONNECTED ise ready kaçmış say
-    const waitedLong = readyFallbackStartedAt > 0 && (Date.now() - readyFallbackStartedAt) >= 12_000;
-    if (state === "CONNECTED" && (storeOk || (authAccepted && waitedLong))) {
+    // Yalnız WWebJS.getChats gerçekten hazırsa ready olayı kaçmış kabul edilir.
+    if (
+      state === "CONNECTED"
+      && webState.apiReady
+      && typeof activeClient.getChats === "function"
+    ) {
       await new Promise((r) => setTimeout(r, 800));
-      if (!isReady && client) markWhatsAppReady(reason);
+      if (!isReady && client === activeClient) markWhatsAppReady(reason);
+    } else if (authAccepted) {
+      lastError = "Telefon onayladı — WhatsApp Web API hazırlanıyor…";
     }
   } catch (e) {
     logger.warn({ err: e, reason }, "wa: ready promote kontrolü başarısız");
@@ -468,6 +504,7 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
   if (pairingMode || !hasWhatsAppLocalSession()) {
     authAccepted = false;
     sessionSoftRestartTried = false;
+    readySyncTriggerTried = false;
   }
   stopReadyFallbackWatcher();
   lastError = pairingMode
@@ -651,6 +688,7 @@ export async function stopWhatsAppClient(): Promise<void> {
   pairingIntent = false;
   authAccepted = false;
   sessionSoftRestartTried = false;
+  readySyncTriggerTried = false;
   stopReadyFallbackWatcher();
   pairingCodeRequested = false;
   pendingPhone = null;
@@ -775,13 +813,17 @@ async function discoverFromWhatsAppStore(page: {
   }>;
 }
 
-async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>> {
+async function collectWhatsAppGroupsOnce(activeClient: any): Promise<Map<string, WhatsAppChannel>> {
   const byId = new Map<string, WhatsAppChannel>();
-  if (!client || !isReady) return byId;
+  if (!activeClient || !isReady || client !== activeClient) return byId;
 
   // 1) getChats ana kaynağı
   try {
-    const chats = await client.getChats();
+    if (typeof activeClient.getChats !== "function") {
+      throw new Error("WhatsApp Web getChats API henüz hazır değil");
+    }
+    const chats = await activeClient.getChats();
+    if (client !== activeClient) return byId;
     for (const c of chats as any[]) {
       const id = String(c?.id?._serialized ?? "");
       upsertWhatsAppChannel(byId, {
@@ -798,8 +840,9 @@ async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>
 
   // 1b) getAllGroups — bazı wwebjs sürümlerinde ayrı API
   try {
-    if (typeof (client as any).getAllGroups === "function") {
-      const groups = await (client as any).getAllGroups();
+    if (typeof activeClient.getAllGroups === "function") {
+      const groups = await activeClient.getAllGroups();
+      if (client !== activeClient) return byId;
       for (const c of groups as any[]) {
         const id = String(c?.id?._serialized ?? "");
         upsertWhatsAppChannel(byId, {
@@ -816,8 +859,9 @@ async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>
 
   // 2) getChannels ile kanalları ekle
   try {
-    if (typeof client.getChannels === "function") {
-      const channels = await client.getChannels();
+    if (typeof activeClient.getChannels === "function") {
+      const channels = await activeClient.getChannels();
+      if (client !== activeClient) return byId;
       for (const c of channels as any[]) {
         const id = String(c?.id?._serialized ?? "");
         upsertWhatsAppChannel(byId, {
@@ -834,8 +878,9 @@ async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>
 
   // 3) getContacts ile kişi listesindeki grupları da ekle
   try {
-    if (typeof client.getContacts === "function") {
-      const contacts = await client.getContacts();
+    if (typeof activeClient.getContacts === "function") {
+      const contacts = await activeClient.getContacts();
+      if (client !== activeClient) return byId;
       for (const c of contacts as any[]) {
         const id = String(c?.id?._serialized ?? "");
         upsertWhatsAppChannel(byId, {
@@ -853,9 +898,10 @@ async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>
 
   // 4) WhatsApp Web Store yedeği — Chat + Newsletter + GroupMetadata
   try {
-    const page = (client as any).pupPage;
+    const page = activeClient.pupPage;
     if (page) {
       const storeSources = await discoverFromWhatsAppStore(page);
+      if (client !== activeClient) return byId;
       for (const s of storeSources) {
         upsertWhatsAppChannel(byId, s);
       }
@@ -869,13 +915,15 @@ async function collectWhatsAppGroupsOnce(): Promise<Map<string, WhatsAppChannel>
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
+  const activeClient = client;
 
   // ready sonrası Chat index boş kalabiliyor — kısa yeniden deneme
-  let byId = await collectWhatsAppGroupsOnce();
+  let byId = await collectWhatsAppGroupsOnce(activeClient);
   for (let attempt = 0; attempt < 3 && byId.size === 0; attempt++) {
+    if (!isReady || client !== activeClient) return [];
     logger.info({ attempt: attempt + 1 }, "wa: grup listesi boş — senkron bekleniyor");
     await new Promise((r) => setTimeout(r, 2500));
-    byId = await collectWhatsAppGroupsOnce();
+    byId = await collectWhatsAppGroupsOnce(activeClient);
   }
 
   return [...byId.values()].sort((a, b) => {
@@ -916,18 +964,26 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
     diagnostic.errors.push("WhatsApp istemcisi hazır değil.");
     return diagnostic;
   }
+  const activeClient = client;
 
   try {
-    const state = String(await client.getState?.() ?? "") || null;
+    const state = String(await activeClient.getState?.() ?? "") || null;
     diagnostic.state = state;
   } catch { /* ignore */ }
   try {
-    const wwebVersion = String(await client.getWWebVersion?.() ?? "") || null;
+    const wwebVersion = String(await activeClient.getWWebVersion?.() ?? "") || null;
     diagnostic.wwebVersion = wwebVersion;
   } catch { /* ignore */ }
 
   try {
-    const chats = await client.getChats();
+    if (client !== activeClient) {
+      diagnostic.errors.push("WhatsApp bağlantısı tanı sırasında yenilendi; liste tekrar yüklenecek.");
+      return diagnostic;
+    }
+    if (typeof activeClient.getChats !== "function") {
+      throw new Error("WhatsApp Web getChats API henüz hazır değil");
+    }
+    const chats = await activeClient.getChats();
     diagnostic.chatCount = chats.length;
     diagnostic.groupCount = chats.filter((chat: any) => {
       const id = String(chat?.id?._serialized ?? chat?.id ?? "");
@@ -943,8 +999,9 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
   }
 
   try {
-    if (typeof client.getContacts === "function") {
-      const contacts = await client.getContacts();
+    if (client !== activeClient) return diagnostic;
+    if (typeof activeClient.getContacts === "function") {
+      const contacts = await activeClient.getContacts();
       diagnostic.contactGroupCount = contacts.filter((contact: any) => {
         const id = String(contact?.id?._serialized ?? contact?.id ?? "");
         return Boolean(contact?.isGroup || id.endsWith("@g.us"));
@@ -956,7 +1013,8 @@ export async function getWhatsAppDiscoveryDiagnostics(): Promise<WhatsAppDiscove
   }
 
   try {
-    const page = (client as any).pupPage;
+    if (client !== activeClient) return diagnostic;
+    const page = activeClient.pupPage;
     if (page) {
       const store = await page.evaluate(() => {
         const w = window as any;
