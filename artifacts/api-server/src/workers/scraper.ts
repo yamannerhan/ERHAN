@@ -1951,8 +1951,9 @@ export function onWhatsAppReady(): void {
     } catch (e) {
       logger.warn({ err: e }, "scraper: wa ready status update failed");
     }
+    // Grup geçmişinin senkron olması için kısa bekle
+    await sleep(8_000);
     void runWhatsAppSequentialDeepScan();
-    // Bitmiş gruplar için bir kez artımlı tarama (son mesajdan)
     try {
       await triggerWhatsAppScan();
     } catch (e) {
