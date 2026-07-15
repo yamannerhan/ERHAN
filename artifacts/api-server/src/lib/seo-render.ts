@@ -85,8 +85,8 @@ function toIsoDate(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function escapeHtml(s: string): string {
-  return s
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -208,6 +208,65 @@ function makeCitySeo(city: string): { title: string; description: string } {
   };
 }
 
+function cityLocative(city: string): string {
+  const normalized = city.toLocaleLowerCase("tr-TR");
+  const vowels = [...normalized].filter((char) => "aeıioöuü".includes(char));
+  const lastVowel = vowels.at(-1) ?? "a";
+  const suffixVowel = "eiöü".includes(lastVowel) ? "e" : "a";
+  const lastLetter = normalized.replace(/[^a-zçğıöşü]/g, "").at(-1) ?? "";
+  const consonant = "fstkçşhp".includes(lastLetter) ? "t" : "d";
+  return `${city}’${consonant}${suffixVowel}`;
+}
+
+/** DB boş veya geçici olarak erişilemez olsa da geçerli şehir sayfası indexlenebilir ve 200 kalır. */
+export function buildEmptyCityMeta(city: string, slug: string): SeoMeta {
+  const { title, description } = makeCitySeo(city);
+  const pageUrl = `${SEO_BASE_URL}/${slug}`;
+  const otherCityLinks = ALL_LOCATIONS
+    .filter((location) => location !== city)
+    .slice(0, 30)
+    .map((location) => `<a href="${SEO_BASE_URL}/${toSlug(location)}">${escapeHtml(location)}</a>`)
+    .join(" · ");
+
+  return {
+    title,
+    description,
+    canonical: pageUrl,
+    ogImage: `${SEO_BASE_URL}/og-brand.jpg`,
+    ogType: "website",
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
+          { "@type": "ListItem", position: 2, name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+          { "@type": "ListItem", position: 3, name: city, item: pageUrl },
+        ],
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        name: title,
+        description,
+        url: pageUrl,
+        inLanguage: "tr-TR",
+      },
+    ],
+    bodyHtml: `
+<header><h1>${escapeHtml(city)} Özel Güvenlik İş İlanları — Bay Bayan Personel Alımı</h1></header>
+<main>
+<p>${escapeHtml(description)}</p>
+<p>${escapeHtml(cityLocative(city))} şu anda aktif özel güvenlik ilanı bulunmuyor.</p>
+${buildCityLongContentServer(city)}
+<h2>Diğer seçenekler</h2>
+<p><a href="${SEO_BASE_URL}/ilanlar">Türkiye geneli ilanlar</a> · <a href="${SEO_BASE_URL}/bildirimler">Yeni ilan bildirimi</a></p>
+<h2>Yakın Şehirler ve Diğer İller</h2>
+<nav>${otherCityLinks}</nav>
+</main>`,
+  };
+}
+
 async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
   const { title, description } = makeCitySeo(city);
   const pageUrl = `${SEO_BASE_URL}/${slug}`;
@@ -229,6 +288,10 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     cityListings = rows.filter((row) => listingMatchesSeoLocation(row.city, city)).slice(0, 20);
   } catch { /* ignore */ }
 
+  if (cityListings.length === 0) {
+    return buildEmptyCityMeta(city, slug);
+  }
+
   const listingLinks = cityListings.length
     ? `<h2>${escapeHtml(city)} Aktif İlanlar</h2><ul>${cityListings
         .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a> <small>(${escapeHtml(l.city)})</small></li>`)
@@ -249,8 +312,11 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
     .map((district) => `<a href="${SEO_BASE_URL}/${toSlug(district)}">${escapeHtml(district)}</a>`)
     .join(" · ");
   const latestUpdate = cityListings[0]?.updatedAt;
-  const updateText = latestUpdate
-    ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "long", timeZone: "Europe/Istanbul" }).format(latestUpdate)
+  const validLatestUpdate = latestUpdate instanceof Date && !Number.isNaN(latestUpdate.getTime())
+    ? latestUpdate
+    : null;
+  const updateText = validLatestUpdate
+    ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "long", timeZone: "Europe/Istanbul" }).format(validLatestUpdate)
     : null;
 
   return {
@@ -282,7 +348,7 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
 <header><h1>${escapeHtml(city)} Özel Güvenlik İş İlanları — Bay Bayan Personel Alımı</h1></header>
 <main>
 <p>${escapeHtml(description)}</p>
-<p>Bu sayfada yalnız konum alanı ${escapeHtml(city)} veya bu konuma bağlı doğrulanabilir ilçe bilgisi taşıyan aktif ilanlar gösterilir.${updateText ? ` Son ilan güncellemesi: <time datetime="${latestUpdate!.toISOString()}">${escapeHtml(updateText)}</time>.` : ""}</p>
+<p>Bu sayfada yalnız konum alanı ${escapeHtml(city)} veya bu konuma bağlı doğrulanabilir ilçe bilgisi taşıyan aktif ilanlar gösterilir.${updateText ? ` Son ilan güncellemesi: <time datetime="${validLatestUpdate!.toISOString()}">${escapeHtml(updateText)}</time>.` : ""}</p>
 ${districtLinks ? `<h2>İlçe ve bölge bağlantıları</h2><nav>${districtLinks}</nav>` : ""}
 ${listingLinks}
 ${buildCityLongContentServer(city)}

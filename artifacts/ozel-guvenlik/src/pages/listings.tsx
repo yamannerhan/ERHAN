@@ -55,6 +55,16 @@ const OTHER_CITIES = [
 
 type CategoryId = (typeof CATEGORY_PILLS)[number]["id"];
 
+function cityLocative(city: string): string {
+  const normalized = city.toLocaleLowerCase("tr-TR");
+  const vowels = [...normalized].filter((char) => "aeıioöuü".includes(char));
+  const lastVowel = vowels.at(-1) ?? "a";
+  const suffixVowel = "eiöü".includes(lastVowel) ? "e" : "a";
+  const lastLetter = normalized.replace(/[^a-zçğıöşü]/g, "").at(-1) ?? "";
+  const consonant = "fstkçşhp".includes(lastLetter) ? "t" : "d";
+  return `${city}’${consonant}${suffixVowel}`;
+}
+
 function getSavedListingsState() {
   try {
     const saved = sessionStorage.getItem(LISTINGS_STATE_KEY);
@@ -366,6 +376,58 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     );
   };
 
+  const renderEmptyState = () => (
+    <div className="og-lp-empty">
+      <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
+      <p>
+        {initialCity
+          ? `${cityLocative(initialCity)} şu anda aktif özel güvenlik ilanı bulunmuyor.`
+          : "Bu filtreye uygun ilan bulunamadı"}
+      </p>
+      {initialCity ? (
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => {
+              setCity("");
+              setSearch("");
+              setCategoryFilter("all");
+              setPage(1);
+              setActiveSubFilter(null);
+            }}
+            className="text-amber-400 hover:underline"
+          >
+            Türkiye geneli ilanlar
+          </button>
+          <button
+            type="button"
+            onClick={() => setOtherSheetOpen(true)}
+            className="text-amber-400 hover:underline"
+          >
+            Yakın şehirler
+          </button>
+          <Link href="/bildirimler" className="text-amber-400 hover:underline">
+            Yeni ilan bildirimi
+          </Link>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setCity("");
+            setSearch("");
+            setCategoryFilter("all");
+            setPage(1);
+            setActiveSubFilter(null);
+          }}
+          className="text-amber-400 text-xs mt-2 hover:underline"
+        >
+          Filtreyi Temizle
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <Layout headerVariant="listings">
       <div className="og-listings-page">
@@ -484,23 +546,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
               {isLoading ? (
                 [1, 2, 3, 4].map(i => <div key={i} className="og-list-skeleton" style={{ minHeight: 140, marginBottom: 10 }} />)
               ) : displayListings.length === 0 ? (
-                <div className="og-lp-empty">
-                  <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p>Bu filtreye uygun ilan bulunamadı</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCity("");
-                      setSearch("");
-                      setCategoryFilter("all");
-                      setPage(1);
-                      setActiveSubFilter(null);
-                    }}
-                    className="text-amber-400 text-xs mt-2 hover:underline"
-                  >
-                    Filtreyi Temizle
-                  </button>
-                </div>
+                renderEmptyState()
               ) : (
                 displayListings.map((listing, idx) => renderListingCard(listing, idx))
               )}
@@ -525,10 +571,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
             </div>
           )}
           {isDesktop && !isLoading && displayListings.length === 0 && (
-            <div className="desktop-home og-lp-empty">
-              <Briefcase className="w-8 h-8 mx-auto mb-2 opacity-40" />
-              <p>Bu filtreye uygun ilan bulunamadı</p>
-            </div>
+            <div className="desktop-home">{renderEmptyState()}</div>
           )}
 
           {!isLoading && totalPages > 1 && (

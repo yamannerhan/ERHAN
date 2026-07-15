@@ -10,6 +10,7 @@ const {
   generateStaticSitemapIndexXml,
 } = await import("./seo-sitemap");
 const { listingMatchesSeoLocation } = await import("./seo-location");
+const { buildEmptyCityMeta, getSeoMetaForPath } = await import("./seo-render");
 
 const baseListing = {
   title: "Güvenlik Görevlisi",
@@ -26,6 +27,24 @@ test("şehir eşleşmesi yalnız yapılandırılmış konum ve bağlı ilçeyi k
   assert.equal(listingMatchesSeoLocation("Türkiye", "İstanbul"), false);
   assert.equal(listingMatchesSeoLocation("Türkiye Geneli / İstanbul dahil", "İstanbul"), false);
   assert.equal(listingMatchesSeoLocation("İstanbul / Tuzla Kimya OSB", "Kocaeli"), false);
+});
+
+test("ilansız geçerli şehir 200 için indexlenebilir SEO yedeği üretir", () => {
+  for (const [city, slug, message] of [
+    ["Adana", "adana", "Adana’da şu anda aktif özel güvenlik ilanı bulunmuyor."],
+    ["Bayburt", "bayburt", "Bayburt’ta şu anda aktif özel güvenlik ilanı bulunmuyor."],
+    ["Tunceli", "tunceli", "Tunceli’de şu anda aktif özel güvenlik ilanı bulunmuyor."],
+  ] as const) {
+    const meta = buildEmptyCityMeta(city, slug);
+    assert.equal(meta.canonical, `https://ozelguvenlik.online/${slug}`);
+    assert.match(meta.bodyHtml, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(JSON.stringify(meta.jsonLd), /JobPosting/);
+    assert.notEqual(meta.robots, "noindex, follow");
+  }
+});
+
+test("geçersiz şehir slug SEO route tarafından kabul edilmez", async () => {
+  assert.equal(await getSeoMetaForPath("/gecersiz-sehir-slug"), null);
 });
 
 test("şehir lastmod gerçek en yeni eşleşen ilan güncellemesinden hesaplanır", () => {

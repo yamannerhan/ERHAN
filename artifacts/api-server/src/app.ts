@@ -15,7 +15,14 @@ import {
   redactProductionErrors,
   verifyMutationOrigin,
 } from "./middlewares/security";
-import { buildNotFoundSeoMeta, getSeoMetaForPath, injectSeoIntoHtml, SEO_BASE_URL, slugToCity } from "./lib/seo-render";
+import {
+  buildEmptyCityMeta,
+  buildNotFoundSeoMeta,
+  getSeoMetaForPath,
+  injectSeoIntoHtml,
+  SEO_BASE_URL,
+  slugToCity,
+} from "./lib/seo-render";
 import {
   buildSitemapXml,
   generateBlogSitemapXml,
@@ -317,7 +324,19 @@ app.use((req, res, next) => {
           return;
         }
         res.status(200).type("html").send(injectSeoIntoHtml(clientIndexHtml!, meta));
-      } catch {
+      } catch (error) {
+        const cityMatch = req.path.match(/^\/([a-z0-9-]+)\/?$/i);
+        const slug = cityMatch?.[1];
+        const city = slug ? slugToCity(slug) : null;
+        if (city && slug) {
+          logger.error({ err: error, city, path: req.path }, "City SEO render failed; serving empty-city fallback");
+          res
+            .setHeader("Cache-Control", "private, no-store")
+            .status(200)
+            .type("html")
+            .send(injectSeoIntoHtml(clientIndexHtml!, buildEmptyCityMeta(city, slug)));
+          return;
+        }
         res.status(500).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
       }
     })();
