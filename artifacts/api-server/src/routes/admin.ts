@@ -2095,7 +2095,7 @@ const DEFAULT_BANNERS = [
     title: null as string | null,
     subtitle: null as string | null,
     ctaLabel: "Hemen İlanları Keşfet",
-    altText: "Özel güvenlik görevlisi ve İstanbul silüeti",
+    altText: "Özel güvenlik görevlisi, İstanbul silüeti ve kariyer ilanları",
     imageUrl: "/banners/career-hero.png",
     linkUrl: "/ilanlar",
     sortOrder: 1,

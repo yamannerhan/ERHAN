@@ -6,7 +6,7 @@ export const HOME_BANNER_ASSETS = [
     title: null,
     subtitle: null,
     ctaLabel: "Hemen İlanları Keşfet",
-    altText: "Özel güvenlik görevlisi ve İstanbul silüeti",
+    altText: "Özel güvenlik görevlisi, İstanbul silüeti ve kariyer ilanları",
     imageUrl: "/banners/career-hero.png",
     linkUrl: "/ilanlar",
     sortOrder: 1,
