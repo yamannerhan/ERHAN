@@ -20,6 +20,20 @@ let manualStop = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+/** Aynı Puppeteer sayfasında grup keşfi ve geçmiş taraması yarışmasın. */
+let pageBusy: Promise<void> = Promise.resolve();
+
+async function withWhatsAppPageLock<T>(operation: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const previous = pageBusy;
+  pageBusy = new Promise<void>((resolve) => { release = resolve; });
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
@@ -495,6 +509,10 @@ export async function stopWhatsAppClient(): Promise<void> {
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
+  return withWhatsAppPageLock(() => fetchWhatsAppGroupsUnlocked());
+}
+
+async function fetchWhatsAppGroupsUnlocked(): Promise<WhatsAppChannel[]> {
   const byId = new Map<string, WhatsAppChannel>();
   const addChannel = (raw: any, fallbackKind?: "group" | "channel") => {
     const id = String(raw?.id?._serialized ?? raw?.id ?? raw?.serialized ?? "");
@@ -510,13 +528,22 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
     });
   };
 
-  try {
+  const pullChats = async () => {
     const chats = await client.getChats();
     for (const c of chats as any[]) {
       addChannel(c);
     }
+  };
+  try {
+    await pullChats();
   } catch (e) {
-    logger.warn({ err: e }, "wa: getChats failed");
+    logger.warn({ err: e }, "wa: getChats failed — retry");
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    try {
+      await pullChats();
+    } catch (retryError) {
+      logger.warn({ err: retryError }, "wa: getChats retry failed");
+    }
   }
 
   // Abone olunan kanallar — getChats bazen eksik bırakır
@@ -566,6 +593,72 @@ export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   });
 }
 
+async function resolveWhatsAppChat(groupJid: string): Promise<any | null> {
+  if (!client) return null;
+  const jid = String(groupJid || "").trim();
+  if (!jid) return null;
+
+  // Chat indeksinin hazır olması gecikebilir; önce doğrudan sohbeti dene.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const chat = await client.getChatById(jid);
+      if (chat) return chat;
+    } catch (e) {
+      if (attempt === 2) logger.warn({ err: e, groupJid: jid }, "wa: getChatById failed");
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+  }
+
+  // Kanallar, getChatById yerine özel API ile çözümlenebiliyor.
+  if (jid.includes("@newsletter") && typeof client.getChannelById === "function") {
+    try {
+      const channel = await client.getChannelById(jid);
+      if (channel) return channel;
+    } catch (e) {
+      logger.warn({ err: e, groupJid: jid }, "wa: getChannelById failed");
+    }
+  }
+
+  try {
+    const chats = await client.getChats();
+    const exact = (chats as any[]).find((item) => String(item?.id?._serialized ?? "") === jid);
+    if (exact) return exact;
+    const local = jid.split("@")[0] || "";
+    if (local) {
+      const fuzzy = (chats as any[]).find((item) => {
+        const id = String(item?.id?._serialized ?? "");
+        return id.startsWith(`${local}@`) || id.includes(local);
+      });
+      if (fuzzy) {
+        logger.info({ wanted: jid, found: fuzzy.id?._serialized }, "wa: chat fuzzy eşleşti");
+        return fuzzy;
+      }
+    }
+  } catch (e) {
+    logger.warn({ err: e, groupJid: jid }, "wa: getChats fallback failed");
+  }
+  return null;
+}
+
+function waTimestampToMs(value: unknown): number {
+  const timestamp = Number(value ?? 0);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
+  return timestamp < 1e12 ? Math.round(timestamp * 1000) : Math.round(timestamp);
+}
+
+function extractWhatsAppText(message: any): string {
+  return String(
+    message?.body
+    ?? message?.caption
+    ?? message?._data?.body
+    ?? message?._data?.caption
+    ?? message?.list?.description
+    ?? message?.hydratedButtonsMessage?.contentText
+    ?? message?.text
+    ?? "",
+  ).trim();
+}
+
 /** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */
 async function harvestStoreMessages(
   page: { evaluate: (fn: (...args: any[]) => any, ...args: any[]) => Promise<any> },
@@ -579,7 +672,11 @@ async function harvestStoreMessages(
       const w = window as any;
       let storeChat =
         w.Store?.Chat?.get?.(id) ||
-        (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+        (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id) ||
+        (w.Store?.Chat?.models || []).find((c: any) => String(c?.id?._serialized ?? "").includes(String(id).split("@")[0] || "__none__"));
+      if (!storeChat && typeof w.WWebJS?.getChat === "function") {
+        try { storeChat = await w.WWebJS.getChat(id); } catch { /* ignore */ }
+      }
       if (!storeChat && typeof w.Store?.Chat?.find === "function") {
         try { storeChat = await w.Store.Chat.find(id); } catch { /* ignore */ }
       }
@@ -588,17 +685,21 @@ async function harvestStoreMessages(
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
       for (const m of arr) {
         const mid = m.id?._serialized;
-        const ts = (m.t ?? m.timestamp ?? 0) * 1000;
+        const rawTimestamp = Number(m.t ?? m.timestamp ?? 0);
+        const ts = rawTimestamp > 0 && rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
         if (!mid || !ts || ts <= cut) continue;
         // body, caption, veya medya açıklaması
         const text = String(
           m.body
           ?? m.caption
+          ?? m._data?.body
+          ?? m._data?.caption
           ?? m.list?.description
           ?? m.hydratedButtonsMessage?.contentText
+          ?? m.text
           ?? "",
         ).trim();
-        if (!text || text.length < 8) continue;
+        if (!text || text.length < 4) continue;
         out.push({ id: mid, text, timestamp: ts });
       }
       return out;
@@ -660,7 +761,19 @@ export async function fetchWhatsAppMessagesDetailed(
       diagnostic: "WhatsApp istemcisi hazır değil; oturum veya bağlantı bekleniyor.",
     };
   }
+  return withWhatsAppPageLock(() => fetchWhatsAppMessagesDetailedUnlocked(groupJid, opts));
+}
 
+async function fetchWhatsAppMessagesDetailedUnlocked(
+  groupJid: string,
+  opts: {
+    afterTimestampMs?: number;
+    limit?: number;
+    maxAgeDays?: number;
+    deep?: boolean;
+    onProgress?: (progress: { round: number; maxRounds: number; messages: number; oldestTs: number }) => void | Promise<void>;
+  } = {},
+): Promise<WhatsAppFetchResult> {
   const page = (client as any).pupPage;
   const diagnostics: string[] = [];
   try {
@@ -686,35 +799,14 @@ export async function fetchWhatsAppMessagesDetailed(
     diagnostics.push(`Sohbet penceresi açılamadı: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
   }
 
-  let chat: any;
-  // WhatsApp Web ready olduktan sonra sohbet indeksinin dolması birkaç saniye
-  // sürebilir. İlk getChatById hatasında boş tarama yerine yeniden dene.
-  for (let attempt = 0; attempt < 3 && !chat; attempt++) {
-    try {
-      chat = await client.getChatById(groupJid);
-    } catch (e) {
-      if (attempt === 2) {
-        logger.warn({ err: e, groupJid }, "wa: getChatById failed");
-        diagnostics.push(`getChatById başarısız: ${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-    }
-  }
-  if (!chat) {
-    try {
-      const chats = await client.getChats();
-      chat = (chats as any[]).find((candidate) => candidate?.id?._serialized === groupJid);
-    } catch (e) {
-      diagnostics.push(`getChats yedeği başarısız: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}`);
-    }
-  }
+  const chat = await resolveWhatsAppChat(groupJid);
   if (!chat && !page) {
     return {
       messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0,
       diagnostic: diagnostics.join(" | ") || "Grup/kanal istemcide ve WhatsApp Web Store'da bulunamadı.",
     };
   }
-  if (!chat) diagnostics.push("wwebjs sohbet nesnesi bulunamadı; WhatsApp Web Store yedeğiyle okunuyor.");
+  if (!chat) diagnostics.push("Grup/kanal istemci sohbet indeksinde bulunamadı; WhatsApp Web Store yedeğiyle okunuyor.");
 
   // syncHistory (wwebjs) — sunucudan geçmiş çekmeye zorla
   try {
@@ -753,10 +845,10 @@ export async function fetchWhatsAppMessagesDetailed(
       for (const m of batch) {
         const id = m.id?._serialized;
         if (!id || byId.has(id)) continue;
-        const ts = (m.timestamp ?? 0) * 1000;
+        const ts = waTimestampToMs(m.timestamp);
         if (!ts || ts <= cutoff) continue;
-        const text = String(m.body ?? (m as any).caption ?? "").trim();
-        if (!text || text.length < 8) continue;
+        const text = extractWhatsAppText(m);
+        if (!text || text.length < 4) continue;
         byId.set(id, { id, remoteJid: groupJid, text, timestamp: ts });
       }
       return batch.length;
@@ -836,7 +928,8 @@ export async function fetchWhatsAppMessagesDetailed(
           const count = arr.length || msgsBefore;
           let oldest = Date.now();
           for (const m of arr) {
-            const t = (m.t ?? m.timestamp ?? 0) * 1000;
+            const rawTimestamp = Number(m.t ?? m.timestamp ?? 0);
+            const t = rawTimestamp > 0 && rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
             if (t > 0 && t < oldest) oldest = t;
           }
           const noGrowth = count <= msgsBefore && loaded === 0;
