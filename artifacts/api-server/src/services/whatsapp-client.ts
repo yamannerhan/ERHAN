@@ -13,6 +13,8 @@ let pendingPhone: string | null = null;
 /** true = kullanıcı onay kodu istedi; QR asla UI'ya gitmez */
 let pairingIntent = false;
 let pairingCodeRequested = false;
+/** Telefon kodu/QR kabul etti; ready henüz gelmedi */
+let authAccepted = false;
 let ClientCtor: any = null;
 let LocalAuthCtor: any = null;
 /** Admin «Bağlantıyı Kes» — otomatik yeniden bağlanma yapma */
@@ -20,6 +22,9 @@ let manualStop = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+let readyFallbackTimer: ReturnType<typeof setInterval> | null = null;
+let readyFallbackStartedAt = 0;
+let sessionSoftRestartTried = false;
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
@@ -184,39 +189,48 @@ function attachHandlers(c: any): void {
     }
   });
 
-  c.on("loading_screen", (percent: string, message: string) => {
-    logger.info(`wa: loading ${percent}% ${message}`);
-  });
-
   c.on("code", (code: string) => {
     setPairingCode(code);
   });
 
   c.on("authenticated", () => {
     logger.info("wa: authenticated");
-    lastError = null;
+    authAccepted = true;
+    pairingCode = null;
+    qrDataUrl = null;
+    lastError = "Telefon onayladı — uygulama senkron bekliyor…";
+    startReadyFallbackWatcher();
   });
 
   c.on("ready", () => {
-    logger.info("wa: connected");
-    isReady = true;
-    qrDataUrl = null;
-    pairingCode = null;
-    pendingPhone = null;
-    pairingIntent = false;
-    pairingCodeRequested = false;
-    lastError = null;
-    reconnectAttempts = 0;
-    manualStop = false;
-    startWhatsAppWatchdog();
-    void import("../workers/scraper").then((m) => {
-      if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
-    }).catch(() => {});
+    markWhatsAppReady("ready_event");
+  });
+
+  c.on("change_state", (state: string) => {
+    logger.info({ state }, "wa: change_state");
+    if (String(state).toUpperCase() === "CONNECTED" && authAccepted && !isReady) {
+      lastError = "WhatsApp CONNECTED — hazırlık tamamlanıyor…";
+      void tryPromoteConnectedToReady("change_state");
+    }
+  });
+
+  c.on("loading_screen", (percent: string, message: string) => {
+    logger.info(`wa: loading ${percent}% ${message}`);
+    if (authAccepted && !isReady) {
+      lastError = `WhatsApp yükleniyor… %${percent}`;
+    }
+    // %99'da takılı kalma: senkron yedeğini hızlandır
+    const n = Number(percent);
+    if (!Number.isNaN(n) && n >= 99 && authAccepted && !isReady) {
+      void tryPromoteConnectedToReady("loading_99");
+    }
   });
 
   c.on("disconnected", (reason: string) => {
     logger.warn(`wa: disconnected - ${reason}`);
     isReady = false;
+    authAccepted = false;
+    stopReadyFallbackWatcher();
     stopWhatsAppWatchdog();
     const old = client;
     client = null;
@@ -230,6 +244,8 @@ function attachHandlers(c: any): void {
   c.on("auth_failure", (msg: string) => {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
+    authAccepted = false;
+    stopReadyFallbackWatcher();
     stopWhatsAppWatchdog();
     client = null;
     qrDataUrl = null;
@@ -237,6 +253,123 @@ function attachHandlers(c: any): void {
     lastError = `Kimlik doğrulama hatası: ${msg}`;
     if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
   });
+}
+
+function markWhatsAppReady(reason: string): void {
+  if (isReady && client) {
+    stopReadyFallbackWatcher();
+    return;
+  }
+  if (!client) return;
+  logger.info({ reason }, "wa: connected");
+  isReady = true;
+  authAccepted = true;
+  qrDataUrl = null;
+  pairingCode = null;
+  pendingPhone = null;
+  pairingIntent = false;
+  pairingCodeRequested = false;
+  lastError = null;
+  reconnectAttempts = 0;
+  sessionSoftRestartTried = false;
+  manualStop = false;
+  stopReadyFallbackWatcher();
+  startWhatsAppWatchdog();
+  void import("../workers/scraper").then((m) => {
+    if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
+  }).catch(() => {});
+}
+
+function stopReadyFallbackWatcher(): void {
+  if (readyFallbackTimer) {
+    clearInterval(readyFallbackTimer);
+    readyFallbackTimer = null;
+  }
+  readyFallbackStartedAt = 0;
+}
+
+/**
+ * Telefon kodu kabul edilip ready gelmezse (wwebjs hasSynced takılması)
+ * getState/Store ile bağlanmış say; gerekirse oturumu silmeden soft restart.
+ */
+function startReadyFallbackWatcher(): void {
+  if (readyFallbackTimer || isReady || manualStop) return;
+  readyFallbackStartedAt = Date.now();
+  logger.info("wa: ready fallback watcher başladı");
+  readyFallbackTimer = setInterval(() => {
+    void (async () => {
+      if (manualStop || isReady || !client) {
+        stopReadyFallbackWatcher();
+        return;
+      }
+      const elapsed = Date.now() - readyFallbackStartedAt;
+      await tryPromoteConnectedToReady("fallback_poll");
+
+      // 25 sn sonra oturumu koruyarak yeniden başlat — hasSynced kaçmış olabilir
+      if (!isReady && elapsed >= 25_000 && !sessionSoftRestartTried && hasWhatsAppLocalSession()) {
+        sessionSoftRestartTried = true;
+        lastError = "Senkron takıldı — kayıtlı oturumla yeniden bağlanılıyor…";
+        logger.warn("wa: ready gelmedi — soft session restart");
+        stopReadyFallbackWatcher();
+        const old = client;
+        client = null;
+        isReady = false;
+        try { await old?.destroy?.(); } catch { /* ignore */ }
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          await startWhatsAppClient({ force: true });
+        } catch (e) {
+          logger.warn({ err: e }, "wa: soft restart failed");
+          scheduleWhatsAppReconnect("soft_restart_failed");
+        }
+        return;
+      }
+
+      if (!isReady && elapsed >= 90_000) {
+        lastError = "WhatsApp telefonda bağlandı ama uygulama hazır olamadı. Bir kez daha «Bağlan» deneyin.";
+        logger.error("wa: ready fallback timeout (90s)");
+        stopReadyFallbackWatcher();
+      }
+    })();
+  }, 2500);
+}
+
+async function tryPromoteConnectedToReady(reason: string): Promise<void> {
+  if (isReady || !client || manualStop) return;
+  try {
+    const state = String(await client.getState?.() ?? "").toUpperCase();
+    if (state && state !== "CONNECTED") {
+      if (authAccepted) lastError = `WhatsApp durumu: ${state} — bekleniyor…`;
+      return;
+    }
+
+    const page = (client as any).pupPage;
+    let storeOk = false;
+    if (page?.evaluate) {
+      storeOk = Boolean(await page.evaluate(() => {
+        const w = window as any;
+        try {
+          const sock = w.require?.("WAWebSocketModel")?.Socket;
+          if (sock?.hasSynced === true) return true;
+        } catch { /* ignore */ }
+        return Boolean(
+          w.Store?.Chat
+          || w.WWebJS
+          || w.Store?.Conn
+          || w.require?.("WAWebChatCollection"),
+        );
+      }));
+    }
+
+    // CONNECTED + store hazırsa, veya uzun süredir authAccepted + CONNECTED ise ready kaçmış say
+    const waitedLong = readyFallbackStartedAt > 0 && (Date.now() - readyFallbackStartedAt) >= 12_000;
+    if (state === "CONNECTED" && (storeOk || (authAccepted && waitedLong))) {
+      await new Promise((r) => setTimeout(r, 800));
+      if (!isReady && client) markWhatsAppReady(reason);
+    }
+  } catch (e) {
+    logger.warn({ err: e, reason }, "wa: ready promote kontrolü başarısız");
+  }
 }
 
 function scheduleWhatsAppReconnect(reason: string): void {
@@ -331,7 +464,15 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
   pairingCode = null;
   pairingCodeRequested = false;
   pairingIntent = pairingMode;
-  lastError = pairingMode ? "Onay kodu hazırlanıyor… QR kullanılmayacak." : null;
+  // Soft restart (force, telefonsuz) oturumu yeniden yükler — authAccepted sıfırlanır
+  if (pairingMode || !hasWhatsAppLocalSession()) {
+    authAccepted = false;
+    sessionSoftRestartTried = false;
+  }
+  stopReadyFallbackWatcher();
+  lastError = pairingMode
+    ? "Onay kodu hazırlanıyor… QR kullanılmayacak."
+    : (hasWhatsAppLocalSession() ? "Kayıtlı oturumla bağlanılıyor…" : null);
 
   if (pairingMode) {
     pendingPhone = normalizePhone(opts!.phoneNumber!);
@@ -479,15 +620,26 @@ export function isWhatsAppReady(): boolean {
 export function getWhatsAppStatus() {
   let chromePath: string | null = null;
   try { chromePath = resolveExecutablePath(); } catch { chromePath = null; }
+  const phase = isWhatsAppReady()
+    ? "ready"
+    : authAccepted
+      ? "authenticating"
+      : (pairingIntent || !!pairingCode)
+        ? "pairing"
+        : starting
+          ? "starting"
+          : "idle";
   return {
     ready: isWhatsAppReady(),
     connected: isWhatsAppReady(),
     starting,
     pairing: pairingIntent,
+    authAccepted,
+    phase,
     hasSession: hasWhatsAppLocalSession(),
     // Onay kodu modunda QR asla dönmesin
-    qr: pairingIntent ? null : qrDataUrl,
-    pairingCode,
+    qr: pairingIntent && !authAccepted ? null : (pairingIntent ? null : qrDataUrl),
+    pairingCode: authAccepted ? null : pairingCode,
     phone: pendingPhone,
     error: lastError,
     chromePath,
@@ -497,6 +649,9 @@ export function getWhatsAppStatus() {
 export async function stopWhatsAppClient(): Promise<void> {
   manualStop = true;
   pairingIntent = false;
+  authAccepted = false;
+  sessionSoftRestartTried = false;
+  stopReadyFallbackWatcher();
   pairingCodeRequested = false;
   pendingPhone = null;
   stopWhatsAppWatchdog();

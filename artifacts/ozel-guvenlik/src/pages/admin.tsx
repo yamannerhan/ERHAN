@@ -3357,24 +3357,26 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         connected?: boolean; ready?: boolean; qr?: string | null;
         pairingCode?: string | null; pairing?: boolean;
         error?: string | null; starting?: boolean;
+        authAccepted?: boolean; phase?: string;
       };
       const isConn = !!(nextStatus.connected ?? nextStatus.ready);
-      const isPairing = !!(nextStatus.pairing || pairingMode);
+      const authPending = !!(nextStatus.authAccepted || nextStatus.phase === "authenticating");
+      const isPairing = !!(nextStatus.pairing || pairingMode) && !authPending && !isConn;
       setConnected(isConn);
       if (isConn) setPairingMode(false);
-      else if (nextStatus.pairing) setPairingMode(true);
+      else if (nextStatus.pairing && !authPending) setPairingMode(true);
       // Onay kodu modunda QR gösterme
       setQr(isPairing ? null : (nextStatus.qr ?? null));
-      // Kısa kopmalarda kodun UI'dan kaybolmasını engelle
+      // Kısa kopmalarda kodun UI'dan kaybolmasını engelle; telefon onayladıysa kodu kaldır
       setPairingCode((prev) => {
-        if (isConn) return null;
+        if (isConn || authPending) return null;
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
         if (isPairing && prev) return prev;
         return nextStatus.pairingCode ?? null;
       });
       setErrorLog(nextStatus.error ?? "");
       if (isConn) setQrStatus("ready");
-      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
+      else if (authPending || isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
       else if (nextStatus.error) setQrStatus("failed");
 
       if (isConn) {
@@ -3614,12 +3616,24 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
               <span className={`text-xs font-bold ${connected ? "text-emerald-400" : "text-amber-400"}`}>
-                {connected ? "Bağlı" : qrStatus === "connecting" ? "Bekleniyor…" : "Bağlı değil"}
+                {connected
+                  ? "Bağlı"
+                  : errorLog?.includes("Telefon onayladı") || errorLog?.includes("CONNECTED") || errorLog?.includes("yükleniyor")
+                    ? "Senkron…"
+                    : qrStatus === "connecting"
+                      ? "Bekleniyor…"
+                      : "Bağlı değil"}
               </span>
             </div>
             {connected ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">
                 WhatsApp Web oturumu aktif. Temiz tarama (gidebildiği kadar) için «Sıfırla / Tekrar Tara»; sadece yeni mesaj için «Şimdi Tara». Bot ilanı sitede 15 gün.
+              </div>
+            ) : (errorLog?.includes("Telefon onayladı") || errorLog?.includes("CONNECTED") || errorLog?.includes("Senkron takıldı") || errorLog?.includes("yükleniyor")) && !pairingCode ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 space-y-2">
+                <p className="font-bold">Telefon onayladı — uygulama bağlanıyor…</p>
+                <p className="text-xs text-amber-200/90">{errorLog}</p>
+                <p className="text-[10px] text-slate-400">Sayfayı kapatmayın. Takılırsa otomatik yeniden denenecek (1 dk).</p>
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">
