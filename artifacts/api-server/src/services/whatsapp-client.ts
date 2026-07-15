@@ -20,20 +20,6 @@ let manualStop = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
-/** Puppeteer sayfasını aynı anda getChats + deep fetch paylaşmasın */
-let pageBusy: Promise<void> = Promise.resolve();
-
-async function withWhatsAppPageLock<T>(fn: () => Promise<T>): Promise<T> {
-  let release!: () => void;
-  const previous = pageBusy;
-  pageBusy = new Promise<void>((resolve) => { release = resolve; });
-  await previous.catch(() => undefined);
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
 
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH || "./.wwebjs_auth";
 const WA_CLIENT_ID = "ozelguvenlik";
@@ -149,37 +135,40 @@ function setPairingCode(code: string | null): void {
   if (!code) return;
   const raw = String(code).replace(/\s+/g, "").toUpperCase();
   if (raw.length < 6) return;
-  if (pairingCode === raw) return;
   pairingCode = raw;
   qrDataUrl = null;
-  lastError = "Telefonda kodu girin — giriş bitene kadar bu ekranı kapatmayın…";
+  lastError = null;
   logger.info({ codeLen: raw.length }, "wa: pairing code set");
 }
 
-/** Kod geldikten sonra: yenileme + inject tekrar requestPairingCode yapmasın (bağlantı kopar) */
-function stabilizePairingSession(c: any): void {
+async function requestPairingCodeNow(c: any, phone: string): Promise<string | null> {
+  if (!c || typeof c.requestPairingCode !== "function") return null;
   try {
-    if (c?.options?.pairWithPhoneNumber) {
-      c.options.pairWithPhoneNumber.phoneNumber = "";
+    const code = await c.requestPairingCode(phone, true, 180_000);
+    if (code) {
+      setPairingCode(String(code));
+      return pairingCode;
     }
-  } catch { /* ignore */ }
-  void c?.pupPage?.evaluate?.(() => {
-    const w = window as unknown as { codeInterval?: ReturnType<typeof setInterval> };
-    if (w.codeInterval) {
-      clearInterval(w.codeInterval);
-      w.codeInterval = undefined;
-    }
-  }).catch(() => undefined);
+  } catch (e) {
+    logger.warn({ err: e }, "wa: requestPairingCode failed");
+  }
+  return null;
 }
 
 function attachHandlers(c: any): void {
   c.on("qr", async (qr: string) => {
-    // Onay kodu modunda QR gösterme / ikinci kod isteği YOK (çift istek = «bağlantıda sorun»)
+    // Onay kodu modunda QR'ı ASLA gösterme — kod iste
     if (pairingIntent && pendingPhone) {
-      logger.info("wa: QR yoksayıldı (onay kodu modu)");
+      logger.info("wa: QR yoksayıldı (onay kodu modu) — pairing code isteniyor");
       qrDataUrl = null;
-      if (pairingCode) {
-        lastError = "Telefonda kodu girin — bekleyin…";
+      if (!pairingCode && !pairingCodeRequested) {
+        pairingCodeRequested = true;
+        void requestPairingCodeNow(c, pendingPhone).then((code) => {
+          if (!code) {
+            pairingCodeRequested = false;
+            lastError = "Onay kodu alınamadı. Numarayı 905… formatında kontrol edip tekrar deneyin.";
+          }
+        });
       }
       return;
     }
@@ -197,22 +186,15 @@ function attachHandlers(c: any): void {
 
   c.on("loading_screen", (percent: string, message: string) => {
     logger.info(`wa: loading ${percent}% ${message}`);
-    if (pairingIntent) {
-      lastError = `Giriş yapılıyor… %${percent}`;
-    }
   });
 
   c.on("code", (code: string) => {
     setPairingCode(code);
-    stabilizePairingSession(c);
   });
 
   c.on("authenticated", () => {
     logger.info("wa: authenticated");
-    stabilizePairingSession(c);
-    lastError = pairingIntent
-      ? "Giriş yapılıyor — oturum kaydediliyor, bekleyin…"
-      : null;
+    lastError = null;
   });
 
   c.on("ready", () => {
@@ -226,10 +208,6 @@ function attachHandlers(c: any): void {
     lastError = null;
     reconnectAttempts = 0;
     manualStop = false;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
     startWhatsAppWatchdog();
     void import("../workers/scraper").then((m) => {
       if (typeof m.onWhatsAppReady === "function") m.onWhatsAppReady();
@@ -237,70 +215,32 @@ function attachHandlers(c: any): void {
   });
 
   c.on("disconnected", (reason: string) => {
-    const reasonStr = String(reason ?? "unknown");
-    logger.warn(`wa: disconnected - ${reasonStr}`);
+    logger.warn(`wa: disconnected - ${reason}`);
     isReady = false;
     stopWhatsAppWatchdog();
-    const wasPairing = pairingIntent && !!pendingPhone;
-    const savedPhone = pendingPhone;
-    const savedCode = pairingCode;
-    qrDataUrl = null;
-
-    // Kod / giriş sırasında client'ı öldürme → telefonda «bağlantıda sorun oluştu»
-    if (wasPairing && savedPhone && savedCode) {
-      pairingIntent = true;
-      pendingPhone = savedPhone;
-      pairingCode = savedCode;
-      const browser = client?.pupBrowser as { isConnected?: () => boolean } | undefined;
-      const alive = !!client?.pupPage && browser?.isConnected?.() !== false;
-      if (alive) {
-        lastError = "Giriş yapılıyor — bekleyin, tekrar basmayın…";
-        logger.info({ reason: reasonStr }, "wa: pairing disconnect yok sayıldı (client canlı)");
-        return;
-      }
-      const old = client;
-      client = null;
-      lastError = "Giriş kesildi. «Onay Kodu ile Bağlan»a bir kez daha basın (yeni kod).";
-      try { void old?.destroy?.(); } catch { /* ignore */ }
-      return;
-    }
-
     const old = client;
     client = null;
-    if (wasPairing && savedPhone) {
-      pairingIntent = true;
-      pendingPhone = savedPhone;
-      pairingCode = null;
-      lastError = `Bağlantı koptu (${reasonStr}). «Onay Kodu ile Bağlan»a tekrar basın.`;
-      try { void old?.destroy?.(); } catch { /* ignore */ }
-      return;
-    }
-
+    qrDataUrl = null;
     pairingCode = null;
-    lastError = `Bağlantı koptu: ${reasonStr}`;
+    lastError = `Bağlantı koptu: ${reason}`;
     try { void old?.destroy?.(); } catch { /* ignore */ }
-    scheduleWhatsAppReconnect(reasonStr);
+    scheduleWhatsAppReconnect(reason);
   });
 
   c.on("auth_failure", (msg: string) => {
     logger.error(`wa: auth failure - ${msg}`);
     isReady = false;
     stopWhatsAppWatchdog();
-    const old = client;
     client = null;
     qrDataUrl = null;
     pairingCode = null;
     lastError = `Kimlik doğrulama hatası: ${msg}`;
-    try { void old?.destroy?.(); } catch { /* ignore */ }
-    if (pairingIntent) return;
     if (!manualStop && reconnectAttempts < 2) scheduleWhatsAppReconnect(`auth_failure:${msg}`);
   });
 }
 
 function scheduleWhatsAppReconnect(reason: string): void {
   if (manualStop) return;
-  // Onay kodu beklerken QR modunda yeniden başlatma
-  if (pairingIntent && pendingPhone) return;
   if (reconnectTimer) return;
   reconnectAttempts++;
   if (reconnectAttempts > 20) {
@@ -439,18 +379,15 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
         ],
       },
       restartOnAuthFail: false,
-      authTimeoutMs: 180_000,
     };
 
-    // SADECE pairWithPhoneNumber — manuel requestPairingCode çift istek yapıp
-    // telefonda «bağlantıda sorun oluştu» verir.
+    // Dolu phoneNumber → kod; boş/yok → QR. Pairing'de mutlaka phoneNumber ver.
     if (pairingMode && pendingPhone) {
       clientOpts.pairWithPhoneNumber = {
         phoneNumber: String(pendingPhone),
         showNotification: true,
-        intervalMs: 600_000,
+        intervalMs: 180_000,
       };
-      pairingCodeRequested = true;
     }
 
     client = new ClientCtor(clientOpts);
@@ -458,18 +395,22 @@ export async function startWhatsAppClient(opts?: { phoneNumber?: string; force?:
 
     await client.initialize();
 
-    if (pairingMode && pendingPhone && !isReady) {
-      for (let i = 0; i < 40 && !pairingCode && !isReady; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        if (i === 5 || i === 15) {
-          lastError = `Onay kodu bekleniyor… (${pendingPhone})`;
+    // initialize sonrası kod yoksa zorla iste ve bekle
+    if (pairingMode && pendingPhone && !isReady && !pairingCode) {
+      lastError = "Onay kodu isteniyor…";
+      pairingCodeRequested = true;
+      const code = await requestPairingCodeNow(client, pendingPhone);
+      if (!code) {
+        // Birkaç sn daha code event bekledikten sonra hata
+        for (let i = 0; i < 20 && !pairingCode && !isReady; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
         }
       }
       if (!pairingCode && !isReady) {
-        lastError = "Onay kodu gelmedi. Bir kez daha «Onay Kodu ile Bağlan»a basın.";
+        lastError = "Onay kodu gelmedi. 905xxxxxxxxx formatında tekrar deneyin (QR kapalı).";
         logger.warn({ phone: pendingPhone }, "wa: pairing code gelmedi");
-      } else if (pairingCode && !isReady) {
-        lastError = "Telefonda kodu girin — giriş bitene kadar bekleyin…";
+      } else if (pairingCode) {
+        lastError = null;
       }
     }
   } catch (e) {
@@ -579,126 +520,50 @@ export async function stopWhatsAppClient(): Promise<void> {
 
 export async function fetchWhatsAppGroups(): Promise<WhatsAppChannel[]> {
   if (!client || !isReady) return [];
-  return withWhatsAppPageLock(async () => {
-    const byId = new Map<string, WhatsAppChannel>();
-
-    const pullChats = async () => {
-      const chats = await client.getChats();
-      for (const c of chats as any[]) {
-        const id = String(c?.id?._serialized ?? "");
-        if (!id) continue;
-        const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
-        const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
-        if (!isChannel && !isGroup) continue;
-        byId.set(id, {
-          id,
-          name: String(c.name || c.formattedTitle || id),
-          participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
-          kind: isChannel ? "channel" : "group",
-        });
-      }
-    };
-
-    try {
-      await pullChats();
-    } catch (e) {
-      logger.warn({ err: e }, "wa: getChats failed — retry");
-      await new Promise((r) => setTimeout(r, 1500));
-      try {
-        await pullChats();
-      } catch (e2) {
-        logger.warn({ err: e2 }, "wa: getChats retry failed");
-      }
-    }
-
-    // Abone olunan kanallar — getChats bazen eksik bırakır
-    try {
-      if (typeof client.getChannels === "function") {
-        const channels = await client.getChannels();
-        for (const c of channels as any[]) {
-          const id = String(c?.id?._serialized ?? "");
-          if (!id) continue;
-          byId.set(id, {
-            id,
-            name: String(c.name || c.formattedTitle || id),
-            participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
-            kind: "channel",
-          });
-        }
-      }
-    } catch (e) {
-      logger.warn({ err: e }, "wa: getChannels failed");
-    }
-
-    return [...byId.values()].sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
-      return a.name.localeCompare(b.name, "tr");
-    });
-  });
-}
-
-/** WA timestamp sn veya ms olabilir */
-function waTsToMs(raw: unknown): number {
-  const n = Number(raw ?? 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  // 1e12 ≈ 2001 ms; daha küçükse saniye kabul et
-  return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
-}
-
-function extractWaText(m: any): string {
-  const raw = m?.body
-    ?? m?.caption
-    ?? m?._data?.body
-    ?? m?._data?.caption
-    ?? m?.list?.description
-    ?? m?.hydratedButtonsMessage?.contentText
-    ?? m?.text
-    ?? "";
-  return String(raw).trim();
-}
-
-async function resolveWhatsAppChat(groupJid: string): Promise<any | null> {
-  if (!client) return null;
-  const jid = String(groupJid || "").trim();
-  if (!jid) return null;
-
-  try {
-    const chat = await client.getChatById(jid);
-    if (chat) return chat;
-  } catch (e) {
-    logger.warn({ err: e, groupJid: jid }, "wa: getChatById failed");
-  }
-
-  if (jid.includes("@newsletter")) {
-    try {
-      if (typeof client.getChannelById === "function") {
-        const ch = await client.getChannelById(jid);
-        if (ch) return ch;
-      }
-    } catch (e) {
-      logger.warn({ err: e, groupJid: jid }, "wa: getChannelById failed");
-    }
-  }
+  const byId = new Map<string, WhatsAppChannel>();
 
   try {
     const chats = await client.getChats();
-    const exact = (chats as any[]).find((c) => String(c?.id?._serialized ?? "") === jid);
-    if (exact) return exact;
-    const local = jid.split("@")[0] || "";
-    if (local) {
-      const fuzzy = (chats as any[]).find((c) => {
-        const id = String(c?.id?._serialized ?? "");
-        return id.startsWith(`${local}@`) || id.includes(local);
+    for (const c of chats as any[]) {
+      const id = String(c?.id?._serialized ?? "");
+      if (!id) continue;
+      const isChannel = !!(c.isChannel || c.isNewsletter || id.endsWith("@newsletter"));
+      const isGroup = !!(c.isGroup || id.endsWith("@g.us"));
+      if (!isChannel && !isGroup) continue;
+      byId.set(id, {
+        id,
+        name: String(c.name || c.formattedTitle || id),
+        participants: Number(c.participants?.length ?? c.groupMetadata?.participants?.length ?? 0) || 0,
+        kind: isChannel ? "channel" : "group",
       });
-      if (fuzzy) {
-        logger.info({ wanted: jid, found: fuzzy.id?._serialized }, "wa: chat fuzzy eşleşti");
-        return fuzzy;
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "wa: getChats failed");
+  }
+
+  // Abone olunan kanallar — getChats bazen eksik bırakır
+  try {
+    if (typeof client.getChannels === "function") {
+      const channels = await client.getChannels();
+      for (const c of channels as any[]) {
+        const id = String(c?.id?._serialized ?? "");
+        if (!id) continue;
+        byId.set(id, {
+          id,
+          name: String(c.name || c.formattedTitle || id),
+          participants: Number(c.subscribersCount ?? c.participants?.length ?? 0) || 0,
+          kind: "channel",
+        });
       }
     }
   } catch (e) {
-    logger.warn({ err: e, groupJid: jid }, "wa: getChats fallback failed");
+    logger.warn({ err: e }, "wa: getChannels failed");
   }
-  return null;
+
+  return [...byId.values()].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
+    return a.name.localeCompare(b.name, "tr");
+  });
 }
 
 /** Store'daki metin mesajlarını cutoff sonrası oku (WA bellek penceresi kaydığı için tur tur biriktirilir). */
@@ -708,68 +573,43 @@ async function harvestStoreMessages(
   groupJid: string,
   cutoff: number,
   byId: Map<string, WhatsAppMessage>,
-): Promise<{ count: number; oldest: number; raw: number }> {
+): Promise<{ count: number; oldest: number }> {
   const storeMsgs: Array<{ id: string; text: string; timestamp: number }> = await page.evaluate(
     (id: string, cut: number) => {
       const w = window as any;
-      const models = w.Store?.Chat?.models || [];
-      const local = String(id).split("@")[0] || "";
       const storeChat =
         w.Store?.Chat?.get?.(id) ||
         w.Store?.Chat?.find?.(id) ||
-        models.find((c: any) => c?.id?._serialized === id) ||
-        models.find((c: any) => String(c?.id?._serialized || "").includes(local || "__none__"));
-
+        (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === id);
+      if (!storeChat) return [];
+      const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
       const out: Array<{ id: string; text: string; timestamp: number }> = [];
-      const seen = new Set<string>();
-      const pushMsg = (m: any) => {
-        const mid = String(m?.id?._serialized ?? m?.id ?? "");
-        if (!mid || seen.has(mid)) return;
-        const rawT = Number(m?.t ?? m?.timestamp ?? m?._data?.t ?? 0);
-        const ts = rawT > 0 && rawT < 1e12 ? rawT * 1000 : rawT;
-        if (!ts || ts <= cut) return;
+      for (const m of arr) {
+        const mid = m.id?._serialized;
+        const ts = (m.t ?? m.timestamp ?? 0) * 1000;
+        if (!mid || !ts || ts <= cut) continue;
+        // body, caption, veya medya açıklaması
         const text = String(
-          m?.body
-          ?? m?.caption
-          ?? m?._data?.body
-          ?? m?._data?.caption
-          ?? m?.list?.description
-          ?? m?.hydratedButtonsMessage?.contentText
+          m.body
+          ?? m.caption
+          ?? m.list?.description
+          ?? m.hydratedButtonsMessage?.contentText
           ?? "",
         ).trim();
-        if (!text || text.length < 4) return;
-        seen.add(mid);
+        if (!text || text.length < 8) continue;
         out.push({ id: mid, text, timestamp: ts });
-      };
-
-      if (storeChat) {
-        const arr = storeChat.msgs?.getModelsArray?.() ?? storeChat.msgs?.models ?? [];
-        for (const m of arr) pushMsg(m);
       }
-
-      // Chat.msgs boşsa global Msg store'dan sohbet mesajlarını tara
-      try {
-        const all = w.Store?.Msg?.models
-          ?? w.Store?.Msg?.getModelsArray?.()
-          ?? [];
-        for (const m of all) {
-          const from = String(m?.id?.remote ?? m?.from ?? m?.to ?? m?.chatId?._serialized ?? "");
-          if (from !== id && !from.includes(local)) continue;
-          pushMsg(m);
-        }
-      } catch { /* ignore */ }
-
       return out;
     },
     chatId,
     cutoff,
-  ).catch(() => [] as Array<{ id: string; text: string; timestamp: number }>);
+  );
   let oldest = Date.now();
   for (const m of storeMsgs) {
     byId.set(m.id, { id: m.id, remoteJid: groupJid, text: m.text, timestamp: m.timestamp });
     if (m.timestamp < oldest) oldest = m.timestamp;
   }
-  return { count: storeMsgs.length, oldest: storeMsgs.length ? oldest : Date.now(), raw: storeMsgs.length };
+  return { count: storeMsgs.length, oldest: storeMsgs.length ? oldest : Date.now() };
 }
 
 export type WhatsAppFetchResult = {
@@ -812,161 +652,89 @@ export async function fetchWhatsAppMessagesDetailed(
     return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
   }
 
-  return withWhatsAppPageLock(() => fetchWhatsAppMessagesDetailedUnlocked(groupJid, opts));
-}
-
-async function fetchWhatsAppMessagesDetailedUnlocked(
-  groupJid: string,
-  opts: {
-    afterTimestampMs?: number;
-    limit?: number;
-    maxAgeDays?: number;
-    deep?: boolean;
-  },
-): Promise<WhatsAppFetchResult> {
   const page = (client as any).pupPage;
-  const cutoff = opts.afterTimestampMs != null
-    ? opts.afterTimestampMs
-    : (Date.now() - (opts.maxAgeDays ?? 730) * 24 * 60 * 60 * 1000);
-
   try {
+    // Sohbeti aç — geçmiş senkronu için şart
     await (client as any).interface?.openChatWindow?.(groupJid);
-    await new Promise((r) => setTimeout(r, 1800));
-  } catch { /* ignore */ }
-
-  let chat = await resolveWhatsAppChat(groupJid);
-  if (!chat) {
-    // Bir kez daha açıp dene — WA sohbet listesi gecikebilir
-    try {
-      await (client as any).interface?.openChatWindow?.(groupJid);
-      await new Promise((r) => setTimeout(r, 2500));
-    } catch { /* ignore */ }
-    chat = await resolveWhatsAppChat(groupJid);
-  }
-  if (!chat) {
-    logger.warn({ groupJid }, "wa: sohbet bulunamadı");
-    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
-  }
-
-  const chatId = String((chat as any).id?._serialized ?? groupJid);
-  if (page) {
-    try {
-      await page.evaluate((jid: string) => {
-        const w = window as any;
-        const models = w.Store?.Chat?.models || [];
-        const storeChat =
-          w.Store?.Chat?.get?.(jid) ||
-          w.Store?.Chat?.find?.(jid) ||
-          models.find((c: any) => c?.id?._serialized === jid);
-        if (storeChat?.presence?.subscribe) storeChat.presence.subscribe();
-        if (typeof storeChat?.syncHistory === "function") {
-          try { storeChat.syncHistory(); } catch { /* ignore */ }
-        }
-      }, chatId);
-    } catch { /* ignore */ }
-  }
-
-  const syncChatHistory = async () => {
-    try {
-      if (typeof chat.syncHistory === "function") {
-        const synced = await chat.syncHistory();
-        logger.info({ groupJid: chatId, synced }, "wa: syncHistory");
-      }
-    } catch (e) {
-      logger.warn({ err: e, groupJid: chatId }, "wa: syncHistory failed");
-    }
+    await new Promise((r) => setTimeout(r, 2500));
     if (page) {
       try {
         await page.evaluate((jid: string) => {
           const w = window as any;
-          const storeChat =
+          const chat =
             w.Store?.Chat?.get?.(jid) ||
-            w.Store?.Chat?.find?.(jid) ||
-            (w.Store?.Chat?.models || []).find((c: any) => c?.id?._serialized === jid);
-          if (typeof storeChat?.syncHistory === "function") {
-            try { storeChat.syncHistory(); } catch { /* ignore */ }
+            w.Store?.Chat?.find?.(jid);
+          if (chat?.presence?.subscribe) chat.presence.subscribe();
+          if (typeof chat?.syncHistory === "function") {
+            try { chat.syncHistory(); } catch { /* ignore */ }
           }
-        }, chatId);
+        }, groupJid);
       } catch { /* ignore */ }
     }
-  };
+  } catch { /* ignore */ }
 
-  await syncChatHistory();
-  await new Promise((r) => setTimeout(r, 2500));
+  let chat: any;
+  try {
+    chat = await client.getChatById(groupJid);
+  } catch (e) {
+    logger.warn({ err: e, groupJid }, "wa: getChatById failed");
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+  }
+  if (!chat) {
+    return { messages: [], oldestTs: Date.now(), reachedCutoff: false, historyExhausted: false, rounds: 0 };
+  }
 
+  // syncHistory (wwebjs) — sunucudan geçmiş çekmeye zorla
+  try {
+    if (typeof chat.syncHistory === "function") {
+      const synced = await chat.syncHistory();
+      logger.info({ groupJid, synced }, "wa: syncHistory");
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  } catch (e) {
+    logger.warn({ err: e, groupJid }, "wa: syncHistory failed");
+  }
+
+  const cutoff = opts.afterTimestampMs != null
+    ? opts.afterTimestampMs
+    : (Date.now() - (opts.maxAgeDays ?? 730) * 24 * 60 * 60 * 1000);
+
+  const chatId = (chat as any).id?._serialized ?? groupJid;
   const byId = new Map<string, WhatsAppMessage>();
   let rounds = 0;
   let reachedCutoff = false;
   let historyExhausted = false;
-  let rawSeen = 0;
-
-  const ingestMessage = (m: any): boolean => {
-    const id = String(m?.id?._serialized ?? m?.id ?? "");
-    if (!id || byId.has(id)) return false;
-    const ts = waTsToMs(m?.timestamp ?? m?.t ?? m?._data?.t);
-    if (!ts || ts <= cutoff) return false;
-    const text = extractWaText(m);
-    if (!text || text.length < 4) return false;
-    byId.set(id, { id, remoteJid: chatId, text, timestamp: ts });
-    return true;
-  };
 
   const pullFetchMessages = async (limit: number) => {
     try {
       const batch = (await chat.fetchMessages({ limit })) ?? [];
-      rawSeen += batch.length;
-      let kept = 0;
       for (const m of batch) {
-        if (ingestMessage(m)) kept += 1;
+        const id = m.id?._serialized;
+        if (!id || byId.has(id)) continue;
+        const ts = (m.timestamp ?? 0) * 1000;
+        if (!ts || ts <= cutoff) continue;
+        const text = String(m.body ?? (m as any).caption ?? "").trim();
+        if (!text || text.length < 8) continue;
+        byId.set(id, { id, remoteJid: groupJid, text, timestamp: ts });
       }
-      logger.info({ groupJid: chatId, limit, batch: batch.length, kept, total: byId.size }, "wa: fetchMessages");
       return batch.length;
     } catch (e) {
-      logger.warn({ err: e, groupJid: chatId, limit }, "wa: fetchMessages failed");
+      logger.warn({ err: e, groupJid }, "wa: fetchMessages failed");
       return 0;
     }
   };
 
-  // Hızlı yol: önce son mesajlar (boş grupta uzun deep %2'de takılıyordu)
-  for (let attempt = 0; attempt < 3 && byId.size === 0; attempt++) {
-    if (attempt > 0) {
-      await syncChatHistory();
-      try {
-        await (client as any).interface?.openChatWindow?.(chatId);
-      } catch { /* ignore */ }
-      await new Promise((r) => setTimeout(r, 1500 + attempt * 1000));
-      chat = (await resolveWhatsAppChat(chatId)) || chat;
-    }
-    for (const lim of [50, 100, 200, Math.min(opts.limit ?? 200, 400)]) {
-      await pullFetchMessages(lim);
-      if (byId.size > 0) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    if (page) {
-      await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
-    }
-    // chat.messages / _prefetch yedek
-    if (byId.size === 0) {
-      try {
-        const cached = (chat as any).messages ?? (chat as any)._msgs ?? [];
-        const arr = typeof cached.getModelsArray === "function"
-          ? cached.getModelsArray()
-          : (Array.isArray(cached) ? cached : []);
-        for (const m of arr) ingestMessage(m);
-      } catch { /* ignore */ }
-    }
-  }
-
   if (opts.deep && page) {
-    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
-    if (byId.size === 0) await pullFetchMessages(300);
+    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    await pullFetchMessages(500);
 
     let stagnant = 0;
     let lastHarvested = byId.size;
     let lastOldest = Date.now();
-    // Boş başlayan sohbette 120 tur = %2'de takılma. Mesaj yoksa erken çık.
-    const maxRounds = byId.size === 0 ? 10 : 60;
-    const STAGNANT_LIMIT = byId.size === 0 ? 4 : 10;
+    // QR/Chromium genelde 30 güne inemez — uzun tur boşa zaman kaybettirir
+    const maxRounds = 120;
+    /** İlerleme yoksa bu kadar tur sonra “gidebildiği kadar” kabul et */
+    const STAGNANT_LIMIT = 12;
 
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
@@ -1018,8 +786,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
           const count = arr.length || msgsBefore;
           let oldest = Date.now();
           for (const m of arr) {
-            const rawT = Number(m.t ?? m.timestamp ?? 0);
-            const t = rawT > 0 && rawT < 1e12 ? rawT * 1000 : rawT;
+            const t = (m.t ?? m.timestamp ?? 0) * 1000;
             if (t > 0 && t < oldest) oldest = t;
           }
           const noGrowth = count <= msgsBefore && loaded === 0;
@@ -1054,7 +821,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       await new Promise((r) => setTimeout(r, 500));
 
       // 3) Her tur harvest + ara ara fetchMessages
-      const harvested = await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+      const harvested = await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
       if (i % 5 === 0) await pullFetchMessages(Math.min(2000, 300 + i * 20));
 
       const oldest = Math.min(info.oldest ?? Date.now(), harvested.oldest);
@@ -1063,7 +830,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       if (i % 5 === 0 || oldest <= cutoff || byId.size !== lastHarvested) {
         logger.info(
           {
-            groupJid: chatId,
+            groupJid,
             round: i + 1,
             storeCount: count,
             harvested: byId.size,
@@ -1087,7 +854,7 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
         if (stagnant >= STAGNANT_LIMIT) {
           historyExhausted = true;
           logger.warn(
-            { groupJid: chatId, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString(), stagnant },
+            { groupJid, rounds: i + 1, harvested: byId.size, oldest: new Date(oldest).toISOString(), stagnant },
             "wa: geçmiş tükendi (Chromium daha eski yüklemiyor)",
           );
           break;
@@ -1105,48 +872,36 @@ async function fetchWhatsAppMessagesDetailedUnlocked(
       historyExhausted = true;
     }
 
+    // Son bir syncHistory + büyük fetch
     try {
       if (typeof chat.syncHistory === "function") await chat.syncHistory();
     } catch { /* ignore */ }
-    await pullFetchMessages(2000);
-    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
+    await pullFetchMessages(5000);
+    await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
 
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     if (finalOldest <= cutoff) {
       reachedCutoff = true;
       historyExhausted = false;
     } else if (!reachedCutoff && byId.size > 0) {
+      // Hedefe inilemedi ama mesaj var → mevcut geçmiş tükendi sayılır
       historyExhausted = true;
     }
-  } else if (page) {
-    await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
-    if (byId.size === 0) await pullFetchMessages(Math.min(opts.limit ?? 300, 500));
-    rounds = Math.max(1, rounds);
+  } else {
+    if (page) await harvestStoreMessages(page, chatId, groupJid, cutoff, byId);
+    await pullFetchMessages(Math.min(opts.limit ?? 200, 500));
     const finalOldest = [...byId.values()].reduce((min, m) => Math.min(min, m.timestamp), Date.now());
     reachedCutoff = byId.size === 0 || finalOldest <= cutoff;
     historyExhausted = !reachedCutoff && byId.size > 0;
-  }
-
-  // Hâlâ boşsa son şans: sohbeti yeniden aç + küçük fetch
-  if (byId.size === 0) {
-    try {
-      await (client as any).interface?.openChatWindow?.(chatId);
-      await new Promise((r) => setTimeout(r, 3000));
-      chat = await resolveWhatsAppChat(chatId) || chat;
-      await pullFetchMessages(100);
-      if (page) await harvestStoreMessages(page, chatId, chatId, cutoff, byId);
-    } catch (e) {
-      logger.warn({ err: e, groupJid: chatId }, "wa: son şans fetch failed");
-    }
+    rounds = 1;
   }
 
   const out = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
   const oldestTs = out.length ? out[0]!.timestamp : Date.now();
   logger.info(
     {
-      groupJid: chatId,
+      groupJid,
       inRange: out.length,
-      rawSeen,
       deep: !!opts.deep,
       reachedCutoff,
       historyExhausted,
