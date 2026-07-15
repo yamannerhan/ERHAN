@@ -744,7 +744,6 @@ export default function AddListing() {
                 )}
               </div>
               <div className="og-cl-preview__main">
-                <span className="og-cl-preview__badge">YENİ</span>
                 <h3 className="og-cl-preview__title">{watched.title || "Özel Güvenlik Görevlisi"}</h3>
                 <div className="og-cl-preview__loc">
                   <MapPin />

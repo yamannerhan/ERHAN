@@ -74,10 +74,6 @@ function listingBlob(l: { title?: string | null; description?: string | null; re
   return `${l.title ?? ""} ${l.description ?? ""} ${l.requirements ?? ""}`.toLocaleLowerCase("tr-TR");
 }
 
-function isListingNew(createdAt: string) {
-  return Date.now() - new Date(createdAt).getTime() < 86_400_000;
-}
-
 function isListingUrgent(l: { title?: string | null; description?: string | null; requirements?: string | null }) {
   return /acil|urgent/i.test(listingBlob(l));
 }
@@ -96,14 +92,12 @@ function matchesCategory(
   return true;
 }
 
-function ListingStatusBadges({ listing }: { listing: { title?: string | null; description?: string | null; requirements?: string | null; createdAt: string } }) {
+function ListingStatusBadges({ listing }: { listing: { title?: string | null; description?: string | null; requirements?: string | null } }) {
   const urgent = isListingUrgent(listing);
-  const isNew = isListingNew(listing.createdAt);
-  if (!urgent && !isNew) return null;
+  if (!urgent) return null;
   return (
     <div className="og-lp-card-badges">
-      {urgent && <span className="og-lp-badge og-lp-badge--urgent">ACİL</span>}
-      {isNew && <span className="og-lp-badge og-lp-badge--new">YENİ</span>}
+      <span className="og-lp-badge og-lp-badge--urgent">ACİL</span>
     </div>
   );
 }
