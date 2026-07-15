@@ -41,13 +41,14 @@ function relativeDate(value?: string | Date | null): string {
 
 export function HomeNewsCards({ announcements }: { announcements: HomeAnnouncement[] }) {
   const liveItems = announcements.filter((item) => item.content?.trim()).slice(0, 3);
-  const items = liveItems.length > 0
-    ? liveItems.map((item, index) => ({
+  const items = [
+    ...liveItems.map((item, index) => ({
         ...item,
         relative: relativeDate(item.createdAt),
         imageUrl: SAMPLE_NEWS[index]?.imageUrl ?? SAMPLE_NEWS[0].imageUrl,
-      }))
-    : [...SAMPLE_NEWS];
+      })),
+    ...SAMPLE_NEWS.slice(liveItems.length),
+  ].slice(0, 3);
 
   return (
     <section className="og-home-news" aria-labelledby="home-news-title">
