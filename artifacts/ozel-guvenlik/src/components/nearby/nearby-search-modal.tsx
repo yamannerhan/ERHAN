@@ -215,10 +215,11 @@ export function NearbySearchModal({ open, onClose }: Props) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="og-nearby-title"
-            initial={isDesktop ? { opacity: 0, scale: 0.96 } : { y: "100%" }}
-            animate={isDesktop ? { opacity: 1, scale: 1 } : { y: 0 }}
-            exit={isDesktop ? { opacity: 0, scale: 0.96 } : { y: "100%" }}
+            initial={isDesktop ? { opacity: 0, scale: 0.96, x: "-50%", y: "-50%" } : { y: "100%" }}
+            animate={isDesktop ? { opacity: 1, scale: 1, x: "-50%", y: "-50%" } : { y: 0 }}
+            exit={isDesktop ? { opacity: 0, scale: 0.96, x: "-50%", y: "-50%" } : { y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            style={isDesktop ? { left: "50%", right: "auto", top: "50%", bottom: "auto" } : { left: 0, right: 0, width: "100%" }}
           >
             <div className="og-nearby-sheet__handle" aria-hidden />
             <h2 id="og-nearby-title" className="og-nearby-sheet__title">Yakınımdaki İlanları Bul</h2>

@@ -3,15 +3,9 @@
 .og-ref-quick-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: clamp(7px, 2vw, 14px);
+  gap: clamp(4px, 1.2vw, 14px);
   width: 100%;
   min-width: 0;
-}
-
-@media (max-width: 599px) {
-  .og-ref-quick-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .og-ref-quick-card {
@@ -21,9 +15,9 @@
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
-  min-height: clamp(104px, 27vw, 144px);
-  padding: clamp(12px, 3vw, 20px) clamp(5px, 1.5vw, 12px) 10px;
-  border-radius: clamp(14px, 3vw, 20px);
+  min-height: clamp(88px, 22vw, 144px);
+  padding: clamp(8px, 2vw, 20px) clamp(3px, 1vw, 12px) 8px;
+  border-radius: clamp(12px, 2.5vw, 20px);
   border: 1px solid rgba(25, 94, 165, 0.10);
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(25, 94, 165, 0.09);
@@ -50,16 +44,21 @@ html:not(.dark) .og-ref-quick-card {
 }
 
 .og-ref-quick-icon {
-  width: clamp(38px, 10vw, 54px);
-  height: clamp(38px, 10vw, 54px);
-  border-radius: 14px;
+  width: clamp(28px, 7.5vw, 54px);
+  height: clamp(28px, 7.5vw, 54px);
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #eff7ff, #ffffff);
   color: #0878e8;
-  margin-bottom: clamp(7px, 2vw, 12px);
+  margin-bottom: clamp(5px, 1.4vw, 12px);
   flex-shrink: 0;
+}
+
+.og-ref-quick-icon svg {
+  width: clamp(16px, 4.5vw, 28px) !important;
+  height: clamp(16px, 4.5vw, 28px) !important;
 }
 
 .og-ref-quick-value {
@@ -75,7 +74,7 @@ html:not(.dark) .og-ref-quick-value {
 }
 
 .og-ref-quick-title {
-  font-size: clamp(9px, 2.5vw, 14px);
+  font-size: clamp(8px, 2.1vw, 14px);
   font-weight: 800;
   line-height: 1.15;
   color: #10233f;
@@ -87,7 +86,7 @@ html:not(.dark) .og-ref-quick-title {
 }
 
 .og-ref-quick-sub {
-  font-size: clamp(8px, 2vw, 11px);
+  font-size: clamp(7px, 1.7vw, 11px);
   font-weight: 600;
   color: #71849b;
   margin-top: 6px;
@@ -171,27 +170,22 @@ html:not(.dark) .og-ref-quick-soon-overlay span {
   color: #71849b;
 }
 
-@media (min-width: 390px) {
-  .og-ref-quick-card {
-    min-height: 118px;
-    padding: 16px 8px 10px;
-  }
-  .og-ref-quick-value {
-    font-size: 17px;
-  }
-  .og-ref-quick-title {
-    font-size: 10.5px;
-  }
-}
-
-@media (max-width: 350px) {
+@media (max-width: 420px) {
   .og-ref-quick-row {
-    gap: 5px;
+    gap: 4px;
   }
 
   .og-ref-quick-card {
-    min-height: 100px;
-    padding-inline: 3px;
+    min-height: 86px;
+    padding: 7px 2px 6px;
+  }
+
+  .og-ref-quick-title {
+    font-size: 7.5px;
+  }
+
+  .og-ref-quick-sub {
+    font-size: 6.5px;
   }
 }
 

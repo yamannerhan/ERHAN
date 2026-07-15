@@ -72,12 +72,12 @@ export function HomeNewsCards({ announcements }: { announcements: HomeAnnounceme
                 <source
                   type="image/avif"
                   srcSet={`/news/${item.imageName}-320.avif 320w, /news/${item.imageName}-640.avif 640w`}
-                  sizes="(min-width: 1024px) 33vw, 100vw"
+                  sizes="33vw"
                 />
                 <source
                   type="image/webp"
                   srcSet={`/news/${item.imageName}-320.webp 320w, /news/${item.imageName}-640.webp 640w`}
-                  sizes="(min-width: 1024px) 33vw, 100vw"
+                  sizes="33vw"
                 />
                 <img
                   src={`/news/${item.imageName}.png`}
