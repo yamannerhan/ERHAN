@@ -1,4 +1,4 @@
-import { Send, Bell, FileText, MapPin } from "lucide-react";
+import { Bell, FileText, MapPin, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import "./home-ref-ui.css";
 
@@ -13,13 +13,13 @@ export function HomeQuickCards({
 }: HomeQuickCardsProps) {
   return (
     <section className="og-ref-quick-row" aria-label="Hızlı erişim">
-      <div className="og-ref-quick-card" aria-label="Yeni özellikler yakında hizmetinizde">
+      <Link href="/bana-uygun-isler" className="og-ref-quick-card" aria-label="Bana uygun işler sayfasını aç">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Send className="w-7 h-7" strokeWidth={1.8} />
+          <Sparkles className="w-7 h-7" strokeWidth={1.8} />
         </div>
-        <div className="og-ref-quick-title">Yakında Hizmetinizde</div>
-        <div className="og-ref-quick-sub">Yeni özellikleri yolda!</div>
-      </div>
+        <div className="og-ref-quick-title">Bana Uygun İşler</div>
+        <div className="og-ref-quick-sub">Tercihine göre ilan bul</div>
+      </Link>
 
       <div className="og-ref-quick-card" aria-label="Geliştirmeler yakında hizmetinizde">
         <div className="og-ref-quick-icon" aria-hidden>
