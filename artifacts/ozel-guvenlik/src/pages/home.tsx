@@ -218,7 +218,8 @@ function BannerCarousel({ banners }: { banners: Banner[] }) {
 }
 
 function formatDate(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
+  const t = new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - (Number.isFinite(t) ? t : Date.now()));
   const mins = Math.floor(diff / 60000);
   const hours = Math.floor(mins / 60);
   const days = Math.floor(hours / 24);

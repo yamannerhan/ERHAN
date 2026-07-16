@@ -80,9 +80,14 @@ function formatSalary(raw?: string | null): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+const NEW_LISTING_MS = 24 * 60 * 60 * 1000;
+/** Telegram/WA saat kayması — birkaç dk ilerideki tarihler de "yeni/az önce" sayılsın */
+const CLOCK_SKEW_MS = 2 * 60 * 60 * 1000;
+
 function formatPostedAt(iso: string): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "";
+  // İlerideki kaynak saati (saat farkı) → az önce
   const diff = Math.max(0, Date.now() - t);
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "Az önce";
@@ -93,6 +98,15 @@ function formatPostedAt(iso: string): string {
   if (days === 1) return "Dün";
   if (days < 7) return `${days} gün önce`;
   return new Date(iso).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+}
+
+/** Kaynak tarihi son 24 saat içinde mi? (küçük gelecek saat kaymasına izin ver) */
+function isWithinNewWindow(publishedAt: string, now = Date.now()): boolean {
+  const ms = new Date(publishedAt).getTime();
+  if (!Number.isFinite(ms)) return false;
+  const ageMs = now - ms;
+  // ageMs negatif = kaynak saati biraz ileride → yine yeni
+  return ageMs > -CLOCK_SKEW_MS && ageMs < NEW_LISTING_MS;
 }
 
 type Chip = { key: string; label: string; Icon: typeof Clock; tone?: "shift" };
@@ -106,20 +120,20 @@ type Props = {
   compact?: boolean;
 };
 
-/** YENİ = kaynak/paylaşım tarihi son 24 saat içinde (API createdAt = listingDisplayDate) */
+/** YENİ = kaynak/paylaşım tarihi son 24 saat (API createdAt = listingDisplayDate) */
 function useIsNewListing(publishedAt: string): boolean {
-  const calculate = () => {
-    const ms = new Date(publishedAt).getTime();
-    const ageMs = Date.now() - ms;
-    return Number.isFinite(ms) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
-  };
+  const calculate = () => isWithinNewWindow(publishedAt);
   const [isNew, setIsNew] = React.useState(calculate);
   React.useEffect(() => {
     const ms = new Date(publishedAt).getTime();
-    const remaining = ms + 24 * 60 * 60 * 1000 - Date.now();
-    setIsNew(Number.isFinite(ms) && remaining > 0 && ms <= Date.now());
-    if (!Number.isFinite(remaining) || remaining <= 0) return;
-    const timer = window.setTimeout(() => setIsNew(false), Math.min(remaining + 250, 2_147_483_647));
+    const refresh = () => setIsNew(isWithinNewWindow(publishedAt));
+    refresh();
+    if (!Number.isFinite(ms)) return;
+    // Etiket 24 saat dolunca kalksın (saat kayması dahil üst sınır)
+    const remaining = ms + NEW_LISTING_MS - Date.now();
+    if (remaining <= 0 && !isWithinNewWindow(publishedAt)) return;
+    const wait = Math.min(Math.max(remaining, 1_000), 2_147_483_647);
+    const timer = window.setTimeout(refresh, wait);
     return () => window.clearTimeout(timer);
   }, [publishedAt]);
   return isNew;
