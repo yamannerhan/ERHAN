@@ -149,6 +149,7 @@ const {
   locationAccuracy: _locationAccuracy,
   locationSource: _locationSource,
   // Liste için gereksiz; kolon yoksa SELECT patlamasın diye çıkar
+  expiredAt: _expiredAt,
   contentHash: _contentHash,
   sourceMessageId: _sourceMessageId,
   sourceChatId: _sourceChatId,
