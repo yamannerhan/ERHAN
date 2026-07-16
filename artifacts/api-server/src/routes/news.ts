@@ -15,9 +15,9 @@ function toProxiedImage(abs: string | null | undefined): string | null {
 }
 
 function toPublicCover(row: typeof newsArticlesTable.$inferSelect): string | null {
-  // Doğrudan mutlak URL (kaynak görselleri açılıyor). Proxy yedek.
+  // Hotlink / referer engellerine karşı her zaman kendi proxy’mizden sun
   const abs = resolveNewsImageUrl(row.coverImage, row.sourceUrl || row.canonicalUrl);
-  return abs;
+  return toProxiedImage(abs);
 }
 
 function proxyInlineImages(html: string | null | undefined): string | null {
@@ -321,6 +321,26 @@ router.post("/admin/news/repair", authMiddleware, requireAdmin, async (_req, res
   const { repairNewsArticles } = await import("../news/scanner");
   void repairNewsArticles(150).catch(() => undefined);
   res.json({ success: true, message: "Haber kapak/içerik onarımı başlatıldı" });
+});
+
+/** Otomatik haberleri silip kaynaklardan sıfırdan yeniden çeker (manuel haberler kalır) */
+router.post("/admin/news/reset", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const { resetAutoImportedNews, runNewsScanCycle } = await import("../news/scanner");
+    const { deleted } = await resetAutoImportedNews();
+    const kick = () => void runNewsScanCycle(true).catch(() => undefined);
+    kick();
+    // İlk tarama kilitliyse birkaç kez daha dene
+    setTimeout(kick, 20_000);
+    setTimeout(kick, 60_000);
+    res.json({
+      success: true,
+      deleted,
+      message: `${deleted} otomatik haber silindi; yeniden tarama başladı`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : "Sıfırlama başarısız" });
+  }
 });
 
 router.get("/admin/news-import-logs", authMiddleware, requireAdmin, async (_req, res) => {

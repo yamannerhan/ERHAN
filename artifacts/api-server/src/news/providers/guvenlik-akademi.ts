@@ -92,7 +92,42 @@ function parseTrDate(html: string): Date | null {
 
 function isBadCover(url: string): boolean {
   const u = url.toLowerCase();
-  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
+  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes|default-user|emoji/.test(u);
+}
+
+function extractLdImage(ld: Record<string, unknown> | null): string | null {
+  if (!ld?.image) return null;
+  const img = ld.image;
+  if (typeof img === "string" && img.trim()) return img.trim();
+  if (Array.isArray(img)) {
+    for (const item of img) {
+      if (typeof item === "string" && item.trim()) return item.trim();
+      if (item && typeof item === "object" && "url" in item) {
+        const u = String((item as { url?: string }).url || "").trim();
+        if (u) return u;
+      }
+    }
+  }
+  if (typeof img === "object" && img && "url" in img) {
+    const u = String((img as { url?: string }).url || "").trim();
+    if (u) return u;
+  }
+  return null;
+}
+
+function extractLdArticleBody(ld: Record<string, unknown> | null): string {
+  const body = ld?.articleBody;
+  if (typeof body !== "string" || body.trim().length < 40) return "";
+  const plain = stripHtml(body);
+  if (plain.length < 40) return "";
+  // JSON-LD gövdesi düz metin olabilir
+  if (/<[a-z][\s\S]*>/i.test(body)) return body;
+  return plain
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${p}</p>`)
+    .join("\n");
 }
 
 /** class="post-content ..." bloğunu div derinliğiyle güvenli çıkar (sidebar/ilgili haber karışmasın) */
@@ -129,30 +164,40 @@ function stripJunkBlocks(html: string): string {
   return out;
 }
 
-function pickCoverImage(html: string, pageUrl: string): string | null {
+function pickCoverImage(html: string, pageUrl: string, ld?: Record<string, unknown> | null): string | null {
   const slug = (pageUrl.split("/").filter(Boolean).pop() || "").toLowerCase();
   const candidates: string[] = [];
 
-  // 1) og / twitter (örnek sayfada her zaman var)
-  for (const prop of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
-    const v = resolveNewsImageUrl(metaContent(html, prop), pageUrl);
+  const push = (raw: string | null | undefined) => {
+    const v = resolveNewsImageUrl(raw ? decodeHtmlEntities(raw) : null, pageUrl);
     if (v && !isBadCover(v)) candidates.push(v);
+  };
+
+  // 0) JSON-LD image
+  push(extractLdImage(ld ?? null));
+
+  // 1) og / twitter
+  for (const prop of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
+    push(metaContent(html, prop));
   }
 
-  // 2) h1 öncesi featured img (class img-fluid / posts)
+  // 2) h1 öncesi featured img (src / data-src)
   const h1idx = html.search(/<h1[\s>]/i);
   if (h1idx > 0) {
-    const before = html.slice(Math.max(0, h1idx - 3500), h1idx);
-    for (const m of before.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) {
-      const v = resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl);
-      if (v && !isBadCover(v)) candidates.push(v);
+    const before = html.slice(Math.max(0, h1idx - 4500), h1idx);
+    for (const m of before.matchAll(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/gi)) {
+      push(m[1]);
     }
   }
 
   // 3) tüm /uploads/posts/ görselleri
-  for (const m of html.matchAll(/(?:src|content)=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)) {
-    const v = resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl);
-    if (v && !isBadCover(v)) candidates.push(v);
+  for (const m of html.matchAll(/(?:src|content|data-src)=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)) {
+    push(m[1]);
+  }
+
+  // 4) wp-content/uploads genel
+  for (const m of html.matchAll(/(?:src|content)=["']([^"']*\/wp-content\/uploads\/[^"']+\.(?:jpe?g|png|webp|gif))["']/gi)) {
+    push(m[1]);
   }
 
   const uniq = [...new Set(candidates)];
@@ -162,20 +207,30 @@ function pickCoverImage(html: string, pageUrl: string): string | null {
   const matched = uniq.find((u) => slugKey.length > 8 && u.toLowerCase().includes(slugKey.slice(0, 20)));
   if (matched) return matched;
 
-  // posts klasöründekileri tercih et
-  const post = uniq.find((u) => /\/uploads\/posts\//i.test(u));
+  const post = uniq.find((u) => /\/uploads\/posts\//i.test(u) || /\/wp-content\/uploads\//i.test(u));
   return post || uniq[0]!;
 }
 
-function extractPostContent(html: string): string {
+function extractPostContent(html: string, ld?: Record<string, unknown> | null): string {
   const primary = extractBalancedByClass(html, "post-content")
     || extractBalancedByClass(html, "entry-content")
-    || extractBalancedByClass(html, "td-post-content");
+    || extractBalancedByClass(html, "td-post-content")
+    || extractBalancedByClass(html, "article-content")
+    || extractBalancedByClass(html, "single-content");
   if (primary && stripHtml(primary).length > 80) return stripJunkBlocks(primary);
 
-  // Son çare: yalnızca ilk birkaç <p> — ilgili haber kartlarını alma
+  const article = (html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i) || [])[1] || "";
+  if (article && stripHtml(article).length > 120) {
+    const cleaned = stripJunkBlocks(article);
+    if (stripHtml(cleaned).length > 80) return cleaned;
+  }
+
+  const ldBody = extractLdArticleBody(ld ?? null);
+  if (ldBody) return ldBody;
+
+  // Son çare: yalnızca ilk birkaç <p>
   const ps = [...html.matchAll(/<p\b[^>]*>[\s\S]*?<\/p>/gi)].map((m) => m[0]);
-  const joined = ps.slice(0, 12).join("\n");
+  const joined = ps.slice(0, 16).join("\n");
   if (stripHtml(joined).length > 80) return joined;
   return "";
 }
@@ -206,7 +261,7 @@ export const guvenlikAkademiProvider: NewsProvider = {
     const title = cleanNewsTitle(String(ld?.headline || ogTitle || h1 || ""));
     if (!title || title.length < 8) return null;
 
-    const rawContent = extractPostContent(html);
+    const rawContent = extractPostContent(html, ld);
     let contentHtml = sanitizeNewsHtml(rawContent);
     contentHtml = absolutizeContentImages(contentHtml, url);
     contentHtml = decodeHtmlEntities(contentHtml);
@@ -214,13 +269,13 @@ export const guvenlikAkademiProvider: NewsProvider = {
     if (plain.length < 40) return null;
 
     const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
-    const coverImage = pickCoverImage(html, url);
+    const coverImage = pickCoverImage(html, url, ld);
     const category = extractPageCategory(html) || mapCategory(title + " " + excerpt);
 
     // Kapak yoksa içerikten ilk uygun görseli dene
     const coverFinal = coverImage
       || resolveNewsImageUrl(
-        (contentHtml.match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1],
+        (contentHtml.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i) || [])[1],
         url,
       );
 

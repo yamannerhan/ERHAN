@@ -93,8 +93,6 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       publishMode: "auto",
       showSource: false,
       showSourceLink: false,
-      // Kapak/içerik onarımı için bir sonraki cycle hemen tarasın
-      lastScanAt: null,
       updatedAt: new Date(),
     }).where(eq(newsSourcesTable.id, row.id));
   }
@@ -321,6 +319,40 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
   }
 }
 
+/** Otomatik haberleri siler, kaynak ilk tarama durumuna döner; ardından tarama tetiklenir */
+export async function resetAutoImportedNews(): Promise<{ deleted: number }> {
+  await ensureNewsSchema();
+
+  // Mümkünse aktif taramayı bitmesini bekle (max ~15 sn)
+  let locked = false;
+  for (let i = 0; i < 15; i++) {
+    locked = await tryAdvisoryLock();
+    if (locked) break;
+    await sleep(1000);
+  }
+
+  try {
+    const deleted = await db.delete(newsArticlesTable)
+      .where(eq(newsArticlesTable.isManual, false))
+      .returning({ id: newsArticlesTable.id });
+
+    await db.delete(newsImportLogsTable);
+
+    await db.update(newsSourcesTable).set({
+      initialScanDone: false,
+      lastScanAt: null,
+      lastSuccessAt: null,
+      lastError: null,
+      updatedAt: new Date(),
+    });
+
+    logger.info({ deleted: deleted.length }, "news: auto-imported articles reset");
+    return { deleted: deleted.length };
+  } finally {
+    if (locked) await releaseAdvisoryLock();
+  }
+}
+
 /** DB'deki otomatik haberleri source_url ile yeniden çek — kapak + tam metin onarımı */
 export async function repairNewsArticles(limit = 80): Promise<{ repaired: number; failed: number }> {
   await ensureNewsSchema();
@@ -341,11 +373,13 @@ export async function repairNewsArticles(limit = 80): Promise<{ repaired: number
     const needs =
       !row.coverImage
       || !/^https?:\/\//i.test(row.coverImage)
+      || !row.excerpt
+      || (row.excerpt?.length || 0) < 40
       || !row.content
       || (row.content?.length || 0) < 400
       || row.publicationType !== "full"
       || /güvenlik\s*akademi|guvenlikakademi/i.test(row.title);
-    // Her boot'ta bir kez tümünü tazelemek için: son 48s içinde kontrol edilmediyse de yenile
+    // Eksik/bozuk kayıtlar veya 6 saatten eski kontroller yenilenir
     const stale = !row.lastCheckedAt || (Date.now() - row.lastCheckedAt.getTime() > 6 * 60 * 60 * 1000);
     if (!needs && !stale) continue;
 

@@ -50,6 +50,8 @@ type Article = {
   publishedAt?: string | null;
   importedAt?: string | null;
   sourceName?: string | null;
+  coverImage?: string | null;
+  excerpt?: string | null;
 };
 
 type Log = {
@@ -115,6 +117,28 @@ export function NewsAdminSection() {
       setTimeout(() => { void load(); }, 8000);
     } catch (e) {
       toast({ title: "Onarım başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const resetNow = async () => {
+    const ok = window.confirm(
+      "Tüm otomatik haberler silinecek ve kaynaklardan sıfırdan yeniden yüklenecek.\nManuel eklediğin haberler kalır.\nDevam edilsin mi?",
+    );
+    if (!ok) return;
+    setScanning(true);
+    try {
+      const res = await api("/admin/news/reset", "POST") as { deleted?: number; message?: string };
+      toast({
+        title: "Haberler sıfırlandı",
+        description: res.message || `${res.deleted ?? 0} haber silindi; yeniden tarama sürüyor.`,
+      });
+      setArticles([]);
+      setTimeout(() => { void load(); }, 12_000);
+      setTimeout(() => { void load(); }, 45_000);
+    } catch (e) {
+      toast({ title: "Sıfırlama başarısız", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     } finally {
       setScanning(false);
     }
@@ -192,7 +216,17 @@ export function NewsAdminSection() {
             <div key={a.id} className="rounded-xl border border-white/10 bg-[#131831]/80 p-3 flex flex-wrap gap-2 items-center justify-between">
               <div className="min-w-0">
                 <div className="text-sm font-bold text-white truncate">{a.title}</div>
-                <div className="text-[10px] text-slate-400">{a.status} · {a.category} · {a.isManual ? "manuel" : a.sourceName || "otomatik"}</div>
+                <div className="text-[10px] text-slate-400">
+                  {a.status} · {a.category} · {a.isManual ? "manuel" : a.sourceName || "otomatik"}
+                  {" · "}
+                  <span className={a.coverImage ? "text-emerald-400" : "text-amber-400"}>
+                    {a.coverImage ? "kapak ✓" : "kapak yok"}
+                  </span>
+                  {" · "}
+                  <span className={(a.excerpt?.length || 0) >= 40 ? "text-emerald-400" : "text-amber-400"}>
+                    {(a.excerpt?.length || 0) >= 40 ? "özet ✓" : "özet yok"}
+                  </span>
+                </div>
               </div>
               <div className="flex gap-1.5">
                 {a.status !== "published" && (
