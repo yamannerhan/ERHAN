@@ -694,34 +694,20 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // WhatsApp / Eleman: admin bildirimi + kaynak adı
-  // Telegram: duyuruda ve bildirimde "Telegram" yazsın (ilk taramada sadece admin)
-  if (source.platform === "whatsapp") {
+  // Bot kaynakları: yalnızca admin/mod — sohbet + kullanıcı bildiriminde kaynak yok
+  const botSourceLabel =
+    source.platform === "whatsapp" ? "WhatsApp"
+      : source.platform === "telegram" ? "Telegram"
+        : source.platform === "eleman" ? "Eleman.net"
+          : (source.name || source.platform || "Bot");
+  if (source.platform === "whatsapp" || source.platform === "telegram" || !isInitialScan) {
     void announceNewListing({
       id: newListing.id,
       title: newListing.title,
       city: newListing.city,
       company: newListing.company,
-    }, { adminOnly: true, skipChat: true, sourceLabel: "WhatsApp" })
-      .catch((err) => logger.error({ err }, "scraper: wa admin notify failed"));
-  } else if (source.platform === "telegram") {
-    void announceNewListing({
-      id: newListing.id,
-      title: newListing.title,
-      city: newListing.city,
-      company: newListing.company,
-    }, isInitialScan
-      ? { adminOnly: true, skipChat: true, sourceLabel: "Telegram" }
-      : { sourceLabel: "Telegram" })
-      .catch((err) => logger.error({ err }, "scraper: telegram announce failed"));
-  } else if (!isInitialScan) {
-    void announceNewListing({
-      id: newListing.id,
-      title: newListing.title,
-      city: newListing.city,
-      company: newListing.company,
-    }, { sourceLabel: source.platform === "eleman" ? "Eleman.net" : (source.name || source.platform) })
-      .catch((err) => logger.error({ err }, "scraper: announceNewListing failed"));
+    }, { adminOnly: true, skipChat: true, sourceLabel: botSourceLabel })
+      .catch((err) => logger.error({ err }, "scraper: admin notify failed"));
   }
 
   return "added";

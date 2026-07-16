@@ -47,16 +47,14 @@ type HomeSavedState = {
 function getSavedHomeState(): HomeSavedState {
   try {
     const saved = sessionStorage.getItem(HOME_STATE_KEY);
-    if (!saved) return { page: 1, activePill: "all", otherCity: null, sortMode: "recommended" };
+    if (!saved) return { page: 1, activePill: "all", otherCity: null, sortMode: "newest" };
     const parsed = JSON.parse(saved) as Partial<HomeSavedState> & { sortNewest?: "new" | "old" };
     const sortMode =
       parsed.sortMode === "newest" || parsed.sortMode === "oldest" || parsed.sortMode === "recommended"
-        ? parsed.sortMode
+        ? (parsed.sortMode === "recommended" ? "newest" : parsed.sortMode)
         : parsed.sortNewest === "old"
           ? "oldest"
-          : parsed.sortNewest === "new"
-            ? "newest"
-            : "recommended";
+          : "newest";
     return {
       page: Math.max(1, parsed.page ?? 1),
       activePill: parsed.activePill ?? "all",
@@ -64,7 +62,7 @@ function getSavedHomeState(): HomeSavedState {
       sortMode,
     };
   } catch {
-    return { page: 1, activePill: "all", otherCity: null, sortMode: "recommended" };
+    return { page: 1, activePill: "all", otherCity: null, sortMode: "newest" };
   }
 }
 
@@ -475,12 +473,11 @@ export default function Home() {
   }, [allListings, activePill, otherCity]);
 
   const sorted = useMemo(() => {
-    // recommended: sunucu sırası korunur; newest/oldest yalnızca fallback client sort
     if (sortMode === "recommended") return filtered;
     const arr = [...filtered];
     arr.sort((a, b) => {
-      const ta = new Date((a as { sourcePublishedAt?: string }).sourcePublishedAt || a.createdAt).getTime();
-      const tb = new Date((b as { sourcePublishedAt?: string }).sourcePublishedAt || b.createdAt).getTime();
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
       return sortMode === "newest" ? tb - ta : ta - tb;
     });
     return arr;

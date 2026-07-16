@@ -485,7 +485,8 @@ export default function ListingDetail() {
                 </div>
               </div>
 
-              {ext?.sourceType && (
+              {/* Kaynak rozetleri kullanıcıya gösterilmez — yalnızca admin detayında */}
+              {isAdminOnly && ext?.sourceType && (
                 <ListingSourceInfoCard listing={{
                   sourceType: ext?.sourceType,
                   sourceName: ext?.sourceName,

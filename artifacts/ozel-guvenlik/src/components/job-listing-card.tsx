@@ -8,7 +8,6 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
-import { ListingSourceBadges } from "@/components/listing-source-badges";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -256,8 +255,6 @@ export function JobListingCard({
             </div>
           </div>
         </div>
-
-        <ListingSourceBadges listing={listing} compact />
 
         {visibleChips.length > 0 && (
           <div className="og-job__tags">

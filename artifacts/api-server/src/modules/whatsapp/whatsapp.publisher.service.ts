@@ -179,7 +179,7 @@ export async function processWhatsAppMessage(params: {
 
     void announceNewListing(
       { id: listingId, title, city, company: company || "Belirtilmemiş" },
-      { sourceLabel: "WhatsApp" },
+      { adminOnly: true, skipChat: true, sourceLabel: "WhatsApp" },
     ).catch((err) => logger.warn({ err, listingId }, "wa: announce failed"));
 
     logger.info({

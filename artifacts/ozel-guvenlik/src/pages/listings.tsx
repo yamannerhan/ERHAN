@@ -128,7 +128,7 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     resolveIstanbulSideFromLabel(initialCity ?? savedState.city),
   );
   const [categoryFilter, setCategoryFilter] = useState<CategoryId>("all");
-  const [sortMode, setSortMode] = useState<"recommended" | "newest" | "oldest">("recommended");
+  const [sortMode, setSortMode] = useState<"recommended" | "newest" | "oldest">("newest");
   const listingsTopRef = useRef<HTMLElement | null>(null);
   const prevPageRef = useRef<number | null>(null);
   const gpuSafeMode = useGpuSafeMode();
@@ -302,8 +302,8 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
     }
     if (sortMode !== "recommended") {
       list.sort((a, b) => {
-        const ta = new Date((a as { sourcePublishedAt?: string }).sourcePublishedAt || a.createdAt).getTime();
-        const tb = new Date((b as { sourcePublishedAt?: string }).sourcePublishedAt || b.createdAt).getTime();
+        const ta = new Date(a.createdAt).getTime();
+        const tb = new Date(b.createdAt).getTime();
         return sortMode === "newest" ? tb - ta : ta - tb;
       });
     }
@@ -489,10 +489,10 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
           <button
             type="button"
             className="og-lp-sort"
-            onClick={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
+            onClick={() => setSortMode((s) => (s === "newest" ? "oldest" : "newest"))}
           >
             <ArrowUpDown className="w-3 h-3" />
-            {sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
+            {sortMode === "oldest" ? "En Eski" : "En Yeni"}
           </button>
         </div>
 
@@ -559,8 +559,8 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
               listings={displayListings}
               totalCount={statActive}
               sortNewest={sortMode === "oldest" ? "old" : "new"}
-              sortLabel={sortMode === "recommended" ? "Önerilen" : sortMode === "newest" ? "En Yeni" : "En Eski"}
-              onToggleSort={() => setSortMode((s) => (s === "recommended" ? "newest" : s === "newest" ? "oldest" : "recommended"))}
+              sortLabel={sortMode === "oldest" ? "En Eski" : "En Yeni"}
+              onToggleSort={() => setSortMode((s) => (s === "newest" ? "oldest" : "newest"))}
               savedIds={favIds}
               onToggleSave={handleToggleFav}
             />

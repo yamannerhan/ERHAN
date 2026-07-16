@@ -516,16 +516,17 @@ function formatListing(
     companyVerified,
     authorId: listing.authorId,
     authorUsername: authorUsername ?? null,
-    sourceType: listing.sourceType ?? null,
-    sourceName: listing.sourceName ?? null,
     verifiedPublisher: !!listing.verifiedPublisher,
     lastCheckedAt: listing.lastCheckedAt
       ? listing.lastCheckedAt.toISOString()
       : (listing.lastSeenAt ? listing.lastSeenAt.toISOString() : null),
-    badges: listingBadgeMeta(listing),
-    sourceUrl: listing.sourceUrl ?? null,
+    // Kaynak (Telegram/WhatsApp/Eleman…) yalnızca admin meta ile
     ...(opts?.includeSourceMeta
       ? {
+          sourceType: listing.sourceType ?? null,
+          sourceName: listing.sourceName ?? null,
+          badges: listingBadgeMeta(listing),
+          sourceUrl: listing.sourceUrl ?? null,
           sourceTag: listing.sourceTag ?? null,
           directPriorityUntil: listing.directPriorityUntil ? listing.directPriorityUntil.toISOString() : null,
           freshnessConfirmedAt: listing.freshnessConfirmedAt ? listing.freshnessConfirmedAt.toISOString() : null,
@@ -534,7 +535,12 @@ function formatListing(
             : null,
           messageId: listing.messageId ?? null,
         }
-      : {}),
+      : {
+          sourceType: null,
+          sourceName: null,
+          badges: null,
+          sourceUrl: null,
+        }),
     isLikedByMe: userId != null && likedIds != null ? likedIds.has(listing.id) : false,
     isFavoritedByMe: userId != null && favIds != null ? favIds.has(listing.id) : false,
     expiresAt: listing.expiresAt ? listing.expiresAt.toISOString() : null,
@@ -623,10 +629,10 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   const search = req.query["search"] as string | undefined;
   const featured = req.query["featured"] === "true";
   const includeTotal = req.query["includeTotal"] !== "false";
-  const sortRaw = String(req.query["sort"] ?? "recommended").toLowerCase();
+  const sortRaw = String(req.query["sort"] ?? "newest").toLowerCase();
   const sort = sortRaw === "newest" || sortRaw === "oldest" || sortRaw === "recommended"
     ? sortRaw
-    : "recommended";
+    : "newest";
 
   try {
     await ensureListingSourceSchema();
@@ -682,16 +688,16 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
       .select(listingListSelection)
       .from(listingsTable)
       .where(whereClause)
-      .orderBy(asc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .orderBy(asc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
       .limit(limit)
       .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   } else {
-    // newest — gerçek yayın tarihi, bonus yok
+    // newest — siteye eklenme zamanı (bot + gerçek aynı sıra)
     listings = await db
       .select(listingListSelection)
       .from(listingsTable)
       .where(whereClause)
-      .orderBy(desc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .orderBy(desc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
       .limit(limit)
       .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   }

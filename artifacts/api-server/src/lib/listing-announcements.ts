@@ -20,15 +20,15 @@ export type AnnounceOptions = {
 
 const BOT_USER_ID = 0;
 
-function announcementText(listing: ListingAnnouncement, authorName?: string | null, sourceLabel?: string | null): string {
+/** Sohbet metni — kullanıcılara kaynak (Telegram/WhatsApp…) yazılmaz */
+function announcementText(listing: ListingAnnouncement, authorName?: string | null): string {
   const location = listing.city ? ` · ${listing.city}` : "";
   const company = listing.company && listing.company !== "Belirtilmemiş" ? ` · ${listing.company}` : "";
   const who = (authorName || "").trim();
-  const src = sourceLabel?.trim() ? ` [${sourceLabel.trim()}]` : "";
   if (who) {
-    return `📢 ${who} yeni ilan paylaştı${src}: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+    return `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
   }
-  return `📢 Yeni ilan eklendi${src}: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+  return `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
 }
 
 export async function announceNewListing(
@@ -40,7 +40,7 @@ export async function announceNewListing(
   const skipChat = opts.skipChat ?? adminOnly;
   const sourceLabel = opts.sourceLabel?.trim() || null;
   const authorName = (opts.authorName || "").trim();
-  const message = announcementText(listing, authorName, sourceLabel);
+  const message = announcementText(listing, authorName);
 
   if (!skipChat) {
     const settings = await db.select({ chatAnnounceListings: adminSettingsTable.chatAnnounceListings })
@@ -78,13 +78,12 @@ export async function announceNewListing(
     }
   }
 
+  // Kaynak etiketi yalnızca admin/mod bildiriminde
   const notifMessage = adminOnly
     ? `${sourceLabel ?? "Kaynak"} ilanı yayınlandı: ${listing.title}`
-    : sourceLabel
-      ? `${sourceLabel} — ${authorName ? `${authorName} yeni ilan paylaştı` : "Yeni ilan eklendi"}: ${listing.title}`
-      : authorName
-        ? `${authorName} yeni ilan paylaştı: ${listing.title}`
-        : `Yeni ilan eklendi: ${listing.title}`;
+    : authorName
+      ? `${authorName} yeni ilan paylaştı: ${listing.title}`
+      : `Yeni ilan eklendi: ${listing.title}`;
   const notifType = adminOnly ? "admin_listing" : "listing";
 
   const users = adminOnly
