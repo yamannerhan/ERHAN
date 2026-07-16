@@ -153,7 +153,6 @@ const {
   contentHash: _contentHash,
   sourceMessageId: _sourceMessageId,
   sourceChatId: _sourceChatId,
-  sourceMessageTimestamp: _sourceMessageTimestamp,
   ...listingListColumns
 } = getTableColumns(listingsTable);
 
@@ -688,16 +687,16 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
       .select(listingListSelection)
       .from(listingsTable)
       .where(whereClause)
-      .orderBy(asc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .orderBy(asc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
       .limit(limit)
       .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   } else {
-    // newest — siteye eklenme zamanı (bot + gerçek aynı sıra)
+    // newest — kaynak paylaşım tarihi (bot) / oluşturulma (kullanıcı)
     listings = await db
       .select(listingListSelection)
       .from(listingsTable)
       .where(whereClause)
-      .orderBy(desc(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
+      .orderBy(desc(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt})`))
       .limit(limit)
       .offset(offset) as unknown as (typeof listingsTable.$inferSelect)[];
   }

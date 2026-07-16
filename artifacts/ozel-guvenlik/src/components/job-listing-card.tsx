@@ -106,22 +106,32 @@ type Props = {
   compact?: boolean;
 };
 
-function useIsNewListing(createdAt: string): boolean {
+/** YENİ = kaynak/paylaşım tarihi son 24 saat içinde (API createdAt = listingDisplayDate) */
+function useIsNewListing(publishedAt: string): boolean {
   const calculate = () => {
-    const createdAtMs = new Date(createdAt).getTime();
-    const ageMs = Date.now() - createdAtMs;
-    return Number.isFinite(createdAtMs) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
+    const ms = new Date(publishedAt).getTime();
+    const ageMs = Date.now() - ms;
+    return Number.isFinite(ms) && ageMs >= 0 && ageMs < 24 * 60 * 60 * 1000;
   };
   const [isNew, setIsNew] = React.useState(calculate);
   React.useEffect(() => {
-    const createdAtMs = new Date(createdAt).getTime();
-    const remaining = createdAtMs + 24 * 60 * 60 * 1000 - Date.now();
-    setIsNew(Number.isFinite(createdAtMs) && remaining > 0 && createdAtMs <= Date.now());
+    const ms = new Date(publishedAt).getTime();
+    const remaining = ms + 24 * 60 * 60 * 1000 - Date.now();
+    setIsNew(Number.isFinite(ms) && remaining > 0 && ms <= Date.now());
     if (!Number.isFinite(remaining) || remaining <= 0) return;
     const timer = window.setTimeout(() => setIsNew(false), Math.min(remaining + 250, 2_147_483_647));
     return () => window.clearTimeout(timer);
-  }, [createdAt]);
+  }, [publishedAt]);
   return isNew;
+}
+
+function isListingUrgentText(listing: {
+  title?: string | null;
+  description?: string | null;
+  requirements?: string | null;
+}): boolean {
+  const blob = `${listing.title ?? ""} ${listing.description ?? ""} ${listing.requirements ?? ""}`;
+  return /acil|urgent/i.test(blob);
 }
 
 /** Referans düzen — hafif (az ikon, kısa metin taraması) */
@@ -143,8 +153,10 @@ export function JobListingCard({
   const logo = resolveCompanyLogo(listing.companyLogoUrl);
   const hasOwnLogo = isRealCompanyLogo(listing.companyLogoUrl);
   const salaryText = formatSalary(listing.salary);
+  // API createdAt = kaynak paylaşım tarihi (bot) veya ilan oluşturma (kullanıcı)
   const posted = formatPostedAt(listing.createdAt);
   const isNew = useIsNewListing(listing.createdAt);
+  const isUrgent = isListingUrgentText(listing);
   const isSaved = saved ?? !!listing.isFavoritedByMe;
   const detailHref = `/ilan/${listing.id}`;
 
@@ -215,6 +227,7 @@ export function JobListingCard({
       <div className="og-job__inner">
         <div className="og-job__head">
           <div className="og-job__logo-wrap">
+            {isUrgent && <span className="og-job__urgent-label">ACİL</span>}
             <div className="og-job__logo">
               <img
                 src={logo}

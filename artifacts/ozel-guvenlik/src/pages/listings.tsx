@@ -102,16 +102,6 @@ function matchesCategory(
   return true;
 }
 
-function ListingStatusBadges({ listing }: { listing: { title?: string | null; description?: string | null; requirements?: string | null } }) {
-  const urgent = isListingUrgent(listing);
-  if (!urgent) return null;
-  return (
-    <div className="og-lp-card-badges">
-      <span className="og-lp-badge og-lp-badge--urgent">ACİL</span>
-    </div>
-  );
-}
-
 export default function Listings({ initialCity, initialSearch }: { initialCity?: string; initialSearch?: string }) {
   const { user } = useAuth();
   const { isDesktop } = useDisplayMode();
@@ -323,7 +313,6 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
   const renderListingCard = (listing: (typeof listings)[0], idx: number) => {
     const card = (
       <div className="og-lp-card-wrap">
-        <ListingStatusBadges listing={listing} />
         <JobListingCard
           listing={listing}
           saved={favIds.has(listing.id) || !!listing.isFavoritedByMe}

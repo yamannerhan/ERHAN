@@ -4,18 +4,30 @@ export type ListingSourceType = "direct_user" | "direct_company" | "bot_imported
 
 export const BOT_PLATFORMS = ["telegram", "whatsapp", "eleman", "demo"] as const;
 
+function dateFromSourceMessageTimestamp(ts?: number | null): Date | null {
+  if (ts == null || !Number.isFinite(ts) || ts <= 0) return null;
+  // saniye veya ms olabilir
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Kart / liste paylaşım tarihi = kaynak mesaj tarihi (bot); kullanıcı ilanında createdAt */
 export function listingDisplayDate(listing: {
   sourceType?: string | null;
   sourceTag?: string | null;
   sourcePublishedAt?: Date | null;
+  sourceMessageTimestamp?: number | null;
   firstSeenAt?: Date | null;
   createdAt: Date;
 }): Date {
   const imported = listing.sourceType === "bot_imported"
     || (BOT_PLATFORMS as readonly string[]).includes(listing.sourceTag ?? "");
-  return imported
-    ? listing.sourcePublishedAt ?? listing.firstSeenAt ?? listing.createdAt
-    : listing.createdAt;
+  if (!imported) return listing.createdAt;
+  return listing.sourcePublishedAt
+    ?? dateFromSourceMessageTimestamp(listing.sourceMessageTimestamp)
+    ?? listing.firstSeenAt
+    ?? listing.createdAt;
 }
 
 export function platformSourceName(platform: string | null | undefined): string {
