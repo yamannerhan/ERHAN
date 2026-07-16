@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, integer, index, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, integer, index, numeric, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -48,9 +48,18 @@ export const listingsTable = pgTable(
     companyProfileId: integer("company_profile_id"),
     authorId: integer("author_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    expiredAt: timestamp("expired_at", { withTimezone: true }),
     autoDeleteOnExpiry: boolean("auto_delete_on_expiry").notNull().default(true),
     lastRenewedAt: timestamp("last_renewed_at", { withTimezone: true }),
     mergedIntoListingId: integer("merged_into_listing_id"),
+    /** Normalize edilmiş ilan metni hash (WhatsApp çapraz-grup dedup) */
+    contentHash: text("content_hash"),
+    /** Kaynak WhatsApp mesaj kimliği (message.id._serialized) */
+    sourceMessageId: text("source_message_id"),
+    /** Kaynak WhatsApp chat/group JID */
+    sourceChatId: text("source_chat_id"),
+    /** Kaynak mesaj Unix ms */
+    sourceMessageTimestamp: bigint("source_message_timestamp", { mode: "number" }),
     latitude: numeric("latitude", { precision: 9, scale: 6 }),
     longitude: numeric("longitude", { precision: 9, scale: 6 }),
     locationAccuracy: text("location_accuracy"),
@@ -64,6 +73,8 @@ export const listingsTable = pgTable(
     index("listings_source_type_idx").on(t.sourceType),
     index("listings_direct_priority_until_idx").on(t.directPriorityUntil),
     index("listings_verified_publisher_idx").on(t.verifiedPublisher),
+    index("listings_content_hash_idx").on(t.contentHash),
+    index("listings_source_message_id_idx").on(t.sourceMessageId),
   ],
 );
 

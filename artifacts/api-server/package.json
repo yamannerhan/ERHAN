@@ -14,7 +14,7 @@
     "start:worker:eleman": "node --env-file-if-exists=../../.env --enable-source-maps ./dist/bot-worker.mjs --platform=eleman",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run test:whatsapp && pnpm run test:eleman && pnpm run test:security && pnpm run test:seo",
-    "test:whatsapp": "tsx --test src/services/whatsapp-core.test.ts",
+    "test:whatsapp": "tsx --test src/services/whatsapp/helpers.test.ts src/services/whatsapp-core.test.ts",
     "test:eleman": "tsx --test src/services/eleman-client.test.ts",
     "test:security": "tsx --test src/lib/security.test.ts",
     "test:seo": "tsx --test src/lib/seo-sitemap.test.ts",

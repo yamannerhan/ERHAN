@@ -8,7 +8,8 @@ import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/t
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
   getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession, WhatsAppStartError, reloadWhatsAppChats,
-} from "../services/whatsapp-client";
+  addWhatsAppGroupSource, listWhatsAppSourcesForAdmin, disableWhatsAppSource,
+} from "../services/whatsapp";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
 import { logger } from "../lib/logger";
 
@@ -394,41 +395,26 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
     return;
   }
 
-  const existing = await db.select({ id: sourcesTable.id, active: sourcesTable.active })
-    .from(sourcesTable)
-    .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.url, groupId)))
-    .limit(1);
-  if (existing[0]) {
-    if (!existing[0].active) {
-      await db.update(sourcesTable)
-        .set({ active: true, status: "active", lastError: null })
-        .where(eq(sourcesTable.id, existing[0].id));
+  try {
+    const { source, legacySourceId, created } = await addWhatsAppGroupSource({
+      groupId,
+      groupName,
+      sourceName,
+    });
+    const kind = groupId.includes("@newsletter") ? "kanal" : "grup";
+    if (isWhatsAppReady()) {
+      kickWhatsAppDeepScan();
     }
-    res.json({ success: true, source: existing[0], message: "Bu grup zaten kayıtlı." });
-    return;
+    res.json({
+      success: true,
+      source: { id: legacySourceId, name: source.chatName, url: source.chatId },
+      message: created
+        ? `${kind} kaydedildi. 15 günlük ilk tarama kuyruğa alındı.`
+        : "Bu grup zaten kayıtlı. Tarama devam ediyor.",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
-
-  const [source] = await db.insert(sourcesTable).values({
-    name: (sourceName || groupName).slice(0, 120),
-    platform: "whatsapp",
-    url: groupId,
-    active: true,
-    status: "active",
-    checkInterval: 30,
-    autoPublish: true,
-    requireApproval: false,
-    initialScanDone: false,
-    initialScanProgress: 1,
-    initialScanPhase: "backward",
-    lastTelegramMessageId: null,
-  }).returning();
-
-  const kind = groupId.includes("@newsletter") ? "kanal" : "grup";
-  // Kaydetince otomatik tarama — sıfırlama gerekmez
-  if (isWhatsAppReady()) {
-    kickWhatsAppDeepScan();
-  }
-  res.json({ success: true, source, message: `${kind} kaydedildi. Tarama otomatik başlıyor.` });
 });
 
 /** Kayıtlı WA grubunu/kanalını listeden çıkar */
@@ -439,67 +425,17 @@ router.delete("/admin/whatsapp/sources/:id", authMiddleware, requireAdmin, async
     res.status(400).json({ error: "Geçersiz ID" });
     return;
   }
-  const [src] = await db.select().from(sourcesTable)
-    .where(and(eq(sourcesTable.id, id), eq(sourcesTable.platform, "whatsapp")))
-    .limit(1);
-  if (!src) {
-    res.status(404).json({ error: "Kaynak bulunamadı" });
-    return;
+  try {
+    const { name } = await disableWhatsAppSource(id);
+    res.json({ success: true, message: `«${name}» listeden çıkarıldı.` });
+  } catch (e) {
+    res.status(404).json({ error: e instanceof Error ? e.message : "Kaynak bulunamadı" });
   }
-  // Tarama kilidini bırak, kaynağı sil (ilanlar kalır)
-  await db.update(sourcesTable).set({ active: false, isScanning: false }).where(eq(sourcesTable.id, id));
-  await db.delete(sourcesTable).where(eq(sourcesTable.id, id));
-  res.json({ success: true, message: `«${src.name}» listeden çıkarıldı.` });
 });
 
 router.get("/admin/whatsapp/sources", authMiddleware, requireAdmin, async (_req, res) => {
-  const sources = await db.select().from(sourcesTable)
-    .where(eq(sourcesTable.platform, "whatsapp"))
-    .orderBy(desc(sourcesTable.createdAt));
-
-  const withCounts = await Promise.all(sources.map(async (s) => {
-    const [row] = await db.select({ c: count() })
-      .from(listingsTable)
-      .where(and(eq(listingsTable.sourceId, s.id), eq(listingsTable.status, "active")));
-    return {
-      id: s.id,
-      name: s.name,
-      url: s.url,
-      kind: s.url?.includes("@newsletter") ? "channel" : "group",
-      active: s.active,
-      checkInterval: s.checkInterval,
-      initialScanDone: s.initialScanDone ?? false,
-      initialScanProgress: s.initialScanProgress ?? 0,
-      isScanning: s.isScanning ?? false,
-      totalImported: s.totalImported ?? 0,
-      listingCount: row?.c ?? 0,
-      lastScanMessagesRead: s.lastScanMessagesRead ?? 0,
-      lastScanFound: s.lastScanFound ?? 0,
-      lastScanAdded: s.lastScanAdded ?? 0,
-      lastScanDuplicates: s.lastScanDuplicates ?? 0,
-      lastScanErrors: s.lastScanErrors ?? 0,
-      lastScanPublished: s.lastScanPublished ?? 0,
-      lastCheckedAt: s.lastCheckedAt?.toISOString() ?? null,
-      lastMessageAt: (() => {
-        const timestamp = Number(s.lastTelegramMessageId);
-        return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : null;
-      })(),
-      lastError: s.lastError ?? null,
-    };
-  }));
-
-  const totals = withCounts.reduce(
-    (acc, s) => {
-      acc.groups += 1;
-      acc.totalImported += s.totalImported;
-      acc.listingCount += s.listingCount;
-      acc.lastAdded += s.lastScanAdded;
-      return acc;
-    },
-    { groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 },
-  );
-
-  res.json({ sources: withCounts, totals });
+  const payload = await listWhatsAppSourcesForAdmin();
+  res.json(payload);
 });
 
 router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_req, res) => {

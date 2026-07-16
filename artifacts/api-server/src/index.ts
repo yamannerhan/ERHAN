@@ -19,7 +19,7 @@ import {
   reparseImportedListings,
 } from "./workers/scraper";
 import { initTelegramClient, shutdownTelegramClient } from "./services/telegram-client";
-import { initWhatsAppClient, stopWhatsAppClient } from "./services/whatsapp-client";
+import { initWhatsAppClient, stopWhatsAppClient } from "./services/whatsapp";
 import { db, pool, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable, supportTicketsTable } from "@workspace/db";
 import { eq, count, sql, asc, and, or, isNotNull } from "drizzle-orm";
 import { trimChatHistory } from "./lib/chat-retention";
