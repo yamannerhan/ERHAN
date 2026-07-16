@@ -81,8 +81,6 @@ function formatSalary(raw?: string | null): string {
 }
 
 const NEW_LISTING_MS = 24 * 60 * 60 * 1000;
-/** Telegram/WA saat kayması — birkaç dk ilerideki tarihler de "yeni/az önce" sayılsın */
-const CLOCK_SKEW_MS = 2 * 60 * 60 * 1000;
 
 function formatPostedAt(iso: string): string {
   const t = new Date(iso).getTime();
@@ -100,13 +98,12 @@ function formatPostedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
 }
 
-/** Kaynak tarihi son 24 saat içinde mi? (küçük gelecek saat kaymasına izin ver) */
+/** YENİ = "Az önce / X dk / X saat" ile aynı pencere (gelecek saat dahil) */
 function isWithinNewWindow(publishedAt: string, now = Date.now()): boolean {
   const ms = new Date(publishedAt).getTime();
   if (!Number.isFinite(ms)) return false;
-  const ageMs = now - ms;
-  // ageMs negatif = kaynak saati biraz ileride → yine yeni
-  return ageMs > -CLOCK_SKEW_MS && ageMs < NEW_LISTING_MS;
+  // ageMs negatif (gelecek) veya < 24 saat → yeni
+  return now - ms < NEW_LISTING_MS;
 }
 
 type Chip = { key: string; label: string; Icon: typeof Clock; tone?: "shift" };
@@ -120,23 +117,18 @@ type Props = {
   compact?: boolean;
 };
 
-/** YENİ = kaynak/paylaşım tarihi son 24 saat (API createdAt = listingDisplayDate) */
+/** YENİ — senkron hesap (state gecikmesi yok); 24s sonra kalkar */
 function useIsNewListing(publishedAt: string): boolean {
-  const calculate = () => isWithinNewWindow(publishedAt);
-  const [isNew, setIsNew] = React.useState(calculate);
+  const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
     const ms = new Date(publishedAt).getTime();
-    const refresh = () => setIsNew(isWithinNewWindow(publishedAt));
-    refresh();
     if (!Number.isFinite(ms)) return;
-    // Etiket 24 saat dolunca kalksın (saat kayması dahil üst sınır)
     const remaining = ms + NEW_LISTING_MS - Date.now();
-    if (remaining <= 0 && !isWithinNewWindow(publishedAt)) return;
-    const wait = Math.min(Math.max(remaining, 1_000), 2_147_483_647);
-    const timer = window.setTimeout(refresh, wait);
+    if (remaining <= 0) return;
+    const timer = window.setTimeout(() => setTick((n) => n + 1), Math.min(remaining + 100, 2_147_483_647));
     return () => window.clearTimeout(timer);
-  }, [publishedAt]);
-  return isNew;
+  }, [publishedAt, tick]);
+  return isWithinNewWindow(publishedAt);
 }
 
 function isListingUrgentText(listing: {

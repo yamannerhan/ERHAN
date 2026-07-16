@@ -644,6 +644,23 @@ html:not(.dark) .cmc--own .cmc-bubble {
 html:not(.dark) :is(.cmc-name, .cmc-text, .cmc-time, .cmc-reply__text) {
   color: #17324f !important;
   text-shadow: none !important;
+  -webkit-text-fill-color: #17324f !important;
+  background-image: none !important;
+  background-clip: border-box !important;
+  -webkit-background-clip: border-box !important;
+}
+
+/* Gradient isimler beyaz temada görünmez kalmasın */
+html:not(.dark) .cmc-name.name-admin,
+html:not(.dark) .cmc-name.name-mod,
+html:not(.dark) .cmc-name.name-vip,
+html:not(.dark) .name-admin,
+html:not(.dark) .name-mod,
+html:not(.dark) .name-vip {
+  color: #0878e8 !important;
+  -webkit-text-fill-color: #0878e8 !important;
+  background: none !important;
+  background-image: none !important;
 }
 
 html:not(.dark) :is(.cmc--admin, .cmc--vip, .cmc--moderator) {

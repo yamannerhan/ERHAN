@@ -565,11 +565,13 @@ export default function Listings({ initialCity, initialSearch }: { initialCity?:
 
           {!isLoading && totalPages > 1 && (
             <div className="flex items-center justify-center gap-1.5 mt-5 mb-4 flex-wrap">
+              <button type="button" onClick={() => setPage(1)} disabled={page <= 1 || isFetching} className="og-page-btn" aria-label="İlk sayfa">1</button>
               <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1 || isFetching} className="og-page-btn">Önceki</button>
               <div className="og-page-current">Sayfa {page} / {totalPages}</div>
               <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages || isFetching} className="og-page-btn">
                 {isFetching ? "Yükleniyor…" : "Sonraki"}
               </button>
+              <button type="button" onClick={() => setPage(totalPages)} disabled={page >= totalPages || isFetching} className="og-page-btn" aria-label="Son sayfa">{totalPages}</button>
             </div>
           )}
         </section>

@@ -631,7 +631,7 @@ export default function Home() {
           <section ref={listingsTopRef} className="space-y-1 og-home-featured-newest">
             <div className="featured-section-head">
               <h2 className="og-section-title flex items-center gap-1.5 text-sm mb-0">
-                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                <Star className="w-3.5 h-3.5 text-sky-500 fill-sky-500" />
                 En Yeni Öne Çıkan İlanlar
               </h2>
               <Link href="/ilanlar?featured=1" className="featured-section-head__link">

@@ -409,13 +409,9 @@
   letter-spacing: 0.1em;
 }
 .name-admin {
-  background: linear-gradient(105deg,
-    #d4a017 0%, #f5c518 22%, #ea580c 48%, #dc2626 70%, #f5c518 100%);
-  background-size: 240% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: admin-flare 4.2s ease-in-out infinite;
+  background: none;
+  color: #38bdf8;
+  -webkit-text-fill-color: #38bdf8;
   font-weight: 800;
 }
 .name-mod {
@@ -2269,24 +2265,26 @@ html:not(.dark) .og-city-btn {
   border-color: rgba(250,204,21,0.40);
 }
 .og-city-btn-active {
-  background: linear-gradient(135deg, #facc15, #f59e0b);
+  background: linear-gradient(135deg, #25a8ff, #0878e8);
   border-color: transparent;
-  color: #1e1b0a;
+  color: #ffffff;
 }
 
-/* Pagination */
+/* Pagination — siyah yazı, mavi vurgu */
 .og-page-btn {
   padding: 7px 13px;
   border-radius: 10px;
-  background: rgba(250,204,21,0.10);
-  border: 1px solid rgba(250,204,21,0.20);
-  color: #facc15;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  color: #111827;
   font-size: 12px;
   font-weight: 700;
   transition: all 0.15s ease;
 }
 .og-page-btn:hover:not(:disabled) {
-  background: rgba(250,204,21,0.18);
+  background: #f3f4f6;
+  border-color: #0878e8;
+  color: #111827;
 }
 .og-page-btn:disabled {
   opacity: 0.4;
@@ -2295,11 +2293,22 @@ html:not(.dark) .og-city-btn {
 .og-page-current {
   padding: 7px 14px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #facc15, #f59e0b);
-  color: #1e1b0a;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+  color: #111827;
   font-size: 12px;
   font-weight: 800;
-  box-shadow: 0 4px 12px rgba(250,204,21,0.35);
+  box-shadow: none;
+}
+html.dark .og-page-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f8fafc;
+}
+html.dark .og-page-current {
+  background: #0878e8;
+  border-color: transparent;
+  color: #ffffff;
 }
 
 /* Trust strip */
@@ -2887,10 +2896,10 @@ html:not(.dark) .og-pt-row {
   --cmc-name: #c7d2fe;
   opacity: 0.96;
 }
-.cmc--admin { --cmc-accent: #f5c518; --cmc-name: #f5c518; }
+.cmc--admin { --cmc-accent: #0878e8; --cmc-name: #38bdf8; }
 .cmc--moderator { --cmc-accent: #9f1239; --cmc-name: #93c5fd; }
 .cmc--support { --cmc-accent: #22d3ee; --cmc-name: #67e8f9; }
-.cmc--vip { --cmc-accent: #b91c1c; --cmc-name: #facc15; }
+.cmc--vip { --cmc-accent: #0878e8; --cmc-name: #7dd3fc; }
 .cmc--pinned .cmc-bubble {
   box-shadow: 0 0 0 1px rgba(245, 197, 24, 0.35);
 }
@@ -2979,11 +2988,13 @@ html:not(.dark) .og-pt-row {
   white-space: nowrap;
   max-width: 7.5rem;
 }
-/* Gradient isimler: solid color engellemesin */
+/* İsimler her zaman okunaklı (gradient fill kapalı) */
 .cmc-name.name-admin,
 .cmc-name.name-mod,
 .cmc-name.name-vip {
-  color: transparent;
+  color: var(--cmc-name);
+  -webkit-text-fill-color: var(--cmc-name);
+  background: none;
   max-width: 10rem;
 }
 .cmc-role-pill {
@@ -2997,9 +3008,9 @@ html:not(.dark) .og-pt-row {
   flex-shrink: 0;
 }
 .cmc-role-pill--admin {
-  color: #1a1200;
-  border-color: rgba(212, 160, 23, 0.55);
-  background: linear-gradient(90deg, #d4a017, #f5c518 45%, #dc2626);
+  color: #ffffff;
+  border-color: rgba(8, 120, 232, 0.55);
+  background: linear-gradient(90deg, #25a8ff, #0878e8);
 }
 .cmc-role-pill--moderator {
   color: #fff;
@@ -3024,7 +3035,7 @@ html:not(.dark) .og-pt-row {
   color: rgba(226, 232, 240, 0.85);
   flex-shrink: 0;
 }
-.cmc-level--admin { color: #f5c518; border-color: rgba(245, 197, 24, 0.35); background: rgba(245, 197, 24, 0.1); }
+.cmc-level--admin { color: #38bdf8; border-color: rgba(8, 120, 232, 0.35); background: rgba(8, 120, 232, 0.12); }
 .cmc-level--moderator { color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(127, 29, 29, 0.2); }
 .cmc-time {
   margin-left: 0.12rem;
@@ -3237,7 +3248,7 @@ button.cmc-name {
   min-height: 20px;
 }
 .og-chat-typing strong {
-  color: #f5c518;
+  color: #38bdf8;
   font-weight: 700;
 }
 .og-chat-typing-dots span {
@@ -3246,7 +3257,7 @@ button.cmc-name {
   height: 4px;
   margin-left: 2px;
   border-radius: 50%;
-  background: rgba(245, 197, 24, 0.7);
+  background: rgba(8, 120, 232, 0.75);
   animation: og-typing-bounce 1.2s infinite ease-in-out;
 }
 .og-chat-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
@@ -3789,9 +3800,9 @@ html.og-chat-open .og-chat-fab {
   border: 0;
   padding: 0;
   margin: 0;
-  background: rgba(4, 8, 16, 0.88);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  background: rgba(4, 8, 16, 0.72);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   cursor: pointer;
   touch-action: none;
 }
@@ -3799,7 +3810,7 @@ html.og-chat-open .og-chat-fab {
   background: #0c1018;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 18px 18px 14px 14px;
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(245, 197, 24, 0.08);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(8, 120, 232, 0.12);
   overflow: hidden;
   z-index: 10050;
   overscroll-behavior: contain;
@@ -3857,9 +3868,9 @@ html.og-chat-open .og-chat-win {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0a0e1a;
-  background: linear-gradient(145deg, #ffe27a, #f5c518 45%, #c9960a);
-  box-shadow: 0 0 16px rgba(245, 197, 24, 0.55);
+  color: #ffffff;
+  background: linear-gradient(145deg, #25a8ff, #0878e8 55%, #0659b0);
+  box-shadow: 0 0 16px rgba(8, 120, 232, 0.45);
   flex-shrink: 0;
 }
 .og-chat-title {
@@ -4210,9 +4221,9 @@ html.og-chat-open .og-chat-win {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #0a0e1a;
-  background: linear-gradient(135deg, #f5c518, #e8b923);
-  box-shadow: 0 0 16px rgba(245, 197, 24, 0.5);
+  color: #ffffff;
+  background: linear-gradient(135deg, #25a8ff, #0878e8);
+  box-shadow: 0 0 16px rgba(8, 120, 232, 0.45);
   flex-shrink: 0;
 }
 .og-chat-send:disabled { opacity: 0.35; }

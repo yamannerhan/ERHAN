@@ -611,7 +611,7 @@ export default function Chat() {
           <button
             type="button"
             onClick={() => setShowNotifSettings(v => !v)}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10 px-3 py-1.5 rounded-lg transition-all"
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-400/80 hover:text-sky-400 hover:bg-sky-500/10 px-3 py-1.5 rounded-lg transition-all"
           >
             <Settings className="w-3.5 h-3.5" />
             Bildirimler
@@ -721,7 +721,7 @@ export default function Chat() {
               key={t.id}
               onClick={() => setFeedMode(t.id)}
               className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold transition-colors ${
-                feedMode === t.id ? "bg-amber-400 text-black" : "bg-white/5 text-white/50 hover:bg-white/10"
+                feedMode === t.id ? "bg-sky-500 text-white" : "bg-white/5 text-white/50 hover:bg-white/10"
               }`}
             >
               {t.label}
@@ -733,12 +733,12 @@ export default function Chat() {
           const pinnedMsgs = messages.filter(m => !isSystem(m) && (m as ExtMsg).isPinned) as ExtMsg[];
           if (pinnedMsgs.length === 0) return null;
           return (
-            <div className="shrink-0 border-b border-amber-400/20 bg-amber-400/8 px-3 py-2 space-y-1.5 max-h-28 overflow-y-auto">
+            <div className="shrink-0 border-b border-sky-400/20 bg-sky-500/8 px-3 py-2 space-y-1.5 max-h-28 overflow-y-auto">
               {pinnedMsgs.map((pm) => (
                 <div key={`pin-${pm.id}`} className="flex items-start gap-2 text-[11px]">
-                  <span className="text-amber-300 shrink-0 mt-0.5">📌</span>
+                  <span className="text-sky-300 shrink-0 mt-0.5">📌</span>
                   <div className="min-w-0 flex-1">
-                    <span className="font-bold text-amber-200/90">{pm.displayName || pm.username}</span>
+                    <span className="font-bold text-sky-200/90">{pm.displayName || pm.username}</span>
                     <p className="text-white/70 line-clamp-2 leading-snug">{pm.content}</p>
                   </div>
                 </div>
@@ -818,8 +818,8 @@ export default function Chat() {
               <AnimatePresence>
                 {mentionQuery !== null && suggestions.length > 0 && (
                   <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-                    className="absolute bottom-full left-0 right-0 mb-2 glass-card rounded-2xl overflow-hidden border border-amber-400/30 shadow-xl z-30 max-h-56 overflow-y-auto">
-                    <div className="px-3 py-1.5 text-[10px] text-amber-400/80 font-bold border-b border-white/5">Kullanıcı etiketle</div>
+                    className="absolute bottom-full left-0 right-0 mb-2 glass-card rounded-2xl overflow-hidden border border-sky-400/30 shadow-xl z-30 max-h-56 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] text-sky-400/80 font-bold border-b border-white/5">Kullanıcı etiketle</div>
                     {suggestions.map(s => (
                       <button key={s.id} type="button" onClick={() => insertMention(s.username)}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left">
@@ -865,13 +865,13 @@ export default function Chat() {
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
                     <motion.div
-                      className="h-full rounded-full bg-amber-400"
+                      className="h-full rounded-full bg-sky-400"
                       initial={{ width: "100%" }}
                       animate={{ width: "0%" }}
                       transition={{ duration: cooldownLeft, ease: "linear" }}
                     />
                   </div>
-                  <span className="text-[11px] text-amber-400 font-bold shrink-0">{cooldownLeft}s</span>
+                  <span className="text-[11px] text-sky-400 font-bold shrink-0">{cooldownLeft}s</span>
                 </div>
               )}
               <div className="flex items-end space-x-2">

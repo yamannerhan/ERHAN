@@ -184,7 +184,7 @@ html.og-lite .og-job {
 
 html.og-lite .og-job.is-read {
   filter: none !important;
-  opacity: 0.72;
+  opacity: 1 !important;
 }
 
 html.og-lite .og-job__btn-detail,

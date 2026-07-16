@@ -283,21 +283,29 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
 
   useEffect(() => {
     if (!open) return;
-    void syncLatestMessages();
+    // Açılışı kilitlemesin — ilk boya sonrası senkron
+    const t = window.setTimeout(() => { void syncLatestMessages(); }, 0);
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible" && openRef.current) void syncLatestMessages();
-    }, 15000);
-    return () => window.clearInterval(id);
+    }, 20000);
+    return () => {
+      window.clearTimeout(t);
+      window.clearInterval(id);
+    };
   }, [syncLatestMessages, open]);
 
   useEffect(() => {
-    fetch("/api/chat/announcements", { cache: "no-store" })
-      .then(r => r.json())
-      .then((d: { ticker?: string; pinned?: string | null }) => {
-        if (d?.ticker) setChatTicker(d.ticker);
-        setChatPinned(d?.pinned?.trim() || null);
-      })
-      .catch(() => {});
+    if (!open) return;
+    const t = window.setTimeout(() => {
+      fetch("/api/chat/announcements", { cache: "no-store" })
+        .then(r => r.json())
+        .then((d: { ticker?: string; pinned?: string | null }) => {
+          if (d?.ticker) setChatTicker(d.ticker);
+          setChatPinned(d?.pinned?.trim() || null);
+        })
+        .catch(() => {});
+    }, 50);
+    return () => window.clearTimeout(t);
   }, [open]);
 
   useEffect(() => {
@@ -695,22 +703,22 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
   const renderChatRow = (msg: AnyMsg) => {
     if (isSystem(msg)) {
       return (
-        <motion.div key={msg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center">
+        <div key={msg.id} className="flex justify-center">
           {msg.type === "join" ? (
             <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               {msg.text}
             </div>
           ) : (
-            <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed bg-amber-400/10 border border-amber-400/20">
+            <div className="w-full rounded-2xl p-3 text-xs text-white/80 whitespace-pre-wrap leading-relaxed bg-sky-500/10 border border-sky-400/25">
               <div className="flex items-center gap-1.5 mb-1.5">
-                <Bot className="w-3 h-3 text-amber-400" />
-                <span className="text-[10px] font-bold text-amber-400">ÖzelGüvenlik Bot</span>
+                <Bot className="w-3 h-3 text-sky-400" />
+                <span className="text-[10px] font-bold text-sky-300">ÖzelGüvenlik Bot</span>
               </div>
               {msg.text}
             </div>
           )}
-        </motion.div>
+        </div>
       );
     }
 
@@ -718,12 +726,12 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
     // DB’deki “X sohbete katıldı” → join satırı
     if (isChatJoinNotice(chatMsg.content ?? "")) {
       return (
-        <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center">
+        <div key={chatMsg.id} className="flex justify-center">
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium px-3 py-1 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             {chatMsg.content}
           </div>
-        </motion.div>
+        </div>
       );
     }
     const isMe = user?.id === chatMsg.userId;
@@ -758,18 +766,12 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
     if (user && !isMe) {
       return (
         <SwipeableMessage key={chatMsg.id} onReply={() => startReply(chatMsg)}>
-          <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
-            {row}
-          </motion.div>
+          {row}
         </SwipeableMessage>
       );
     }
 
-    return (
-      <motion.div key={chatMsg.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
-        {row}
-      </motion.div>
-    );
+    return <div key={chatMsg.id}>{row}</div>;
   };
 
   return (
@@ -807,23 +809,15 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
       <AnimatePresence>
         {open && (
           <>
-          <motion.button
+          <button
             type="button"
             key="og-chat-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.08 }}
             className="og-chat-backdrop"
             aria-label="Sohbeti kapat"
             onClick={() => { setExpanded(false); setOpen(false); }}
           />
-          <motion.div
+          <div
             key="og-chat-win"
-            initial={{ opacity: 0, y: 28, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 28, scale: 0.96 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
             className={`og-chat-win fixed z-[10050] flex flex-col ${expanded ? "og-chat-win-expanded" : ""}${keyboardInset > 0 ? " og-chat-win--kb" : ""}`}
             style={{
               right: keyboardInset > 0 || expanded
@@ -1151,14 +1145,10 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                     </Link>
                   ) : (
                     <div className="space-y-1.5 relative">
-                      <AnimatePresence>
-                        {mentionQuery !== null && suggestions.length > 0 && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 6 }}
+                      {mentionQuery !== null && suggestions.length > 0 && (
+                          <div
                             className="absolute bottom-full left-0 right-0 mb-1.5 rounded-xl overflow-hidden z-20 max-h-40 overflow-y-auto"
-                            style={{ background: "#1a2030", border: "1px solid rgba(245,197,24,0.35)", boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}
+                            style={{ background: "#1a2030", border: "1px solid rgba(8,120,232,0.4)", boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}
                           >
                             {suggestions.map(s => (
                               <button
@@ -1167,7 +1157,7 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                                 onClick={() => insertMention(s.username)}
                                 className="w-full flex items-center gap-2 px-2.5 py-2 hover:bg-white/5 text-left"
                               >
-                                <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[9px] font-bold bg-amber-500/30 text-amber-200">
+                                <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-[9px] font-bold bg-sky-500/30 text-sky-200">
                                   {s.avatarUrl
                                     ? <img src={s.avatarUrl} alt="" className="w-full h-full object-cover" />
                                     : (s.displayName || s.username).slice(0, 2).toUpperCase()}
@@ -1178,28 +1168,22 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                                 </div>
                               </button>
                             ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                      <AnimatePresence>
-                        {replyTo && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 8 }}
+                          </div>
+                      )}
+                      {replyTo && (
+                          <div
                             className="flex items-start justify-between gap-2 px-2.5 py-1.5 rounded-lg"
-                            style={{ background: "rgba(245,197,24,0.08)", borderLeft: "2px solid #F5C518" }}
+                            style={{ background: "rgba(8,120,232,0.1)", borderLeft: "2px solid #0878e8" }}
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="text-[10px] font-semibold text-amber-300">{replyName(replyTo)}'e yanıt</div>
+                              <div className="text-[10px] font-semibold text-sky-300">{replyName(replyTo)}'e yanıt</div>
                               <div className="text-[10px] text-white/50 line-clamp-1">{replyTo.content}</div>
                             </div>
                             <button onClick={() => setReplyTo(null)} className="shrink-0 p-0.5 text-white/40 hover:text-white/80">
                               <X className="w-3.5 h-3.5" />
                             </button>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                          </div>
+                      )}
                       {sendError && (
                         <div className="px-2.5 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30">
                           <span className="text-[11px] text-red-300">{sendError}</span>
@@ -1208,9 +1192,9 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                       {cooldownLeft > 0 && (
                         <div className="flex items-center gap-1.5 px-1">
                           <div className="h-0.5 flex-1 bg-white/10 rounded-full overflow-hidden">
-                            <motion.div className="h-full bg-amber-400" initial={{ width: "100%" }} animate={{ width: "0%" }} transition={{ duration: cooldownLeft, ease: "linear" }} />
+                            <div className="h-full bg-sky-400" style={{ width: `${Math.min(100, (cooldownLeft / 3) * 100)}%` }} />
                           </div>
-                          <span className="text-[10px] text-amber-400 font-bold shrink-0">{cooldownLeft}s</span>
+                          <span className="text-[10px] text-sky-400 font-bold shrink-0">{cooldownLeft}s</span>
                         </div>
                       )}
                       <div className="og-chat-composer">
@@ -1281,7 +1265,7 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                 </div>
               </>
             )}
-          </motion.div>
+          </div>
           </>
         )}
       </AnimatePresence>
