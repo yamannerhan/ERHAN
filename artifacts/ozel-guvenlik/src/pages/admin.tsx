@@ -3358,26 +3358,45 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         pairingCode?: string | null; pairing?: boolean;
         error?: string | null; starting?: boolean;
         authAccepted?: boolean; phase?: string;
+        connectionMode?: "qr" | "pairing_code";
+        mode?: "qr" | "pairing_code";
+        sessionState?: string;
+        expiresInSeconds?: number | null;
       };
       const isConn = !!(nextStatus.connected ?? nextStatus.ready);
-      const authPending = !!(nextStatus.authAccepted || nextStatus.phase === "authenticating");
-      const isPairing = !!nextStatus.pairing && !authPending && !isConn;
+      const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
+      const isPairing = mode === "pairing_code" && !isConn;
+      const authPending = nextStatus.sessionState === "AUTHENTICATED"
+        || nextStatus.sessionState === "SYNCING"
+        || nextStatus.authAccepted === true;
       setConnected(isConn);
-      if (isConn) setPairingMode(false);
-      else setPairingMode(isPairing);
-      // Onay kodu modunda QR gösterme
+      setPairingMode(isPairing);
       setQr(isPairing ? null : (nextStatus.qr ?? null));
-      // Kısa kopmalarda kodun UI'dan kaybolmasını engelle; telefon onayladıysa kodu kaldır
       setPairingCode((prev) => {
-        if (isConn || authPending) return null;
+        if (isConn || !isPairing) return isPairing ? (nextStatus.pairingCode ?? prev) : null;
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
-        if (isPairing && prev) return prev;
-        return nextStatus.pairingCode ?? null;
+        return prev;
       });
-      setErrorLog(nextStatus.error ?? "");
+      const userFacingError = (() => {
+        const state = nextStatus.sessionState ?? "";
+        if (isConn) return "";
+        if (nextStatus.pairingCode) return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
+        if (authPending) return "Telefon doğrulandı. Sohbetler yükleniyor.";
+        if (state === "STARTING" || state === "PAIRING_CODE_REQUESTING" || nextStatus.starting) {
+          return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
+        }
+        if (state === "QR_READY") return "QR kodu hazır.";
+        // Dahili session/uuid içeren teknik metinleri kullanıcıya gösterme
+        const raw = nextStatus.error ?? "";
+        if (/session|INITIALIZING|requestId|uuid|ozelguvenlik/i.test(raw)) {
+          return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
+        }
+        return raw;
+      })();
+      setErrorLog(userFacingError);
       if (isConn) setQrStatus("ready");
-      else if (authPending || isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) setQrStatus("connecting");
-      else if (nextStatus.error) setQrStatus("failed");
+      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting || authPending) setQrStatus("connecting");
+      else if (nextStatus.error && nextStatus.sessionState === "FAILED") setQrStatus("failed");
 
       if (isConn) {
         const groupList = await apiCall("/admin/whatsapp/groups", "GET");
@@ -3416,6 +3435,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   }, [qrStatus, pairingMode, pairingCode]);
 
   const connect = async (usePairing: boolean) => {
+    if (loading) return;
     setLoading(true);
     try {
       if (usePairing && !form.phoneNumber.trim()) {
@@ -3426,31 +3446,55 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       setPairingMode(usePairing);
       setPairingCode(null);
       setQr(null);
+      setErrorLog("WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.");
       const body = usePairing
-        ? { phoneNumber: form.phoneNumber.trim() }
-        : {};
+        ? { mode: "pairing_code", phoneNumber: form.phoneNumber.trim() }
+        : { mode: "qr" };
       const startResult = await apiCall("/admin/whatsapp/start", "POST", body) as {
         pairingCode?: string | null;
         phase?: string;
+        status?: string;
+        mode?: string;
         message?: string;
+        qr?: string | null;
       };
-      if (startResult.pairingCode) {
-        setPairingCode(startResult.pairingCode);
+      if (startResult.mode === "pairing_code" || usePairing) {
         setPairingMode(true);
+        setQr(null);
+        if (startResult.pairingCode) setPairingCode(startResult.pairingCode);
+      } else {
+        setPairingMode(false);
+        setPairingCode(null);
+        if (startResult.qr) setQr(startResult.qr);
       }
       await refresh();
       toast({
-        title: usePairing ? "Onay kodu oluşturuldu" : "QR bağlantısı başlatıldı",
-        description: startResult.message || (usePairing
-          ? "Kodu WhatsApp → Bağlı Cihazlar bölümüne girin."
-          : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut"),
+        title: usePairing ? "Onay kodu" : "QR bağlantısı",
+        description: startResult.message
+          || (usePairing
+            ? "Onay kodu hazır. WhatsApp uygulamanızdan girin."
+            : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut"),
       });
     } catch (error) {
+      const typed = error as Error & { status?: number; code?: string };
+      // 409 / SESSION_STARTING: genel hata gösterme — mevcut durumu sorgula
+      if (typed.status === 409 || typed.code === "SESSION_STARTING") {
+        await refresh().catch(() => undefined);
+        toast({
+          title: "Bağlantı devam ediyor",
+          description: "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.",
+        });
+        return;
+      }
       await refresh().catch(() => undefined);
-      const typed = error as Error & { status?: number; code?: string; requestId?: string };
+      const safeMsg = (typed.message || "")
+        .replace(/\(kod=[^)]+\)/gi, "")
+        .replace(/\(istek=[^)]+\)/gi, "")
+        .replace(/session\s+\S+/gi, "")
+        .trim();
       toast({
-        title: `WhatsApp bağlantı hatası${typed.status ? ` (HTTP ${typed.status})` : ""}`,
-        description: typed.message,
+        title: "WhatsApp bağlantı hatası",
+        description: safeMsg || "Bağlantı başlatılamadı. Tekrar deneyin.",
         variant: "destructive",
       });
     } finally {
@@ -3592,10 +3636,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void connect(false)} disabled={loading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50">
-              QR ile Bağlan
+              {loading && !pairingMode ? "Bağlanıyor…" : "QR ile Bağlan"}
             </button>
             <button onClick={() => void connect(true)} disabled={loading} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50">
-              Onay Kodu ile Bağlan
+              {loading && pairingMode ? "Kod isteniyor…" : "Onay Kodu ile Bağlan"}
             </button>
             <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
@@ -3651,7 +3695,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">
-                <p className="text-xs text-slate-400">Telefonda WhatsApp → Bağlı Cihazlar → Telefon numarasıyla bağlan → bu kodu gir:</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-300/90 text-center">WhatsApp Onay Kodunuz</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -3667,23 +3711,27 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                 >
                   {pairingCode.length === 8
                     ? `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`
-                    : pairingCode}
+                    : pairingCode.includes("-")
+                      ? pairingCode
+                      : pairingCode}
                 </button>
                 <p className="text-[10px] text-sky-300/90 text-center font-medium">Koda tıklayınca otomatik kopyalanır</p>
-                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra WhatsApp «Giriş yapılıyor» derse 1–2 dk bekleyin. Tekrar basmayın.</p>
-                <p className="text-[10px] text-slate-500 text-center">Bu sayfayı yenilemeyin. Olmazsa QR ile Bağlan deneyin.</p>
+                <p className="text-xs text-slate-300 text-center">
+                  Telefonunuzda: WhatsApp → Bağlı Cihazlar → Cihaz Bağla → Telefon numarasıyla bağla
+                </p>
+                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra 1–2 dk bekleyin. Tekrar basmayın.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
-                Onay kodu hazırlanıyor… QR açılmaz. Numara: {form.phoneNumber || "—"}
-                <p className="mt-2 text-xs text-slate-400">Telefonda: Bağlı Cihazlar → Telefon numarasıyla bağlan</p>
+                WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.
+                <p className="mt-2 text-xs text-slate-400">Onay kodu modu aktif — QR gösterilmez. Numara: {form.phoneNumber || "—"}</p>
               </div>
-            ) : qr ? (
+            ) : qr && !pairingMode ? (
               <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" />
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">
                 {qrStatus === "connecting"
-                  ? "WhatsApp oturumu hazırlanıyor…"
+                  ? "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin."
                   : "Bağlanmak için «QR ile Bağlan» veya «Onay Kodu ile Bağlan» kullanın."}
               </div>
             )}

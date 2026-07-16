@@ -284,39 +284,51 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
   const requestId = crypto.randomUUID();
   try {
     const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber.trim() : undefined;
+    const modeRaw = typeof req.body?.mode === "string" ? req.body.mode.trim() : undefined;
+    const mode = modeRaw === "pairing_code" || modeRaw === "qr"
+      ? modeRaw
+      : (phoneNumber ? "pairing_code" : "qr");
     logger.info(
-      { requestId, pairingRequested: Boolean(phoneNumber), endpoint: "/admin/whatsapp/start" },
+      { requestId, mode, pairingRequested: Boolean(phoneNumber), endpoint: "/admin/whatsapp/start" },
       "wa endpoint: bağlantı başlatma isteği",
     );
 
-    // Endpoint gerçek initialize/pairing sonucunu bekler; arka plana atıp sahte 200 dönmez.
-    const result = await startWhatsAppClient(phoneNumber ? { phoneNumber } : undefined);
+    const result = await startWhatsAppClient(
+      mode === "pairing_code"
+        ? { phoneNumber: phoneNumber || "", mode: "pairing_code" }
+        : { mode: "qr" },
+    );
     const responseBody = {
       success: true,
+      mode: result.mode,
+      status: result.status,
       message: result.message,
       phase: result.phase,
       pairingCode: result.pairingCode,
-      qr: result.qr,
-      requestId,
+      expiresInSeconds: result.expiresInSeconds ?? null,
+      qr: result.mode === "qr" ? result.qr : null,
     };
-    logger.info({ requestId, httpStatus: 200, phase: result.phase }, "wa endpoint: başarılı response");
+    logger.info(
+      { requestId, httpStatus: 200, mode: result.mode, status: result.status },
+      "wa endpoint: başarılı response",
+    );
     res.status(200).json(responseBody);
   } catch (error) {
     const status = error instanceof WhatsAppStartError ? error.statusCode : 500;
     const code = error instanceof WhatsAppStartError ? error.code : "UNEXPECTED_ERROR";
     const message = error instanceof Error ? error.message : String(error);
+    // Kullanıcıya requestId/sessionId gösterme — sadece log
     const responseBody = {
       success: false,
       error: message,
       code,
-      requestId,
     };
     logger.error(
       {
         err: error,
         requestId,
         httpStatus: status,
-        responseBody,
+        code,
         endpoint: "/admin/whatsapp/start",
       },
       "wa endpoint: bağlantı başlatılamadı",
