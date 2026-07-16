@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, notificationsTable } from "@workspace/db";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/auth";
+import { stripListingSourceLabels } from "../lib/strip-listing-source";
 
 const router = Router();
 
@@ -11,16 +12,22 @@ router.get("/notifications", authMiddleware, async (req, res): Promise<void> => 
     .orderBy(desc(notificationsTable.createdAt))
     .limit(50);
 
-  res.json(notifications.map(n => ({
-    id: n.id,
-    type: n.type,
-    title: n.title,
-    message: n.message,
-    isRead: n.isRead,
-    linkUrl: n.linkUrl,
-    relatedId: n.relatedId,
-    createdAt: n.createdAt.toISOString(),
-  })));
+  const isStaff = req.user!.role === "admin" || req.user!.role === "moderator";
+
+  res.json(notifications.map(n => {
+    // Kullanıcıya kaynak adı (Telegram/WhatsApp/Eleman) gitmesin; admin_listing staff'ta kalır
+    const scrub = !isStaff || n.type === "listing";
+    return {
+      id: n.id,
+      type: n.type,
+      title: n.title,
+      message: scrub ? stripListingSourceLabels(n.message ?? "") : n.message,
+      isRead: n.isRead,
+      linkUrl: n.linkUrl,
+      relatedId: n.relatedId,
+      createdAt: n.createdAt.toISOString(),
+    };
+  }));
 });
 
 router.post("/notifications/read-all", authMiddleware, async (req, res): Promise<void> => {

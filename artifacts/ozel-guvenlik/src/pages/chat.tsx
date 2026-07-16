@@ -87,8 +87,18 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   return kept;
 }
 
+function stripSourceLabelsClient(text: string): string {
+  return text
+    .replace(/\s*\[(?:Telegram|WhatsApp|Eleman\.net|Eleman|Demo|Kaynak)\]/gi, "")
+    .replace(/\b(?:Telegram|WhatsApp|Eleman\.net|Eleman)\s*[—\-–:]\s*/gi, "")
+    .replace(/\b(?:Telegram|WhatsApp|Eleman\.net|Eleman|Kaynak)\s+ilanı\s+yayınlandı:\s*/gi, "Yeni ilan eklendi: ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function renderMessageContent(content: string) {
-  return content.split(/(@\w+|\/ilan\/\d+)/g).map((part, i) => {
+  const safe = stripSourceLabelsClient(content);
+  return safe.split(/(@\w+|\/ilan\/\d+)/g).map((part, i) => {
     if (/^\/ilan\/\d+$/.test(part)) {
       return <a key={i} href={part} className="ml-1 inline-flex rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary hover:bg-primary/30">İlana git</a>;
     }
@@ -243,19 +253,22 @@ export default function Chat() {
     };
     s.on("connect", authenticate);
     s.on("chat:message", (msg: ExtMsg) => {
-      const added = addMsg(msg);
+      const cleaned = (msg.userId ?? 0) <= 0 && msg.content
+        ? { ...msg, content: stripSourceLabelsClient(msg.content) }
+        : msg;
+      const added = addMsg(cleaned);
       if (
         added
-        && !isSystem(msg)
-        && isRealHuman(msg)
-        && msg.userId !== user?.id
+        && !isSystem(cleaned)
+        && isRealHuman(cleaned)
+        && cleaned.userId !== user?.id
       ) {
         playChatMessageSound();
       }
-      if (added && isJoinAnnounce(msg)) {
-        const u = extractJoinUsername(msg.content) || "";
+      if (added && isJoinAnnounce(cleaned)) {
+        const u = extractJoinUsername(cleaned.content) || "";
         if (u && canGreetUser(u, user?.username)) {
-          setPendingWelcome({ username: u, kind: "register", replyToId: msg.id });
+          setPendingWelcome({ username: u, kind: "register", replyToId: cleaned.id });
         }
       }
     });

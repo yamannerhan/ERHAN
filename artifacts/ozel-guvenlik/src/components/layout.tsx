@@ -292,9 +292,11 @@ export function Layout({
       };
       socket.on("connect", authenticate);
       socket.on("online_count", (data: { count: number }) => setLiveCount(data.count));
-      socket.on("notification:new", (payload?: { userId?: number }) => {
+      socket.on("notification:new", (payload?: { userId?: number; adminOnly?: boolean }) => {
         if (!user) return;
         if (payload?.userId != null && payload.userId !== user.id) return;
+        // Kaynaklı admin bildirimleri yalnızca admin/mod
+        if (payload?.adminOnly && user.role !== "admin" && user.role !== "moderator") return;
         void refetchNotifs();
         void refetchUnread();
         const bgOnly = isBackgroundOnlyEnabled();

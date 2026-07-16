@@ -12,6 +12,7 @@ import { emitRealtimeToUser } from "../lib/realtime";
 import { awardChatXp, levelNameColor, maybeGrantDailyCosmetics } from "../lib/levels";
 import { getBadgesForUsers, type PublicBadge } from "../lib/user-badges";
 import { resolveChatCosmetics } from "../lib/resolve-cosmetics";
+import { stripListingSourceLabels } from "../lib/strip-listing-source";
 
 const router = Router();
 
@@ -68,10 +69,15 @@ async function formatMessage(
     (role === "user" && !isVip ? levelColor : null);
   const cosmetics = resolveChatCosmetics(user);
 
+  // Bot ilan duyurularında Telegram/WhatsApp/Eleman etiketi kullanıcıya gitmesin
+  const safeContent = msg.userId <= 0
+    ? stripListingSourceLabels(msg.content)
+    : msg.content;
+
   return {
     id: msg.id,
-    content: poll ? `📊 ${poll.question}` : msg.content,
-    rawContent: msg.content,
+    content: poll ? `📊 ${poll.question}` : safeContent,
+    rawContent: safeContent,
     poll: poll ?? null,
     userId: msg.userId,
     username:        vUser?.username        ?? user?.username        ?? "Silindi",

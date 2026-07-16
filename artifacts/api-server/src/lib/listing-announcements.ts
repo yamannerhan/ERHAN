@@ -1,6 +1,7 @@
 import { db, chatMessagesTable, notificationsTable, usersTable, adminSettingsTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { emitRealtime } from "./realtime";
+import { stripListingSourceLabels } from "./strip-listing-source";
 
 type ListingAnnouncement = {
   id: number;
@@ -10,25 +11,25 @@ type ListingAnnouncement = {
 };
 
 export type AnnounceOptions = {
-  /** true: sadece admin/moderatör bildirimi */
+  /** true: yalnızca admin/moderatör bildirimi (kullanıcıya / sohbete gitmez) */
   adminOnly?: boolean;
   /** true: sohbet kanalına yazma */
   skipChat?: boolean;
-  /** Admin bildirim metninde kaynak adı (WhatsApp / Eleman.net / …) */
+  /** Yalnızca admin bildirim metninde kaynak adı */
   sourceLabel?: string;
 };
 
 const BOT_USER_ID = 0;
 
-/** Sohbet metni — kullanıcılara kaynak (Telegram/WhatsApp…) yazılmaz */
-function announcementText(listing: ListingAnnouncement, authorName?: string | null): string {
+/** Sohbet + kullanıcı bildirimi — kaynak adı asla yazılmaz */
+function publicAnnouncementText(listing: ListingAnnouncement, authorName?: string | null): string {
   const location = listing.city ? ` · ${listing.city}` : "";
   const company = listing.company && listing.company !== "Belirtilmemiş" ? ` · ${listing.company}` : "";
   const who = (authorName || "").trim();
-  if (who) {
-    return `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
-  }
-  return `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+  const raw = who
+    ? `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n/ilan/${listing.id}`
+    : `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+  return stripListingSourceLabels(raw);
 }
 
 export async function announceNewListing(
@@ -40,9 +41,10 @@ export async function announceNewListing(
   const skipChat = opts.skipChat ?? adminOnly;
   const sourceLabel = opts.sourceLabel?.trim() || null;
   const authorName = (opts.authorName || "").trim();
-  const message = announcementText(listing, authorName);
+  const publicMessage = publicAnnouncementText(listing, authorName);
 
-  if (!skipChat) {
+  // Canlı sohbet: yalnızca kaynak-siz metin (bot ilanları genelde skipChat)
+  if (!skipChat && !adminOnly) {
     const settings = await db.select({ chatAnnounceListings: adminSettingsTable.chatAnnounceListings })
       .from(adminSettingsTable).limit(1);
     const chatEnabled = settings[0]?.chatAnnounceListings !== false;
@@ -50,12 +52,12 @@ export async function announceNewListing(
     if (chatEnabled) {
       const [chatMsg] = await db.insert(chatMessagesTable).values({
         userId: BOT_USER_ID,
-        content: message,
+        content: publicMessage,
         isPinned: false,
         isDeleted: false,
       }).returning();
 
-      const chatPayload = {
+      emitRealtime("chat:message", {
         id: chatMsg.id,
         content: chatMsg.content,
         userId: BOT_USER_ID,
@@ -73,48 +75,70 @@ export async function announceNewListing(
         isDeleted: false,
         reactions: [],
         createdAt: chatMsg.createdAt.toISOString(),
-      };
-      emitRealtime("chat:message", chatPayload);
+      });
     }
   }
 
-  // Kaynak etiketi yalnızca admin/mod bildiriminde
-  const notifMessage = adminOnly
-    ? `${sourceLabel ?? "Kaynak"} ilanı yayınlandı: ${listing.title}`
-    : authorName
-      ? `${authorName} yeni ilan paylaştı: ${listing.title}`
-      : `Yeni ilan eklendi: ${listing.title}`;
-  const notifType = adminOnly ? "admin_listing" : "listing";
+  const { getNotifPrefsMap, prefsAllowInAppType, DEFAULT_NOTIF_PREFS } = await import("./user-notif-prefs");
 
-  const users = adminOnly
-    ? await db.select({ id: usersTable.id }).from(usersTable)
-      .where(or(eq(usersTable.role, "admin"), eq(usersTable.role, "moderator")))
-    : await db.select({ id: usersTable.id }).from(usersTable);
-
-  if (users.length > 0) {
-    const { getNotifPrefsMap, prefsAllowInAppType, DEFAULT_NOTIF_PREFS } = await import("./user-notif-prefs");
-    const prefsMap = await getNotifPrefsMap(users.map((u) => u.id));
-    const recipients = users.filter((u) => {
+  // Kullanıcı bildirimi — kaynak yok
+  if (!adminOnly) {
+    const allUsers = await db.select({ id: usersTable.id }).from(usersTable);
+    const prefsMap = await getNotifPrefsMap(allUsers.map((u) => u.id));
+    const recipients = allUsers.filter((u) => {
       const prefs = prefsMap.get(u.id) ?? DEFAULT_NOTIF_PREFS;
-      return prefsAllowInAppType(prefs, notifType === "admin_listing" ? "admin" : "listing");
+      return prefsAllowInAppType(prefs, "listing");
     });
+    const userMessage = stripListingSourceLabels(
+      authorName
+        ? `${authorName} yeni ilan paylaştı: ${listing.title}`
+        : `Yeni ilan eklendi: ${listing.title}`,
+    );
     if (recipients.length > 0) {
-      await db.insert(notificationsTable).values(recipients.map(user => ({
+      await db.insert(notificationsTable).values(recipients.map((user) => ({
         userId: user.id,
-        type: notifType,
-        message: notifMessage,
+        type: "listing",
+        message: userMessage,
         linkUrl,
         isRead: false,
       })));
     }
+    emitRealtime("notification:new", {
+      type: "listing",
+      message: userMessage,
+      linkUrl,
+      adminOnly: false,
+      createdAt: new Date().toISOString(),
+    });
   }
 
-  emitRealtime("notification:new", {
-    type: notifType,
-    message: notifMessage,
-    linkUrl,
-    adminOnly,
-    createdAt: new Date().toISOString(),
-  });
-  // Bot/scraper ilanlarında Web Push YOK — sadece gerçek üye ilanı push eder
+  // Admin/mod — kaynak adı yalnızca burada
+  if (adminOnly || sourceLabel) {
+    const adminMessage = sourceLabel
+      ? `${sourceLabel} ilanı yayınlandı: ${listing.title}`
+      : `Yeni ilan eklendi: ${listing.title}`;
+    const staff = await db.select({ id: usersTable.id }).from(usersTable)
+      .where(or(eq(usersTable.role, "admin"), eq(usersTable.role, "moderator")));
+    const prefsMap = await getNotifPrefsMap(staff.map((u) => u.id));
+    const recipients = staff.filter((u) => {
+      const prefs = prefsMap.get(u.id) ?? DEFAULT_NOTIF_PREFS;
+      return prefsAllowInAppType(prefs, "admin");
+    });
+    if (recipients.length > 0) {
+      await db.insert(notificationsTable).values(recipients.map((user) => ({
+        userId: user.id,
+        type: "admin_listing",
+        message: adminMessage,
+        linkUrl,
+        isRead: false,
+      })));
+    }
+    emitRealtime("notification:new", {
+      type: "admin_listing",
+      message: adminMessage,
+      linkUrl,
+      adminOnly: true,
+      createdAt: new Date().toISOString(),
+    });
+  }
 }
