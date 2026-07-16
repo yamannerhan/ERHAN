@@ -15,7 +15,9 @@ function toProxiedImage(abs: string | null | undefined): string | null {
 }
 
 function toPublicCover(row: typeof newsArticlesTable.$inferSelect): string | null {
-  return toProxiedImage(resolveNewsImageUrl(row.coverImage, row.sourceUrl || row.canonicalUrl));
+  // Doğrudan mutlak URL (kaynak görselleri açılıyor). Proxy yedek.
+  const abs = resolveNewsImageUrl(row.coverImage, row.sourceUrl || row.canonicalUrl);
+  return abs;
 }
 
 function proxyInlineImages(html: string | null | undefined): string | null {
@@ -313,6 +315,12 @@ router.post("/admin/news-sources/:id/scan-now", authMiddleware, requireAdmin, as
 router.post("/admin/news/scan-now", authMiddleware, requireAdmin, async (_req, res) => {
   void runNewsScanCycle(true).catch(() => undefined);
   res.json({ success: true, message: "Tüm aktif kaynaklar taranıyor" });
+});
+
+router.post("/admin/news/repair", authMiddleware, requireAdmin, async (_req, res) => {
+  const { repairNewsArticles } = await import("../news/scanner");
+  void repairNewsArticles(150).catch(() => undefined);
+  res.json({ success: true, message: "Haber kapak/içerik onarımı başlatıldı" });
 });
 
 router.get("/admin/news-import-logs", authMiddleware, requireAdmin, async (_req, res) => {

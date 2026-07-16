@@ -79,7 +79,18 @@ export function HomeNewsCards() {
                   loading="lazy"
                   decoding="async"
                   referrerPolicy="no-referrer"
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    // Proxy bozulursa doğrudan mutlak URL dene
+                    if (img.src.includes("/api/news/image?url=")) {
+                      try {
+                        const u = new URL(img.src, window.location.origin);
+                        const raw = u.searchParams.get("url");
+                        if (raw) { img.src = raw; return; }
+                      } catch { /* ignore */ }
+                    }
+                    img.style.opacity = "0";
+                  }}
                 />
               ) : null}
               <span>{item.category || "HABER"}</span>

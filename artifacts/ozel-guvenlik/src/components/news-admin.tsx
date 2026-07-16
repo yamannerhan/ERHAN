@@ -107,6 +107,19 @@ export function NewsAdminSection() {
     }
   };
 
+  const repairNow = async () => {
+    setScanning(true);
+    try {
+      await api("/admin/news/repair", "POST");
+      toast({ title: "Onarım başladı", description: "Eksik kapak ve haber metinleri yeniden çekiliyor." });
+      setTimeout(() => { void load(); }, 8000);
+    } catch (e) {
+      toast({ title: "Onarım başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const saveSource = async (source: Source, patch: Partial<Source>) => {
     try {
       await api(`/admin/news-sources/${source.id}`, "PATCH", patch);
@@ -146,6 +159,9 @@ export function NewsAdminSection() {
           <Button size="sm" onClick={() => void scanNow()} disabled={scanning}>
             {scanning ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
             Şimdi Tara
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void repairNow()} disabled={scanning}>
+            Kapak / Metin Onar
           </Button>
         </div>
       </div>

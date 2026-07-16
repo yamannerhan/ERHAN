@@ -64,14 +64,23 @@ function extractJsonLd(html: string): Record<string, unknown> | null {
 
 function mapCategory(raw: string | null | undefined): string {
   const t = (raw || "").toLocaleLowerCase("tr-TR");
-  if (/mevzuat|yasal|kanun|yonetmelik/.test(t)) return "Mevzuat";
-  if (/sinav|egitim|kurs|sertifika/.test(t)) return "Eğitim ve Sınav";
-  if (/maas|ucret|hak|sendika/.test(t)) return "Maaş ve Haklar";
+  if (/mevzuat/.test(t)) return "Mevzuat";
+  if (/eğitim|egitim|sınav|sinav/.test(t)) return "Eğitim ve Sınav";
+  if (/maaş|maas|hak/.test(t)) return "Maaş ve Haklar";
   if (/teknoloji|kamera|cctv/.test(t)) return "Teknoloji";
-  if (/rehber|nasil|kariyer/.test(t)) return "Rehberler";
-  if (/firma|sirket|kurum/.test(t)) return "Firma ve Kurumlar";
-  if (/sektor|haber|saldiri|olay/.test(t)) return "Sektör Haberleri";
+  if (/rehber/.test(t)) return "Rehberler";
+  if (/firma|kurum/.test(t)) return "Firma ve Kurumlar";
+  if (/sektör|sektor|haber/.test(t)) return "Sektör Haberleri";
   return "Genel Haberler";
+}
+
+/** Sayfadaki kategori linkinden oku (ör. Sektör Haberleri) */
+function extractPageCategory(html: string): string | null {
+  const m = html.match(/bi-folder[\s\S]{0,240}<a[^>]*>\s*([^<]+?)\s*<\/a>/i)
+    || html.match(/class=["'][^"']*badge[^"']*["'][^>]*>\s*([^<]+?)\s*</i);
+  const raw = m?.[1]?.replace(/\s+/g, " ").trim();
+  if (!raw || raw.length < 3 || raw.length > 60) return null;
+  return mapCategory(raw) !== "Genel Haberler" ? mapCategory(raw) : raw;
 }
 
 function parseTrDate(html: string): Date | null {
@@ -122,33 +131,40 @@ function stripJunkBlocks(html: string): string {
 
 function pickCoverImage(html: string, pageUrl: string): string | null {
   const slug = (pageUrl.split("/").filter(Boolean).pop() || "").toLowerCase();
+  const candidates: string[] = [];
 
-  // 1) Kapak: h1 öncesi featured img (en güvenilir)
-  const h1idx = html.search(/<h1[\s>]/i);
-  if (h1idx > 0) {
-    const before = html.slice(Math.max(0, h1idx - 2500), h1idx);
-    const imgs = [...before.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)]
-      .map((m) => resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl))
-      .filter((u): u is string => !!u && !isBadCover(u) && /\/uploads\/posts\//i.test(u));
-    if (imgs.length) return imgs[imgs.length - 1]!;
-  }
-
-  // 2) og:image / twitter
+  // 1) og / twitter (örnek sayfada her zaman var)
   for (const prop of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
     const v = resolveNewsImageUrl(metaContent(html, prop), pageUrl);
-    if (v && !isBadCover(v)) return v;
+    if (v && !isBadCover(v)) candidates.push(v);
   }
 
-  // 3) slug ile eşleşen post görseli
-  const allPosts = [...html.matchAll(/src=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)]
-    .map((m) => resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl))
-    .filter((u): u is string => !!u && !isBadCover(u));
-  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 28);
-  const matched = allPosts.find((u) => slugKey.length > 10 && u.toLowerCase().includes(slugKey.slice(0, 18)));
-  if (matched) return matched;
-  if (allPosts[0]) return allPosts[0];
+  // 2) h1 öncesi featured img (class img-fluid / posts)
+  const h1idx = html.search(/<h1[\s>]/i);
+  if (h1idx > 0) {
+    const before = html.slice(Math.max(0, h1idx - 3500), h1idx);
+    for (const m of before.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) {
+      const v = resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl);
+      if (v && !isBadCover(v)) candidates.push(v);
+    }
+  }
 
-  return null;
+  // 3) tüm /uploads/posts/ görselleri
+  for (const m of html.matchAll(/(?:src|content)=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)) {
+    const v = resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl);
+    if (v && !isBadCover(v)) candidates.push(v);
+  }
+
+  const uniq = [...new Set(candidates)];
+  if (!uniq.length) return null;
+
+  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 32);
+  const matched = uniq.find((u) => slugKey.length > 8 && u.toLowerCase().includes(slugKey.slice(0, 20)));
+  if (matched) return matched;
+
+  // posts klasöründekileri tercih et
+  const post = uniq.find((u) => /\/uploads\/posts\//i.test(u));
+  return post || uniq[0]!;
 }
 
 function extractPostContent(html: string): string {
@@ -199,6 +215,14 @@ export const guvenlikAkademiProvider: NewsProvider = {
 
     const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
     const coverImage = pickCoverImage(html, url);
+    const category = extractPageCategory(html) || mapCategory(title + " " + excerpt);
+
+    // Kapak yoksa içerikten ilk uygun görseli dene
+    const coverFinal = coverImage
+      || resolveNewsImageUrl(
+        (contentHtml.match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1],
+        url,
+      );
 
     let sourcePublishedAt: Date | null = null;
     let sourcePublishedMissing = false;
@@ -224,8 +248,8 @@ export const guvenlikAkademiProvider: NewsProvider = {
       title,
       excerpt,
       contentHtml: contentHtml || `<p>${excerpt}</p>`,
-      coverImage,
-      category: mapCategory(title + " " + excerpt),
+      coverImage: coverFinal,
+      category,
       authorName,
       sourceUrl: url,
       canonicalUrl: absolutizeUrl(url, canonical),

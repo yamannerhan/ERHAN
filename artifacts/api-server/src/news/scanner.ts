@@ -321,6 +321,74 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
   }
 }
 
+/** DB'deki otomatik haberleri source_url ile yeniden çek — kapak + tam metin onarımı */
+export async function repairNewsArticles(limit = 80): Promise<{ repaired: number; failed: number }> {
+  await ensureNewsSchema();
+  const rows = await db.select()
+    .from(newsArticlesTable)
+    .where(and(
+      eq(newsArticlesTable.isManual, false),
+      sql`${newsArticlesTable.sourceUrl} IS NOT NULL`,
+    ))
+    .orderBy(desc(newsArticlesTable.importedAt))
+    .limit(limit);
+
+  let repaired = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const sourceUrl = row.sourceUrl;
+    if (!sourceUrl) continue;
+    const needs =
+      !row.coverImage
+      || !/^https?:\/\//i.test(row.coverImage)
+      || !row.content
+      || (row.content?.length || 0) < 400
+      || row.publicationType !== "full"
+      || /güvenlik\s*akademi|guvenlikakademi/i.test(row.title);
+    // Her boot'ta bir kez tümünü tazelemek için: son 48s içinde kontrol edilmediyse de yenile
+    const stale = !row.lastCheckedAt || (Date.now() - row.lastCheckedAt.getTime() > 6 * 60 * 60 * 1000);
+    if (!needs && !stale) continue;
+
+    try {
+      const provider = getProvider("guvenlik_akademi");
+      if (!provider) { failed += 1; continue; }
+      await sleep(300);
+      const article = await provider.getArticleDetail(sourceUrl, {
+        lastmod: row.sourcePublishedAt ?? undefined,
+      });
+      if (!article || !article.contentHtml || article.contentHtml.length < 80) {
+        failed += 1;
+        continue;
+      }
+      const title = cleanNewsTitle(article.title);
+      const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl);
+      await db.update(newsArticlesTable).set({
+        title,
+        metaTitle: title,
+        excerpt: article.excerpt || row.excerpt,
+        content: article.contentHtml,
+        coverImage: coverImage || resolveNewsImageUrl(row.coverImage, sourceUrl) || row.coverImage,
+        category: article.category || row.category,
+        publicationType: "full",
+        status: "published",
+        publishedAt: row.publishedAt || article.sourcePublishedAt || new Date(),
+        sourcePublishedAt: article.sourcePublishedAt || row.sourcePublishedAt,
+        metaDescription: (article.excerpt || row.metaDescription || "").slice(0, 160),
+        lastCheckedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(newsArticlesTable.id, row.id));
+      repaired += 1;
+    } catch (err) {
+      failed += 1;
+      logger.warn({ err, id: row.id, sourceUrl }, "news: repair article failed");
+    }
+  }
+  if (repaired || failed) {
+    logger.info({ repaired, failed, total: rows.length }, "news: repair finished");
+  }
+  return { repaired, failed };
+}
+
 export async function runNewsScanCycle(force = false): Promise<void> {
   if (scanning) {
     logger.info("news: scan already running — skip");
@@ -344,6 +412,8 @@ export async function runNewsScanCycle(force = false): Promise<void> {
       if (!force && source.initialScanDone && Date.now() - last < intervalMs) continue;
       await scanNewsSource(source.id, { force });
     }
+    // Tarama sonrası eksik kapak/içerikleri onar
+    await repairNewsArticles(force ? 120 : 40);
   } catch (err) {
     logger.error({ err }, "news: scan cycle failed");
   } finally {
@@ -357,11 +427,15 @@ export function startNewsWorker(): void {
   void ensureDefaultNewsSource().catch(() => undefined);
   setTimeout(() => {
     void runNewsScanCycle(true).catch((err) => logger.error({ err }, "news: initial scan failed"));
-  }, 15_000);
+  }, 12_000);
+  // Boot sonrası ekstra onarım (eski kayıtlar)
+  setTimeout(() => {
+    void repairNewsArticles(120).catch((err) => logger.warn({ err }, "news: boot repair failed"));
+  }, 45_000);
   intervalHandle = setInterval(() => {
     void runNewsScanCycle(false).catch((err) => logger.error({ err }, "news: interval scan failed"));
   }, 5 * 60_000);
-  logger.info("news: worker started (30dk kaynak aralığı, 20g saklama, otomatik yayın)");
+  logger.info("news: worker started (30dk kaynak, 20g saklama, kapak+içerik onarım)");
 }
 
 export function stopNewsWorker(): void {

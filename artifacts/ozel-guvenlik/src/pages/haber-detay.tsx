@@ -99,11 +99,24 @@ export default function HaberDetayPage() {
             {article.coverImage && (
               <img
                 src={article.coverImage}
-                alt=""
+                alt={article.title}
                 referrerPolicy="no-referrer"
-                style={{ width: "100%", borderRadius: 16, marginBottom: 16, maxHeight: 360, objectFit: "cover" }}
-                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                style={{ width: "100%", borderRadius: 16, marginBottom: 16, maxHeight: 420, objectFit: "cover" }}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (img.src.includes("/api/news/image?url=")) {
+                    try {
+                      const u = new URL(img.src, window.location.origin);
+                      const raw = u.searchParams.get("url");
+                      if (raw) { img.src = raw; return; }
+                    } catch { /* ignore */ }
+                  }
+                  img.style.display = "none";
+                }}
               />
+            )}
+            {article.excerpt && article.publicationType !== "full" && (
+              <p style={{ color: "#334155", fontSize: 15, lineHeight: 1.55, marginBottom: 14 }}>{article.excerpt}</p>
             )}
             {bodyHtml && (
               <div
