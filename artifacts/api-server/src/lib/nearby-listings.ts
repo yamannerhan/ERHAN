@@ -277,33 +277,9 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
   }
 
   const publishMs = (row: (typeof scored)[0]) => listingDisplayDate(row.listing).getTime();
-  const ageMs = (row: (typeof scored)[0]) => Math.max(0, Date.now() - publishMs(row));
-
-  /** En yeni önce: bugün → 3g → 7g → daha eski. Eski yakın ilan yeni uzağın üstüne çıkmasın. */
-  const freshnessBucket = (row: (typeof scored)[0]): number => {
-    const hours = ageMs(row) / (60 * 60 * 1000);
-    if (hours <= 24) return 0;
-    if (hours <= 72) return 1;
-    if (hours <= 168) return 2;
-    return 3;
-  };
-
-  /** Mesafe + yaş skoru: ~1 gün ≈ 12 km. 6g önce 1 km, bugün 10 km'nin gerisinde kalır. */
-  const nearbyBlendScore = (row: (typeof scored)[0]): number => {
-    const dist = row.sortDistanceKm ?? 9_999;
-    const ageDays = ageMs(row) / (24 * 60 * 60 * 1000);
-    return dist + ageDays * 12;
-  };
+  const distOf = (row: (typeof scored)[0]) => row.sortDistanceKm ?? Number.POSITIVE_INFINITY;
 
   scored.sort((a, b) => {
-    if (q.sort === "newest") {
-      // En yeni → en eski; eşitlikte daha yakın önde
-      const dateDiff = publishMs(b) - publishMs(a);
-      if (dateDiff !== 0) return dateDiff;
-      const da = a.sortDistanceKm ?? Number.POSITIVE_INFINITY;
-      const db_ = b.sortDistanceKm ?? Number.POSITIVE_INFINITY;
-      return da - db_;
-    }
     if (q.sort === "views") {
       return (b.listing.viewCount ?? 0) - (a.listing.viewCount ?? 0);
     }
@@ -312,25 +288,18 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       const sb = Number(b.listing.salaryMin ?? b.listing.salaryMax ?? 0);
       return sb - sa;
     }
-    // Varsayılan "distance" = En yakın + En yeni:
-    // 1) tazelik dilimi (yeniler önce)
-    // 2) dilim içi: mesafe+yaş karışık skor (yakın+yeni üstte, uzak+eski alta)
-    // 3) eşitlikte kesin tarih / mesafe
-    const bucketDiff = freshnessBucket(a) - freshnessBucket(b);
-    if (bucketDiff !== 0) return bucketDiff;
 
-    if (a.sortDistanceKm == null && b.sortDistanceKm == null) {
-      return publishMs(b) - publishMs(a);
-    }
-    if (a.sortDistanceKm == null) return 1;
-    if (b.sortDistanceKm == null) return -1;
-
-    const blendDiff = nearbyBlendScore(a) - nearbyBlendScore(b);
-    if (Math.abs(blendDiff) > 0.05) return blendDiff;
-
+    // "newest" ve varsayılan "distance" (En yakın + En yeni):
+    // 1) En yeni üstte — 1 dk / 1 saat fark bile yeter (eski yakın ilan üste çıkmaz)
+    // 2) Aynı anda / eşit tarihte → en yakın üstte
+    // 3) Mesafesi yoksa alta
     const dateDiff = publishMs(b) - publishMs(a);
     if (dateDiff !== 0) return dateDiff;
-    return a.sortDistanceKm - b.sortDistanceKm;
+
+    if (a.sortDistanceKm == null && b.sortDistanceKm == null) return 0;
+    if (a.sortDistanceKm == null) return 1;
+    if (b.sortDistanceKm == null) return -1;
+    return distOf(a) - distOf(b);
   });
 
   const total = scored.length;
