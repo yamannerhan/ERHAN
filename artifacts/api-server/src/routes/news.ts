@@ -32,6 +32,7 @@ function proxyInlineImages(html: string | null | undefined): string | null {
           || host.includes("ogghaber")
           || host.includes("egm.gov.tr")
           || host.includes("guvenlikakademi")
+          || host.includes("guvenlikegitimi")
           || host.endsWith(".wp.com")
         ) {
           return `${pre}${toProxiedImage(url)}${post}`;
@@ -98,8 +99,10 @@ router.get("/news/image", async (req, res) => {
       || host.endsWith(".ogghaber.net")
       || host === "egm.gov.tr"
       || host.endsWith(".egm.gov.tr")
-      || host === "guvenlikakademi.com"
+      ||       host === "guvenlikakademi.com"
       || host.endsWith(".guvenlikakademi.com")
+      || host === "guvenlikegitimi.com"
+      || host.endsWith(".guvenlikegitimi.com")
       || host.endsWith(".wp.com")
       || host.endsWith(".googleusercontent.com");
     if (!allowed) {
@@ -147,7 +150,9 @@ router.get("/news/image", async (req, res) => {
   }
 });
 
-/** Ana sayfa: en yeni 3 yayınlanmış haber */
+const newestOrder = sql`COALESCE(${newsArticlesTable.publishedAt}, ${newsArticlesTable.sourcePublishedAt}, ${newsArticlesTable.importedAt})`;
+
+/** Ana sayfa: en yeni 3 yayınlanmış haber (en yeniden eskiye) */
 router.get("/news/home", async (_req, res) => {
   try {
     await ensureNewsSchema();
@@ -160,7 +165,7 @@ router.get("/news/home", async (_req, res) => {
           lte(newsArticlesTable.publishedAt, now),
         )!,
       ))
-      .orderBy(desc(newsArticlesTable.publishedAt), desc(newsArticlesTable.id))
+      .orderBy(desc(newestOrder), desc(newsArticlesTable.id))
       .limit(3);
     res.json({ articles: rows.map(publicArticle) });
   } catch (e) {
@@ -186,7 +191,7 @@ router.get("/news", async (req, res) => {
     const offset = (page - 1) * limit;
     const rows = await db.select().from(newsArticlesTable)
       .where(and(...conditions))
-      .orderBy(desc(newsArticlesTable.publishedAt), desc(newsArticlesTable.id))
+      .orderBy(desc(newestOrder), desc(newsArticlesTable.id))
       .limit(limit)
       .offset(offset);
     const [countRow] = await db.select({ c: sql<number>`count(*)::int` })

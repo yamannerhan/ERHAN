@@ -139,7 +139,7 @@ export function NewsAdminSection() {
 
   const resetNow = async () => {
     const ok = window.confirm(
-      "Tüm otomatik haberler silinecek ve 4 kaynaktan (son 10 gün) yeniden yüklenecek.\nManuel haberler kalır.\nDevam?",
+      "Tüm otomatik haberler silinecek ve 6 kaynaktan (son 10 gün) yeniden yüklenecek.\nManuel haberler kalır.\nDevam?",
     );
     if (!ok) return;
     setScanning(true);
@@ -231,7 +231,7 @@ export function NewsAdminSection() {
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
           <p className="text-xs text-slate-400 mt-1">
-            4 kaynak · son 10 gün · tam içerik + kapak · 30 dk tarama · 20g arşiv + 7g silme
+            6 kaynak · son 10 gün · tam içerik + kapak · 30 dk tarama · ana sayfada en yeni 3
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

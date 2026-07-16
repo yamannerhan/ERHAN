@@ -8,6 +8,7 @@ import { getProvider, providerKeyFromUrl } from "./providers";
 import { DEFAULT_BASE, DEFAULT_LISTING } from "./providers/ozel-guvenlik-ajans";
 import { DEFAULT_OGG_BASE, DEFAULT_OGG_LISTING } from "./providers/ogghaber";
 import { EGM_DUYURULAR_LISTING, EGM_HABERLER_LISTING } from "./providers/egm";
+import { DEFAULT_EGITIM_BASE, DEFAULT_EGITIM_LISTING } from "./providers/guvenlik-egitimi";
 import { cleanNewsTitle, mapPool, resolveNewsImageUrl, sleep, slugifyTr } from "./utils";
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
@@ -120,6 +121,18 @@ const SOURCE_SEEDS: SourceSeed[] = [
     listingUrl: DEFAULT_OGG_LISTING,
   },
   {
+    providerKey: "guvenlik_akademi",
+    name: "Güvenlik Akademi",
+    baseUrl: "https://guvenlikakademi.com",
+    listingUrl: "https://guvenlikakademi.com/sitemap.xml",
+  },
+  {
+    providerKey: "guvenlik_egitimi",
+    name: "Akademi Güvenlik Eğitimi",
+    baseUrl: DEFAULT_EGITIM_BASE,
+    listingUrl: DEFAULT_EGITIM_LISTING,
+  },
+  {
     providerKey: "egm_haberler",
     name: "EGM Özel Güvenlik Haberler",
     baseUrl: "https://www.egm.gov.tr",
@@ -133,22 +146,9 @@ const SOURCE_SEEDS: SourceSeed[] = [
   },
 ];
 
-/** 4 aktif kaynak + eski akademiyi kapat + lookback 10 gün */
+/** 6 aktif kaynak · lookback 10 gün · sürekli arka plan tarama */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
-
-  await db.update(newsSourcesTable).set({
-    isActive: false,
-    updatedAt: new Date(),
-  }).where(eq(newsSourcesTable.providerKey, "guvenlik_akademi"));
-
-  await db.delete(newsArticlesTable).where(and(
-    eq(newsArticlesTable.isManual, false),
-    or(
-      sql`${newsArticlesTable.sourceUrl} ILIKE '%guvenlikakademi%'`,
-      sql`${newsArticlesTable.sourceName} ILIKE '%akademi%'`,
-    )!,
-  ));
 
   for (const seed of SOURCE_SEEDS) {
     const [row] = await db.select()
@@ -175,6 +175,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       });
     } else {
       const lookbackGrew = (row.initialLookbackDays || 0) < NEWS_LOOKBACK_DAYS;
+      const reactivated = !row.isActive;
       await db.update(newsSourcesTable).set({
         name: seed.name,
         baseUrl: seed.baseUrl,
@@ -186,8 +187,8 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         showSource: true,
         showSourceLink: false,
         scanIntervalMinutes: 30,
-        // Lookback genişlediyse bir sonraki cycle tam tara
-        ...(lookbackGrew ? { lastScanAt: null as Date | null } : {}),
+        // Lookback genişledi veya kaynak yeniden açıldıysa hemen tara
+        ...((lookbackGrew || reactivated) ? { lastScanAt: null as Date | null, initialScanDone: false } : {}),
         updatedAt: new Date(),
       }).where(eq(newsSourcesTable.id, row.id));
     }
@@ -568,7 +569,7 @@ export function startNewsWorker(): void {
   lifecycleHandle = setInterval(() => {
     void maybeRunLifecycleAt3am().catch((err) => logger.warn({ err }, "news: lifecycle tick failed"));
   }, 15 * 60_000);
-  logger.info("news: worker started (4 kaynak, 10g lookback, 30dk tarama, 20g arşiv+7g silme)");
+  logger.info("news: worker started (6 kaynak, 10g lookback, 30dk tarama, 20g arşiv+7g silme)");
 }
 
 export function stopNewsWorker(): void {
