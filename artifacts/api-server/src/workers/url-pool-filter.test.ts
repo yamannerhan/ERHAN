@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { isUrlPoolJobPosting } from "../lib/job-parsing";
 
-describe("isUrlPoolJobPosting — gevşek havuz filtresi", () => {
+describe("isUrlPoolJobPosting — sadece özel güvenlik ilanları", () => {
   it("accepts typical security hiring posts", () => {
     assert.equal(
       isUrlPoolJobPosting("İstanbul Anadolu yakası özel güvenlik görevlisi aranıyor. Maaş 35.000 TL. Tel: 0532 111 22 33"),
@@ -10,17 +10,39 @@ describe("isUrlPoolJobPosting — gevşek havuz filtresi", () => {
     );
   });
 
-  it("accepts short pool posts with security word", () => {
+  it("accepts silahli / silahsiz keywords", () => {
     assert.equal(
-      isUrlPoolJobPosting("Gebze güvenlik personel aranıyor acil"),
+      isUrlPoolJobPosting("Gebze silahlı güvenlik personel aranıyor acil proje"),
+      true,
+    );
+    assert.equal(
+      isUrlPoolJobPosting("Silahsız güvenlik alınacaktır AVM. Başvuru: 05321112233"),
       true,
     );
   });
 
-  it("accepts phone + job length without explicit security keyword", () => {
+  it("accepts güvenlik danışman", () => {
+    assert.equal(
+      isUrlPoolJobPosting("Kurumsal güvenlik danışmanı aranıyor. Tecrübeli ÖGG. İletişim 0532 111 22 33"),
+      true,
+    );
+  });
+
+  it("rejects driver / cook without security", () => {
+    assert.equal(
+      isUrlPoolJobPosting("Şoför kurulacak acil. Ehliyet şart. Tel 05321112233"),
+      false,
+    );
+    assert.equal(
+      isUrlPoolJobPosting("Yemekçi aşçı aranıyor lokanta personel. Maaş iyi 05321112233"),
+      false,
+    );
+  });
+
+  it("rejects generic project staff without security keyword", () => {
     assert.equal(
       isUrlPoolJobPosting("Kartal proje için personel alınacaktır. Vardiya 12/36. İletişim 05321112233 lütfen yazın hemen."),
-      true,
+      false,
     );
   });
 

@@ -504,12 +504,25 @@ export function isSponsoredPost(text: string): boolean {
   return /#sponsorlu|sponsorlu\s*·|garanti\s+bbva|sur\s+yap[ıi]|ömür\s+boyu\s+tatil|magfi\b|caz\s+festivali|hemen\s+keşfet/i.test(t);
 }
 
+/** Alakasız meslek (şoför, yemekçi vb.) — güvenlik kelimesi yoksa elenir */
+export function isUnrelatedJobRole(text: string): boolean {
+  const t = normalizeTr(text);
+  const unrelated = /(?:\bşoför\b|\bsofor\b|yemekçi|yemekci|aşçı\b|asci\b|garson\b|kurye\b|kasiyer\b|barmen\b|komi\b|hostes\b|temizlik(?:çi|ci)?|camc[ıi]|hasta\s*bak[ıi]c|çocuk\s*bak[ıi]c|yaşlı\s*bak[ıi]c|muhasebe(?:ci)?|satış\s*danışman|pazarlama\s*eleman|mühendis\b|ustabaşı|kaynakç[ıi]|tornac[ıi]|boyac[ıi]|tesisatç[ıi]|kuaför|berber|garsoniye|paketleme\s*eleman|depo\s*işçisi|forklift)/.test(t);
+  if (!unrelated) return false;
+  return !hasSecurityKeyword(t);
+}
+
+export function hasSecurityKeyword(text: string): boolean {
+  const t = normalizeTr(text);
+  return /(?:özel\s*g[üu]venlik|g[üu]venlik|ögg\b|ogg\b|5188|silahl[ıi]|silahs[ıi]z|koruma\s*(?:görev|personel|eleman)|g[üu]venlik\s*danışman|danışman(?:lık)?\s*(?:hizmet)?.*g[üu]venlik|g[üu]venlik.*danışman|kimlikli\s*(?:bay|bayan)?\s*g[üu]venlik|maç\s*günü\s*görev)/.test(t);
+}
+
 export function isNonSecurityStaffPosting(text: string): boolean {
   const t = normalizeTr(text);
+  if (isUnrelatedJobRole(t)) return true;
   const staffJob = /(?:temizlik\s+personeli|temizlik\s+görevlisi|temizlik\s+gorevlisi|camc[ıi]\s+temizlik|makineci\s+temizlik|bak[ıi]m\s+personeli|bak[ıi]c[ıi]\s+personeli|hasta\s+bak[ıi]m|kad[ıi]n\s+bak[ıi]m|zemin\s+y[ıi]kama\s+personeli|çöp\s+toplama)/.test(t);
   if (!staffJob) return false;
-  const securityRole = /(?:özel\s+g[üu]venlik|ögg|g[üu]venlik\s+(?:görevlisi|personeli|amiri|sorumlusu)|5188)/.test(t);
-  return !securityRole;
+  return !hasSecurityKeyword(t);
 }
 
 export function isJobSeekerPost(text: string): boolean {
@@ -520,27 +533,34 @@ export function isJobSeekerPost(text: string): boolean {
 }
 
 /**
- * Mesaj havuzu (url_pool) için gevşek filtre.
- * Havuz önceden ayıklı; sadece bariz spam / iş arayan / temizlik elenir.
- * Çift ilan: yalnızca birebir aynı metin (hash) — burada benzerlik yok.
+ * Mesaj havuzu (url_pool):
+ * - Sadece özel güvenlik iş ilanları
+ * - Anahtar: güvenlik, özel, ögg, silahlı/silahsız, danışman, proje(+güvenlik), koruma…
+ * - Şoför / yemekçi / temizlik vb. alakasız meslekler elenir
+ * - Çok sıkı değil; iş arayan / spam / alakasız meslek dışı kabul
  */
 export function isUrlPoolJobPosting(text: string): boolean {
   const t = text.trim();
-  if (t.length < 12) return false;
+  if (t.length < 15) return false;
   if (isSponsoredPost(t)) return false;
   if (isJobSeekerPost(t)) return false;
+  if (isUnrelatedJobRole(t)) return false;
   if (isNonSecurityStaffPosting(t)) return false;
+
+  // Zorunlu: güvenlik alanına ait anahtar kelime
+  if (!hasSecurityKeyword(t)) return false;
+
+  // Klasik güvenlik ilanı yakalama
   if (isSecurityJobPosting(t)) return true;
 
   const n = normalizeTr(t);
-  const softSecurity = /(?:g[üu]venlik|ögg|ogg|5188|koruma)/.test(n);
-  const softJob = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacak|al[ıi]nacakt[ıi]r|ba[şs]vuru|maa[şs]|[üu]cret|proje|vardiya|personel|ilan|acil|ihtiya[çc]|kimlik|eleman|i[şs]e\s*al[ıi]m|kontenjan|g[öo]rev|laz[ıi]m|çalı[şs]ma|sgk|servis|yemek|hakedi[şs]|yevmiye)/.test(n);
+  const hiringOrListing = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacak|al[ıi]nacakt[ıi]r|ba[şs]vuru|maa[şs]|[üu]cret|proje|vardiya|personel|ilan|acil|ihtiya[çc]|kimlik|eleman|i[şs]e\s*al[ıi]m|kontenjan|g[öo]rev|hakedi[şs]|yevmiye|sgk|servis|ileti[şs]im|irtibat)/.test(n);
   const hasPhone = /(?:\+?90|0)?\s*5\d{2}[\s().-]*\d{3}/.test(t);
 
-  if (softSecurity) return true;
-  if (softJob && t.length >= 18) return true;
-  if (hasPhone && t.length >= 25) return true;
-  if (t.length >= 30) return true;
+  // Güvenlik kelimesi var + (alım/ilan sinyali veya telefon veya yeterli uzunluk)
+  if (hiringOrListing) return true;
+  if (hasPhone && t.length >= 20) return true;
+  if (t.length >= 40) return true;
   return false;
 }
 
