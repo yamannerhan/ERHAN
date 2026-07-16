@@ -120,9 +120,12 @@ export function kickDeepScan(): void {
   })().catch(() => undefined);
 }
 
+/**
+ * Bağlantı CONNECTED olduğunda çağrılmaz.
+ * İlan taraması yalnızca grup kaydı / Şimdi Tara / zamanlayıcı ile başlar.
+ */
 export function onWhatsAppReady(): void {
-  logger.info("wa: READY hook — pending scans enqueue");
-  kickDeepScan();
+  logger.info("wa: scan hook skipped on connect — wait for manual group selection");
 }
 
 export function startWhatsAppScheduler(): void {

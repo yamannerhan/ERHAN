@@ -52,22 +52,46 @@ export async function resetAllWhatsAppSources() {
 }
 
 export async function getDiscoveryDiagnostics() {
-  const client = WhatsAppManager.getClient();
+  const status = WhatsAppManager.getStatus();
+  const client = WhatsAppManager.getActiveClient();
   if (!client) {
-    return { steps: ["client yok"], sources: [], error: "not_connected" };
-  }
-  try {
-    const groups = await WhatsAppManager.getGroups();
     return {
-      steps: ["getChats ok", `groups=${groups.length}`],
-      sources: groups.map((g) => ({ id: g.id, name: g.name, kind: g.isChannel ? "channel" : "group" })),
-      error: null,
-    };
-  } catch (err) {
-    return {
-      steps: [],
-      sources: [],
-      error: err instanceof Error ? err.message : String(err),
+      steps: ["client yok"],
+      sources: [] as Array<{ id: string; name: string; kind: string }>,
+      error: "CLIENT_NOT_AVAILABLE",
     };
   }
+  const cached = WhatsAppManager.getCachedGroups();
+  if (status.groupDiscoveryStatus === "READY" && cached.length > 0) {
+    return {
+      steps: [
+        `clientInstanceId=${status.clientInstanceId}`,
+        `connectionStatus=${status.connectionStatus}`,
+        `groupDiscoveryStatus=${status.groupDiscoveryStatus}`,
+        `chats=${status.chatCount}`,
+        `groups=${status.groupCount}`,
+        `channels=${status.channelCount}`,
+      ],
+      sources: cached.map((g) => ({
+        id: g.id,
+        name: g.name,
+        kind: g.isChannel ? "channel" : "group",
+      })),
+      error: null as string | null,
+    };
+  }
+  return {
+    steps: [
+      `clientInstanceId=${status.clientInstanceId}`,
+      `connectionStatus=${status.connectionStatus}`,
+      `groupDiscoveryStatus=${status.groupDiscoveryStatus}`,
+      status.groupDiscoveryMessage ?? "keşif sürüyor",
+    ],
+    sources: cached.map((g) => ({
+      id: g.id,
+      name: g.name,
+      kind: g.isChannel ? "channel" : "group",
+    })),
+    error: status.groupDiscoveryStatus === "FAILED" ? status.groupDiscoveryMessage : null,
+  };
 }

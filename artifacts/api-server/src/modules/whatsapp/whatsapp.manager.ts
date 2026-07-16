@@ -23,6 +23,8 @@ import {
   PROTOCOL_TIMEOUT_MS,
   SESSION_ID,
   type ConnectionMode,
+  type ConnectionStatus,
+  type GroupDiscoveryStatus,
   type WhatsAppGroup,
   type WhatsAppSessionStatus,
   type WhatsAppStatusDto,
@@ -71,6 +73,16 @@ export class WhatsAppManager {
     updatedAt: new Date(),
     clientInstanceId: null,
     chromePath: null,
+    groupDiscoveryStatus: "NOT_STARTED",
+    groupDiscoveryMessage: null,
+    groupDiscoveryAttempt: 0,
+    groupDiscoveryStartedAt: null,
+    groupDiscoveryPromise: null,
+    cachedGroups: [],
+    chatCount: 0,
+    groupCount: 0,
+    channelCount: 0,
+    scanStatus: "NOT_STARTED",
   };
 
   private static authPath = resolveAuthPath();
@@ -97,26 +109,26 @@ export class WhatsAppManager {
 
   static getStatus(sessionId = SESSION_ID): WhatsAppStatusDto {
     const s = this.state;
-    const connected = ["AUTHENTICATED", "CONNECTED", "SYNCING", "READY"].includes(s.status);
-    const ready = s.status === "READY" || s.status === "CONNECTED";
     const mode: ConnectionMode = s.mode ?? "qr";
     const inPairing = mode === "pairing_code";
-    const authAccepted = connected;
 
-    let connectionStatus = "IDLE";
-    if (ready || s.status === "READY") connectionStatus = "CONNECTED";
-    else if (["CONNECTED", "SYNCING", "AUTHENTICATED"].includes(s.status)) connectionStatus = "CONNECTED";
-    else if (s.status === "FAILED") connectionStatus = "FAILED";
-    else if (s.status === "DISCONNECTED") connectionStatus = "DISCONNECTED";
-    else if (s.starting || ["STARTING", "QR_READY", "PAIRING_READY"].includes(s.status)) {
+    let connectionStatus: ConnectionStatus = "IDLE";
+    if (s.status === "CONNECTED" || s.status === "READY" || s.status === "SYNCING") {
+      connectionStatus = "CONNECTED";
+    } else if (s.status === "AUTHENTICATED") {
+      connectionStatus = "AUTHENTICATED";
+    } else if (s.status === "FAILED") {
+      connectionStatus = "FAILED";
+    } else if (s.status === "DISCONNECTED") {
+      connectionStatus = "DISCONNECTED";
+    } else if (s.starting || ["STARTING", "QR_READY", "PAIRING_READY"].includes(s.status)) {
       connectionStatus = "CONNECTING";
     }
 
-    let syncStatus = "NOT_STARTED";
-    if (s.status === "SYNCING") syncStatus = "LOADING";
-    else if (s.status === "READY") syncStatus = "READY";
-    else if (s.status === "CONNECTED") syncStatus = "WAITING";
-    else if (s.status === "FAILED") syncStatus = "TIMED_OUT";
+    const groupDiscoveryStatus: GroupDiscoveryStatus = s.groupDiscoveryStatus;
+    const connected = connectionStatus === "CONNECTED" || connectionStatus === "AUTHENTICATED";
+    const groupsReady = groupDiscoveryStatus === "READY";
+    const authAccepted = connected || s.status === "AUTHENTICATED";
 
     const pairingDisplay = s.pairingCode
       ? (s.pairingCode.replace(/\D/g, "").length === 8
@@ -127,20 +139,27 @@ export class WhatsAppManager {
     return {
       status: s.status,
       connectionStatus,
-      syncStatus,
-      whatsappState: connected || ready ? "CONNECTED" : s.status === "FAILED" ? "FAILED" : null,
-      authenticated: authAccepted || ready,
-      ready,
-      connected,
-      chatCount: 0,
-      groupCount: 0,
-      syncAttempt: 0,
-      syncStartedAt: null,
-      lastSyncError: s.status === "CONNECTED" ? s.lastError : null,
+      syncStatus: groupDiscoveryStatus,
+      groupDiscoveryStatus,
+      scanStatus: s.scanStatus,
+      whatsappState: connectionStatus === "CONNECTED" ? "CONNECTED"
+        : connectionStatus === "FAILED" ? "FAILED" : null,
+      authenticated: authAccepted,
+      ready: connectionStatus === "CONNECTED",
+      connected: connectionStatus === "CONNECTED",
+      chatCount: s.chatCount,
+      groupCount: s.groupCount,
+      channelCount: s.channelCount,
+      syncAttempt: s.groupDiscoveryAttempt,
+      syncStartedAt: s.groupDiscoveryStartedAt?.toISOString() ?? null,
+      lastSyncError: groupDiscoveryStatus === "RETRYING" || groupDiscoveryStatus === "FAILED"
+        ? s.groupDiscoveryMessage
+        : null,
+      groupDiscoveryMessage: s.groupDiscoveryMessage,
       error: s.lastError,
       updatedAt: s.updatedAt.toISOString(),
       starting: s.starting,
-      pairing: inPairing && !ready && !authAccepted,
+      pairing: inPairing && !connected && !authAccepted,
       authAccepted,
       phase: s.status.toLowerCase(),
       sessionState: s.status,
@@ -148,9 +167,9 @@ export class WhatsAppManager {
       mode,
       hasSession: hasLocalAuth(this.authPath, sessionId),
       volumeWarning: volumeWarning(this.authPath),
-      qr: (inPairing || authAccepted || ready) ? null : s.qrDataUrl,
-      pairingCode: (!inPairing || authAccepted || ready) ? null : pairingDisplay,
-      expiresInSeconds: s.pairingCode && inPairing && !authAccepted && !ready ? 180 : null,
+      qr: (inPairing || connected || authAccepted) ? null : s.qrDataUrl,
+      pairingCode: (!inPairing || connected || authAccepted) ? null : pairingDisplay,
+      expiresInSeconds: s.pairingCode && inPairing && !connected && !authAccepted ? 180 : null,
       phone: s.phoneMasked,
       phoneMasked: s.phoneMasked,
       chromePath: s.chromePath,
@@ -168,8 +187,15 @@ export class WhatsAppManager {
     };
   }
 
+  /** Bağlantı tamam — grup keşfi / tarama ayrı. */
+  static isConnected(): boolean {
+    return ["CONNECTED", "READY", "SYNCING", "AUTHENTICATED"].includes(this.state.status)
+      && Boolean(this.client);
+  }
+
+  /** Tarama / mesaj için client kullanılabilir mi. */
   static isReady(): boolean {
-    return this.state.status === "READY" || this.state.status === "CONNECTED";
+    return this.isConnected();
   }
 
   static hasSession(): boolean {
@@ -182,6 +208,14 @@ export class WhatsAppManager {
 
   static getClient(): WaClient | null {
     return this.client;
+  }
+
+  static getActiveClient(): WaClient | null {
+    return this.client;
+  }
+
+  static getCachedGroups(): WhatsAppGroup[] {
+    return this.state.cachedGroups;
   }
 
   private static async destroyClient(): Promise<void> {
@@ -198,6 +232,13 @@ export class WhatsAppManager {
     }
     this.client = null;
     this.state.clientInstanceId = null;
+    this.state.groupDiscoveryStatus = "NOT_STARTED";
+    this.state.groupDiscoveryPromise = null;
+    this.state.groupDiscoveryMessage = null;
+    this.state.cachedGroups = [];
+    this.state.chatCount = 0;
+    this.state.groupCount = 0;
+    this.state.channelCount = 0;
   }
 
   /** Tek yerde new Client() */
@@ -236,7 +277,10 @@ export class WhatsAppManager {
       client,
       () => this.state,
       (s, status, error) => this.setStatus(s, status, error),
-      (sid) => { void this.markReadyAfterChats(sid); },
+      (sid) => {
+        // Bağlantı CONNECTED → grup keşfi; ilan taraması burada BAŞLAMAZ.
+        queueMicrotask(() => { void this.refreshGroups(sid); });
+      },
     );
 
     logger.info({
@@ -251,34 +295,155 @@ export class WhatsAppManager {
     return client;
   }
 
-  private static async markReadyAfterChats(sessionId: string): Promise<void> {
-    const client = this.client;
-    if (!client) return;
-    const started = Date.now();
-    try {
-      await Promise.race([
-        client.getChats(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("getChats timeout")), GET_CHATS_TIMEOUT_MS)),
-      ]);
-      this.setStatus(this.state, "READY", null);
-      logger.info({ sessionId, durationMs: Date.now() - started, operation: "sync_ready" }, "wa: READY");
-      void import("./whatsapp.scheduler").then((m) => m.onWhatsAppReady()).catch(() => undefined);
-    } catch (err) {
-      this.setStatus(this.state, "CONNECTED", err instanceof Error ? err.message : "Sohbet senkronu gecikti");
-      logger.warn({ err, sessionId, operation: "sync_deferred" }, "wa: getChats delayed; stays CONNECTED");
-      setTimeout(() => {
-        void (async () => {
+  private static clientUsableForGroups(client: WaClient): { ok: boolean; reason?: string } {
+    if (!client) return { ok: false, reason: "CLIENT_NOT_AVAILABLE" };
+    if (typeof client.getChats !== "function") return { ok: false, reason: "GET_CHATS_MISSING" };
+    if (client.pupPage && typeof client.pupPage.isClosed === "function" && client.pupPage.isClosed()) {
+      return { ok: false, reason: "PAGE_CLOSED" };
+    }
+    return { ok: true };
+  }
+
+  private static mapChatsToGroups(chats: Record<string, unknown>[]): WhatsAppGroup[] {
+    const result: WhatsAppGroup[] = [];
+    for (const chat of chats) {
+      const id = chat.id && typeof chat.id === "object"
+        ? String((chat.id as { _serialized?: string })._serialized ?? "")
+        : String(chat.id ?? "");
+      if (!id) continue;
+      const isChannel = id.includes("@newsletter") || Boolean(chat.isChannel) || Boolean(chat.isNewsletter);
+      const isGroup = (Boolean(chat.isGroup) || id.endsWith("@g.us")) && !isChannel;
+      if (!isGroup && !isChannel) continue;
+      const ts = (chat.timestamp as number | undefined)
+        ?? (chat.lastMessage && typeof chat.lastMessage === "object"
+          ? (chat.lastMessage as { timestamp?: number }).timestamp
+          : undefined);
+      result.push({
+        id,
+        name: String(chat.name || chat.formattedTitle || chat.pushname || "İsimsiz grup"),
+        isGroup,
+        isChannel,
+        kind: isChannel ? "channel" : "group",
+        lastMessageAt: ts && Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : null,
+      });
+    }
+    return result;
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * CONNECTED sonrası grup keşfi.
+   * Bağlantıyı FAILED yapmaz. Aynı anda tek promise.
+   * İlk 60 sn: 5 sn · sonraki 2 dk: 15 sn · max 3 dk.
+   */
+  static async refreshGroups(sessionId = SESSION_ID): Promise<WhatsAppGroup[]> {
+    const s = this.state;
+    if (s.groupDiscoveryPromise) return s.groupDiscoveryPromise;
+
+    const promise = (async () => {
+      const startedAt = Date.now();
+      s.groupDiscoveryStartedAt = new Date();
+      s.groupDiscoveryAttempt = 0;
+      s.groupDiscoveryStatus = "LOADING";
+      s.groupDiscoveryMessage = "WhatsApp bağlı. Gruplar yükleniyor.";
+
+      const deadlines = [
+        { untilMs: 60_000, intervalMs: 5_000 },
+        { untilMs: 180_000, intervalMs: 15_000 },
+      ];
+
+      while (Date.now() - startedAt < 180_000) {
+        if (!this.isConnected()) {
+          s.groupDiscoveryStatus = "FAILED";
+          s.groupDiscoveryMessage = "Bağlantı koptu — grup listesi alınamadı.";
+          break;
+        }
+
+        const client = this.getActiveClient();
+        const usable = client ? this.clientUsableForGroups(client) : { ok: false, reason: "CLIENT_NOT_AVAILABLE" };
+        s.groupDiscoveryAttempt += 1;
+
+        if (!usable.ok || !client) {
+          s.groupDiscoveryStatus = "RETRYING";
+          s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+          logger.info({
+            sessionId,
+            clientInstanceId: s.clientInstanceId,
+            attempt: s.groupDiscoveryAttempt,
+            reason: usable.reason,
+            operation: "group_discovery_retry",
+          }, "wa: group discovery wait");
+        } else {
           try {
-            const c = this.client;
-            if (!c) return;
-            await c.getChats();
-            if (this.state.status === "CONNECTED" || this.state.status === "SYNCING") {
-              this.setStatus(this.state, "READY", null);
-              void import("./whatsapp.scheduler").then((m) => m.onWhatsAppReady()).catch(() => undefined);
+            let state: string | null = null;
+            try { state = await client.getState(); } catch { /* ignore */ }
+            if (state && state !== "CONNECTED") {
+              s.groupDiscoveryStatus = "RETRYING";
+              s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+            } else {
+              const chats = await Promise.race([
+                client.getChats(),
+                new Promise<never>((_, rej) =>
+                  setTimeout(() => rej(new Error("getChats timeout")), GET_CHATS_TIMEOUT_MS)),
+              ]) as Record<string, unknown>[];
+
+              const groups = this.mapChatsToGroups(chats);
+              s.cachedGroups = groups;
+              s.chatCount = chats.length;
+              s.groupCount = groups.filter((g) => g.isGroup).length;
+              s.channelCount = groups.filter((g) => g.isChannel).length;
+              s.groupDiscoveryStatus = "READY";
+              s.groupDiscoveryMessage = `${s.groupCount} grup, ${s.channelCount} kanal bulundu.`;
+              // Bağlantı CONNECTED kalır; READY = keşif tamam (legacy status alanı)
+              if (s.status === "CONNECTED" || s.status === "SYNCING") {
+                this.setStatus(s, "CONNECTED", null);
+              }
+              logger.info({
+                sessionId,
+                clientInstanceId: s.clientInstanceId,
+                chatCount: s.chatCount,
+                groupCount: s.groupCount,
+                channelCount: s.channelCount,
+                attempt: s.groupDiscoveryAttempt,
+                durationMs: Date.now() - startedAt,
+                operation: "group_discovery_ready",
+              }, "wa: groups ready");
+              return groups;
             }
-          } catch { /* ignore */ }
-        })();
-      }, 30_000);
+          } catch (err) {
+            // Timeout / Store not ready → bağlantı FAILED olmaz
+            s.groupDiscoveryStatus = "RETRYING";
+            s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+            logger.warn({
+              err,
+              sessionId,
+              clientInstanceId: s.clientInstanceId,
+              attempt: s.groupDiscoveryAttempt,
+              operation: "group_discovery_retry",
+            }, "wa: getChats retry (connection stays CONNECTED)");
+          }
+        }
+
+        const elapsed = Date.now() - startedAt;
+        const phase = deadlines.find((d) => elapsed < d.untilMs) ?? deadlines[deadlines.length - 1];
+        await this.sleep(phase.intervalMs);
+      }
+
+      // Buraya yalnızca READY olmadan çıkılır — bağlantı FAILED yapılmaz
+      s.groupDiscoveryStatus = "FAILED";
+      s.groupDiscoveryMessage = s.groupDiscoveryMessage
+        || "Grup listesi 3 dakikada alınamadı. «Sohbetleri Yeniden Yükle» deneyin.";
+      return s.cachedGroups;
+    })();
+
+    s.groupDiscoveryPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      s.groupDiscoveryPromise = null;
     }
   }
 
@@ -431,48 +596,31 @@ export class WhatsAppManager {
     });
   }
 
+  /** Grup listesi — READY şartı yok; CONNECTED + activeClient yeterli. HTTP'yi 3 dk bloklamaz. */
   static async getChats(): Promise<WhatsAppGroup[]> {
-    const client = this.client;
+    const client = this.getActiveClient();
+    if (!client) {
+      throw new WhatsAppModuleError("WhatsApp client yok", 503, "CLIENT_NOT_AVAILABLE");
+    }
+    if (!this.isConnected()) {
+      throw new WhatsAppModuleError("WhatsApp bağlı değil", 503, "NOT_CONNECTED");
+    }
     const s = this.state;
-    if (!client) throw new WhatsAppModuleError("WhatsApp bağlı değil", 409, "NOT_CONNECTED");
-    if (!["READY", "CONNECTED", "SYNCING"].includes(s.status)) {
-      throw new WhatsAppModuleError("WhatsApp henüz hazır değil", 409, "NOT_READY");
+    if (s.groupDiscoveryStatus === "READY") return s.cachedGroups;
+    // Keşfi başlat / devam ettir; kısa bekle, yoksa cache + LOADING dön
+    void this.refreshGroups();
+    if (s.groupDiscoveryPromise) {
+      await Promise.race([
+        s.groupDiscoveryPromise,
+        this.sleep(12_000),
+      ]);
     }
-
-    const chats = await Promise.race([
-      client.getChats(),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("getChats timeout")), GET_CHATS_TIMEOUT_MS)),
-    ]) as Record<string, unknown>[];
-
-    if (s.status === "CONNECTED" || s.status === "SYNCING") this.setStatus(s, "READY", null);
-
-    const result: WhatsAppGroup[] = [];
-    for (const chat of chats) {
-      const id = chat.id && typeof chat.id === "object"
-        ? String((chat.id as { _serialized?: string })._serialized ?? "")
-        : String(chat.id ?? "");
-      if (!id) continue;
-      const isChannel = id.includes("@newsletter") || Boolean(chat.isChannel) || Boolean(chat.isNewsletter);
-      const isGroup = (Boolean(chat.isGroup) || id.endsWith("@g.us")) && !isChannel;
-      if (!isGroup && !isChannel) continue;
-      const ts = (chat.timestamp as number | undefined)
-        ?? (chat.lastMessage && typeof chat.lastMessage === "object"
-          ? (chat.lastMessage as { timestamp?: number }).timestamp
-          : undefined);
-      result.push({
-        id,
-        name: String(chat.name || chat.formattedTitle || chat.pushname || "İsimsiz grup"),
-        isGroup,
-        isChannel,
-        lastMessageAt: ts && Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : null,
-      });
-    }
-    return result;
+    return s.cachedGroups;
   }
 
   static async getGroups(): Promise<WhatsAppGroup[]> {
-    const chats = await this.getChats();
-    return chats.filter((c) => c.isGroup || c.isChannel);
+    const groups = await this.getChats();
+    return groups.filter((c) => c.isGroup || c.isChannel);
   }
 
   static async getChatById(chatId: string) {

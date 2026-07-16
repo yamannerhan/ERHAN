@@ -1,13 +1,21 @@
 import QRCode from "qrcode";
 import { logger } from "../../lib/logger";
 import { maskPhone } from "./whatsapp.client";
-import type { ConnectionMode, WhatsAppSessionStatus } from "./whatsapp.types";
+import type {
+  ConnectionMode,
+  GroupDiscoveryStatus,
+  ScanStatus,
+  WhatsAppGroup,
+  WhatsAppSessionStatus,
+} from "./whatsapp.types";
 
 export type WaClientLike = {
   info?: { wid?: { user?: string } };
+  pupPage?: { isClosed?: () => boolean } | null;
   on: (event: string, cb: (...args: unknown[]) => void) => void;
   removeAllListeners?: (event?: string) => void;
   getChats: () => Promise<unknown[]>;
+  getState?: () => Promise<string | null>;
 };
 
 export interface SessionRuntime {
@@ -23,6 +31,16 @@ export interface SessionRuntime {
   updatedAt: Date;
   clientInstanceId: string | null;
   chromePath: string | null;
+  groupDiscoveryStatus: GroupDiscoveryStatus;
+  groupDiscoveryMessage: string | null;
+  groupDiscoveryAttempt: number;
+  groupDiscoveryStartedAt: Date | null;
+  groupDiscoveryPromise: Promise<WhatsAppGroup[]> | null;
+  cachedGroups: WhatsAppGroup[];
+  chatCount: number;
+  groupCount: number;
+  channelCount: number;
+  scanStatus: ScanStatus;
 }
 
 export type StatusWriter = (
@@ -31,7 +49,7 @@ export type StatusWriter = (
   error?: string | null,
 ) => void;
 
-export type ReadyHook = (sessionId: string) => void;
+export type ConnectedHook = (sessionId: string) => void;
 
 /** Client event listener'larını bağla — Client oluşturma burada yok. */
 export function attachWhatsAppEvents(
@@ -39,7 +57,7 @@ export function attachWhatsAppEvents(
   client: WaClientLike,
   getState: () => SessionRuntime,
   setStatus: StatusWriter,
-  onReady: ReadyHook,
+  onConnected: ConnectedHook,
 ): void {
   client.on("qr", (qr) => {
     void (async () => {
@@ -64,7 +82,11 @@ export function attachWhatsAppEvents(
     s.qrDataUrl = null;
     s.pairingCode = null;
     setStatus(s, "AUTHENTICATED", null);
-    logger.info({ sessionId, operation: "authenticated" }, "wa: authenticated");
+    logger.info({
+      sessionId,
+      clientInstanceId: s.clientInstanceId,
+      operation: "authenticated",
+    }, "wa: authenticated");
   });
 
   client.on("ready", () => {
@@ -74,10 +96,14 @@ export function attachWhatsAppEvents(
     s.starting = false;
     const wid = client.info?.wid?.user;
     if (wid) s.phoneMasked = maskPhone(wid.startsWith("90") ? wid : `90${wid}`);
+    // CONNECTED = bağlantı tamam. SYNCING'e düşürme — grup keşfi ayrı.
     setStatus(s, "CONNECTED", null);
-    setStatus(s, "SYNCING", null);
-    logger.info({ sessionId, operation: "ready_event" }, "wa: ready → syncing");
-    onReady(sessionId);
+    logger.info({
+      sessionId,
+      clientInstanceId: s.clientInstanceId,
+      operation: "ready_connected",
+    }, "wa: ready → CONNECTED; group discovery queued");
+    queueMicrotask(() => onConnected(sessionId));
   });
 
   client.on("auth_failure", (msg) => {
@@ -92,6 +118,9 @@ export function attachWhatsAppEvents(
     s.starting = false;
     s.qrDataUrl = null;
     s.pairingCode = null;
+    s.groupDiscoveryStatus = "NOT_STARTED";
+    s.groupDiscoveryPromise = null;
+    s.cachedGroups = [];
     setStatus(s, "DISCONNECTED", String(reason || "disconnected"));
     logger.warn({ sessionId, reason: String(reason) }, "wa: disconnected");
   });

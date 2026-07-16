@@ -45,8 +45,21 @@ router.get("/whatsapp/session/status", authMiddleware, requireAdmin, async (_req
 router.post("/admin/whatsapp/reload-chats", authMiddleware, requireAdmin, async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
-    await WhatsAppManager.getChats();
-    res.json({ success: true, message: "Sohbet senkronu yenilendi.", ...WhatsAppManager.getStatus() });
+    if (!WhatsAppManager.getActiveClient()) {
+      res.status(503).json({ success: false, error: "WhatsApp client yok", code: "CLIENT_NOT_AVAILABLE" });
+      return;
+    }
+    if (!WhatsAppManager.isConnected()) {
+      res.status(503).json({ success: false, error: "WhatsApp bağlı değil", code: "NOT_CONNECTED" });
+      return;
+    }
+    await WhatsAppManager.refreshGroups();
+    const status = WhatsAppManager.getStatus();
+    res.json({
+      success: true,
+      message: "Grup listesi yenilendi.",
+      ...status,
+    });
   } catch (error) {
     const m = mapError(error);
     res.status(m.status).json({ success: false, error: m.message, code: m.code });
@@ -115,13 +128,58 @@ router.post("/admin/whatsapp/reset-session", authMiddleware, requireAdmin, async
 });
 
 router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, res) => {
-  if (!WhatsAppManager.isReady()) {
-    res.status(503).json({ error: "WhatsApp bağlı değil." });
+  const activeClient = WhatsAppManager.getActiveClient();
+  const st = WhatsAppManager.getStatus();
+  if (!activeClient) {
+    res.status(503).json({
+      error: "WhatsApp client yok",
+      code: "CLIENT_NOT_AVAILABLE",
+      connectionStatus: st.connectionStatus,
+      groupDiscoveryStatus: st.groupDiscoveryStatus,
+      clientInstanceId: st.clientInstanceId,
+    });
     return;
   }
+  if (!WhatsAppManager.isConnected()) {
+    res.status(503).json({
+      error: "WhatsApp bağlı değil",
+      code: "NOT_CONNECTED",
+      connectionStatus: st.connectionStatus,
+      groupDiscoveryStatus: st.groupDiscoveryStatus,
+      clientInstanceId: st.clientInstanceId,
+    });
+    return;
+  }
+
+  // READY şartı yok — CONNECTED iken keşif başlar / cache döner
   const groups = await listWhatsAppGroups();
   const diagnostics = await getDiscoveryDiagnostics();
-  res.json({ groups, diagnostics });
+  const status = WhatsAppManager.getStatus();
+  res.json({
+    groups: groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      kind: g.kind ?? (g.isChannel ? "channel" : "group"),
+      isGroup: g.isGroup,
+      isChannel: g.isChannel,
+      lastMessageAt: g.lastMessageAt,
+    })),
+    diagnostics: {
+      ...diagnostics,
+      ready: status.groupDiscoveryStatus === "READY",
+      chatCount: status.chatCount,
+      groupCount: status.groupCount,
+      channelCount: status.channelCount,
+      state: status.connectionStatus,
+      clientInstanceId: status.clientInstanceId,
+      groupDiscoveryStatus: status.groupDiscoveryStatus,
+      errors: diagnostics.error ? [diagnostics.error] : [],
+      steps: diagnostics.steps,
+    },
+    connectionStatus: status.connectionStatus,
+    groupDiscoveryStatus: status.groupDiscoveryStatus,
+    clientInstanceId: status.clientInstanceId,
+  });
 });
 
 router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (req, res) => {

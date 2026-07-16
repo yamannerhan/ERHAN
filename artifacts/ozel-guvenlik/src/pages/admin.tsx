@@ -3372,12 +3372,16 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         status?: string;
         connectionStatus?: string;
         syncStatus?: string;
+        groupDiscoveryStatus?: string;
+        groupDiscoveryMessage?: string | null;
         expiresInSeconds?: number | null;
         chatCount?: number;
         groupCount?: number;
+        channelCount?: number;
         whatsappState?: string | null;
         lastSyncError?: string | null;
         sessionId?: string;
+        clientInstanceId?: string | null;
         updatedAt?: string;
       };
       if (trackedSessionId && nextStatus.sessionId && nextStatus.sessionId !== trackedSessionId) {
@@ -3388,44 +3392,51 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         setTrackedSessionId(nextStatus.sessionId);
       }
       const connStatus = nextStatus.connectionStatus ?? "";
-      const sync = nextStatus.syncStatus ?? "";
+      const discovery = nextStatus.groupDiscoveryStatus ?? nextStatus.syncStatus ?? "";
       const state = nextStatus.sessionState ?? nextStatus.status ?? "";
-      const syncReady = !!(nextStatus.ready || sync === "READY");
+      const discoveryReady = discovery === "READY";
+      // Bağlantı = CONNECTED; grup keşfi ayrı (LOADING/RETRYING iken de bağlı sayılır)
       const waConnected = connStatus === "CONNECTED"
         || nextStatus.whatsappState === "CONNECTED"
-        || !!(nextStatus.connected && (nextStatus.authAccepted || syncReady))
-        || state === "SYNCING"
-        || state === "SYNC_TIMEOUT";
+        || !!nextStatus.connected
+        || !!nextStatus.ready
+        || state === "CONNECTED"
+        || state === "READY"
+        || state === "SYNCING";
       const realFailure = connStatus === "FAILED"
         || connStatus === "DISCONNECTED"
         || state === "FAILED"
         || state === "DISCONNECTED";
       setSessionState(state);
       setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : "IDLE"));
-      setSyncStatus(sync || (syncReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
+      setSyncStatus(discovery || (discoveryReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
       setWhatsappState(nextStatus.whatsappState ?? null);
-      setLastSyncError(nextStatus.lastSyncError ?? null);
+      setLastSyncError(nextStatus.lastSyncError ?? nextStatus.groupDiscoveryMessage ?? null);
       setChatCount(nextStatus.chatCount ?? 0);
       setGroupCountUi(nextStatus.groupCount ?? 0);
       const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
       const isPairing = mode === "pairing_code" && !waConnected && !nextStatus.authAccepted
-        && state !== "SYNCING" && state !== "AUTHENTICATED" && state !== "SYNC_TIMEOUT";
-      const authPending = waConnected && !syncReady;
-      setConnected(syncReady);
-      setPairingMode(isPairing && !authPending && !realFailure);
-      setQr((isPairing || authPending || syncReady || waConnected) ? null : (nextStatus.qr ?? null));
+        && state !== "AUTHENTICATED" && state !== "CONNECTED";
+      setConnected(waConnected);
+      setPairingMode(isPairing && !realFailure);
+      setQr((isPairing || waConnected) ? null : (nextStatus.qr ?? null));
       setPairingCode((prev) => {
-        if (syncReady || authPending || waConnected || realFailure) return null;
+        if (waConnected || realFailure) return null;
         if (!isPairing) return null;
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
         return prev;
       });
       const userFacingError = (() => {
-        if (syncReady) return "";
-        if (waConnected) {
-          return nextStatus.error
-            || "WhatsApp bağlantısı başarılı. Sohbetler arka planda yükleniyor. Telefonu yeniden bağlamayın.";
+        if (waConnected && discoveryReady) return "";
+        if (waConnected && (discovery === "LOADING" || discovery === "RETRYING" || discovery === "NOT_STARTED")) {
+          return nextStatus.groupDiscoveryMessage
+            || "WhatsApp bağlı. Gruplar yükleniyor.";
         }
+        if (waConnected && discovery === "FAILED") {
+          return nextStatus.groupDiscoveryMessage
+            || "WhatsApp bağlı. Grup listesi alınamadı — «Sohbetleri Yeniden Yükle» deneyin.";
+        }
+        if (waConnected) return "WhatsApp bağlı.";
         if (nextStatus.pairingCode) return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
         if (state === "STARTING" || state === "PAIRING_CODE_REQUESTING" || nextStatus.starting) {
           return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
@@ -3439,23 +3450,28 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         return raw;
       })();
       setErrorLog(userFacingError);
-      if (syncReady) setQrStatus("ready");
+      if (waConnected) setQrStatus("ready");
       else if (realFailure) setQrStatus("failed");
-      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting || authPending || waConnected) {
+      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) {
         setQrStatus("connecting");
       }
 
-      if (syncReady) {
-        const groupList = await apiCall("/admin/whatsapp/groups", "GET");
-        const parsed = groupList as {
-          groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
-          diagnostics?: typeof discoveryDiagnostics;
-        };
-        setDiscoveryDiagnostics(parsed.diagnostics ?? null);
-        setGroups(prev => {
-          const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
-          return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
-        });
+      // Grupları CONNECTED iken çek — READY bekleme
+      if (waConnected) {
+        try {
+          const groupList = await apiCall("/admin/whatsapp/groups", "GET");
+          const parsed = groupList as {
+            groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
+            diagnostics?: typeof discoveryDiagnostics;
+          };
+          setDiscoveryDiagnostics(parsed.diagnostics ?? null);
+          setGroups(prev => {
+            const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
+            return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
+          });
+        } catch {
+          // Keşif RETRYING iken 503 olabilir — bağlantı kopmuş sayma
+        }
       }
 
       try {
@@ -3476,22 +3492,18 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
 
   useEffect(() => {
     void refresh();
-    const needsFastPoll = !connected && (
-      connectionStatus === "CONNECTED"
-      || syncStatus === "LOADING"
-      || syncStatus === "RETRYING"
-      || syncStatus === "WAITING"
-      || syncStatus === "TIMED_OUT"
-      || sessionState === "SYNCING"
-      || sessionState === "AUTHENTICATED"
-      || sessionState === "STARTING"
-      || sessionState === "PAIRING_CODE_READY"
-      || sessionState === "PAIRING_CODE_REQUESTING"
-      || sessionState === "QR_READY"
-      || sessionState === "SYNC_TIMEOUT"
-      || pairingMode
-      || !!pairingCode
-      || qrStatus === "connecting"
+    const needsFastPoll = (
+      (!connected && (
+        sessionState === "AUTHENTICATED"
+        || sessionState === "STARTING"
+        || sessionState === "PAIRING_CODE_READY"
+        || sessionState === "PAIRING_CODE_REQUESTING"
+        || sessionState === "QR_READY"
+        || pairingMode
+        || !!pairingCode
+        || qrStatus === "connecting"
+      ))
+      || (connected && (syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "NOT_STARTED"))
     );
     const timer = window.setInterval(() => { void refresh(); }, needsFastPoll ? 2000 : 4000);
     return () => window.clearInterval(timer);
@@ -3758,45 +3770,45 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
               <span className={`text-xs font-bold ${
-                connected
+                connected && syncStatus === "READY"
                   ? "text-emerald-400"
-                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
-                    ? "text-rose-400"
-                    : connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT"
-                      ? "text-sky-300"
+                  : connected
+                    ? "text-sky-300"
+                    : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
+                      ? "text-rose-400"
                       : "text-amber-400"
               }`}>
-                {connected
-                  ? "Bağlı"
-                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
-                    ? "Başarısız"
-                    : connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT"
-                      ? "Bağlı · Senkron…"
+                {connected && syncStatus === "READY"
+                  ? "Bağlı · Gruplar hazır"
+                  : connected
+                    ? "Bağlı · Gruplar yükleniyor"
+                    : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
+                      ? "Başarısız"
                       : qrStatus === "connecting"
                         ? "Bekleniyor…"
                         : "Bağlı değil"}
               </span>
             </div>
-            {connected ? (
+            {connected && syncStatus === "READY" ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300 space-y-2">
-                <p className="font-bold">WhatsApp bağlantısı hazır</p>
+                <p className="font-bold">WhatsApp bağlı. Gruplar hazır.</p>
                 <p className="text-xs text-emerald-200/90">
-                  {chatCount} sohbet ve {groupCountUi > 0 ? groupCountUi : (groups.length || 0)} grup bulundu
+                  {chatCount} sohbet · {groupCountUi > 0 ? groupCountUi : (groups.length || 0)} grup
                   {whatsappState ? ` · ${whatsappState}` : ""}
                 </p>
                 <p className="text-xs text-emerald-200/80">
-                  Temiz tarama için «Sıfırla / Tekrar Tara»; sadece yeni mesaj için «Şimdi Tara».
+                  Aşağıdan grup seçip kaydedin. İlan taraması kayıt sonrası başlar.
                 </p>
               </div>
-            ) : (connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT" || sessionState === "SYNCING" || sessionState === "SYNC_TIMEOUT") ? (
+            ) : connected ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100 space-y-3">
-                <p className="font-bold">WhatsApp bağlantısı başarılı.</p>
+                <p className="font-bold">WhatsApp bağlı. Gruplar yükleniyor.</p>
                 <p className="text-xs text-sky-200/90">
-                  Sohbetler arka planda yükleniyor. İlk bağlantıda birkaç dakika sürebilir.
+                  İlan taraması henüz başlamadı. Grup listesi gelince seçim yapabilirsiniz.
                 </p>
                 <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın.</p>
-                {whatsappState && <p className="text-[10px] text-slate-400">WhatsApp durumu: {whatsappState} · sync: {syncStatus}</p>}
-                {lastSyncError && <p className="text-[10px] text-slate-400">Son senkron notu: {lastSyncError}</p>}
+                {whatsappState && <p className="text-[10px] text-slate-400">WhatsApp: {whatsappState} · keşif: {syncStatus}</p>}
+                {lastSyncError && <p className="text-[10px] text-slate-400">{lastSyncError}</p>}
                 <button
                   type="button"
                   disabled={loading}
@@ -4017,7 +4029,13 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         <div className="space-y-2 max-h-[420px] overflow-y-auto">
           {groups.length === 0 ? (
             <p className="text-xs text-slate-500 text-center py-8">
-              {connected ? "Grup/kanal bulunamadı." : "Önce WhatsApp'a bağlanın."}
+              {!connected
+                ? "Önce WhatsApp'a bağlanın."
+                : syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "NOT_STARTED"
+                  ? "WhatsApp bağlı. Gruplar yükleniyor…"
+                  : syncStatus === "FAILED"
+                    ? "Grup listesi alınamadı. «Sohbetleri Yeniden Yükle» deneyin."
+                    : "Grup/kanal bulunamadı."}
             </p>
           ) : groups.map(group => (
             <button key={group.id} onClick={() => toggleGroup(group.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition ${group.selected ? "border-emerald-400 bg-emerald-400/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
