@@ -24,6 +24,8 @@ const Destek = lazy(() => import("@/pages/destek"));
 const CvOlustur = lazy(() => import("@/pages/cv-olustur"));
 const PartTime = lazy(() => import("@/pages/part-time"));
 const NearbyListings = lazy(() => import("@/pages/nearby-listings"));
+const BanaUygunIsler = lazy(() => import("@/pages/bana-uygun-isler"));
+const BanaUygunAyarlar = lazy(() => import("@/pages/bana-uygun-ayarlar"));
 const FirmaBasvurusu = lazy(() => import("@/pages/firma-basvurusu"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
@@ -68,6 +70,8 @@ function Router() {
           <Route path="/cv-olustur">{() => <RequireAuth component={CvOlustur} />}</Route>
           <Route path="/part-time" component={PartTime} />
           <Route path="/yakindaki-ilanlar" component={NearbyListings} />
+          <Route path="/bana-uygun-isler/ayarlar">{() => <RequireAuth component={BanaUygunAyarlar} />}</Route>
+          <Route path="/bana-uygun-isler">{() => <RequireAuth component={BanaUygunIsler} />}</Route>
           <Route path="/admin" component={AdminDashboard} />
           <Route path="/moderator/:page" component={ModeratorApp} />
           <Route path="/moderator" component={ModeratorApp} />

@@ -1115,6 +1115,9 @@ void import("./modules/whatsapp/whatsapp.schema-ensure")
 void import("./lib/bot-public-announce")
   .then((m) => m.ensureBotAnnounceSchema())
   .catch((err) => logger.warn({ err }, "bot announce schema bootstrap skipped"));
+void import("./lib/job-match/ensure")
+  .then((m) => m.ensureJobPreferencesSchema())
+  .catch((err) => logger.warn({ err }, "job-match schema bootstrap skipped"));
 void import("./lib/wipe-notifications-once")
   .then((m) => m.wipeAllNotificationsOnce())
   .catch((err) => logger.warn({ err }, "notifications wipe once skipped"));

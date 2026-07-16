@@ -22,12 +22,14 @@ import locationAdminRouter from "./location-admin";
 import moderatorRouter from "./moderator";
 import publisherVerifyRouter from "./publisher-verify";
 import { whatsappRouter } from "../modules/whatsapp";
+import jobMatchRouter from "./job-match";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use(nearbyListingsRouter);
+router.use(jobMatchRouter);
 router.use(listingsRouter);
 router.use(chatRouter);
 router.use(usersRouter);

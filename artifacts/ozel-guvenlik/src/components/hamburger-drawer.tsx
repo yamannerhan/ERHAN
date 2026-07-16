@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Home, Briefcase, PlusCircle, FileText, Clock, MessageSquare, Bell,
-  Bookmark, Headphones, User, LogOut, Shield, ChevronRight, Crown, Users,
+  Bookmark, Headphones, User, LogOut, Shield, ChevronRight, Crown, Users, Sparkles,
 } from "lucide-react";
 
 type TeamMember = {
@@ -130,6 +130,7 @@ export function HamburgerDrawer({ open, onClose }: DrawerProps) {
     { icon: <PlusCircle className="og-hd-ico" />, label: "İlan Oluştur", href: "/ilan-ekle" },
     { icon: <FileText className="og-hd-ico" />, label: "CV Oluştur", href: "/cv-olustur" },
     { icon: <Clock className="og-hd-ico" />, label: "İş Arayanlar", href: "/part-time" },
+    { icon: <Sparkles className="og-hd-ico" />, label: "Bana Uygun İşler", href: "/bana-uygun-isler", only: "auth" as const },
     { icon: <MessageSquare className="og-hd-ico" />, label: "Sohbet", href: "/sohbet", only: "auth" as const },
     ...(!isLite ? [{ icon: <Bell className="og-hd-ico" />, label: "Bildirimler", href: "/bildirimler", only: "auth" as const, badge: unreadCount }] : []),
     { icon: <Bookmark className="og-hd-ico" />, label: "Favoriler", href: "/favoriler", only: "auth" as const },

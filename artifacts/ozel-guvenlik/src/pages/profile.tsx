@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import {
   LogOut, MapPin, Camera, Loader2, Pencil, Check, X, KeyRound, RefreshCw,
   Clock, UserCircle, Crown, Trash2, Power, Edit2, ShieldCheck, Heart, Bell,
-  Calendar, ChevronRight, Star, Building2,
+  Calendar, ChevronRight, Star, Building2, Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -720,6 +720,15 @@ export default function Profile() {
         {/* ── Settings list (only when isMe) ───────────────── */}
         {isMe && (
           <section className="space-y-2.5">
+            <Link href="/bana-uygun-isler/ayarlar" className="og-setting-row">
+              <div className="og-setting-icon"><Sparkles className="w-5 h-5" /></div>
+              <div className="flex-1 min-w-0 text-left">
+                <div className="og-setting-title">Bana Uygun İşler Ayarları</div>
+                <div className="og-setting-sub">Tercihlerini doldur, sana en uygun özel güvenlik ilanlarını otomatik bulalım.</div>
+              </div>
+              <ChevronRight className="w-4 h-4 og-text-muted" />
+            </Link>
+
             {/* Kişisel bilgiler */}
             <button onClick={openPersonal} className="og-setting-row">
               <div className="og-setting-icon"><UserCircle className="w-5 h-5" /></div>

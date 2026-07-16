@@ -134,7 +134,7 @@ export default function NearbyListingsPage() {
               setPage(1);
             }}
           >
-            <option value="distance">En yakın + En yeni</option>
+            <option value="distance">En yakın</option>
             <option value="newest">En yeni</option>
             <option value="salary">En yüksek maaş</option>
             <option value="views">En çok görüntülenen</option>

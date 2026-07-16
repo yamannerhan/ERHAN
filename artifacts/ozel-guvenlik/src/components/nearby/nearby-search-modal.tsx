@@ -10,7 +10,6 @@ const PREFS_KEY = "nearbyListingsPreferences";
 
 const FILTER_CHIPS = [
   { id: "today", label: "Bugün eklenenler" },
-  { id: "parttime", label: "Part-time ilanlar" },
   { id: "night", label: "Gece vardiyası" },
   { id: "service", label: "Servis imkânı olanlar" },
   { id: "salary", label: "Maaşı belirtilenler" },
@@ -19,7 +18,7 @@ const FILTER_CHIPS = [
 ] as const;
 
 const SORTS = [
-  { id: "distance", label: "En yakın + En yeni" },
+  { id: "distance", label: "En yakın" },
   { id: "newest", label: "En yeni" },
   { id: "salary", label: "En yüksek maaş" },
   { id: "views", label: "En çok görüntülenen" },
@@ -226,6 +225,18 @@ export function NearbySearchModal({ open, onClose }: Props) {
             <p className="og-nearby-sheet__desc">
               Konumuna göre çevrendeki güncel özel güvenlik iş ilanlarını gösterelim.
             </p>
+
+            <button
+              type="button"
+              className="og-nearby-primary"
+              style={{ marginBottom: 12, width: "100%" }}
+              onClick={() => {
+                onClose();
+                navigate("/bana-uygun-isler");
+              }}
+            >
+              Bana Uygun İşler
+            </button>
 
             {phase !== "manual" && (
               <>
