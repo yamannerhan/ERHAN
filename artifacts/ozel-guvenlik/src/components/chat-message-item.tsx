@@ -315,7 +315,7 @@ export function ChatMessageItem({
             name={name}
             role={role}
             isVip={msg.isVip}
-            frame={msg.avatarFrame}
+            frame="none"
             size={32}
             online
           />

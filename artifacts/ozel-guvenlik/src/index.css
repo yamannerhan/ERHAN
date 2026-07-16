@@ -379,14 +379,20 @@
 /* â”€â”€ Admin / ModeratÃ¶r isim + rozet (modern, dÃ¼ÅŸÃ¼k parlama) â”€â”€ */
 /* Admin: gold + kÄ±rmÄ±zÄ± | Mod: bordo + mavi */
 @keyframes admin-flare {
-  0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(250,204,21,.28)) drop-shadow(0 0 4px rgba(185,28,28,.18)); }
-  50%  { background-position: 100% 50%; filter: drop-shadow(0 0 4px rgba(250,204,21,.38)) drop-shadow(0 0 6px rgba(220,38,38,.26)); }
-  100% { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(250,204,21,.28)) drop-shadow(0 0 4px rgba(185,28,28,.18)); }
+  0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(8,120,232,.35)) drop-shadow(0 0 4px rgba(0,0,0,.35)); }
+  50%  { background-position: 100% 50%; filter: drop-shadow(0 0 5px rgba(37,99,235,.55)) drop-shadow(0 0 8px rgba(15,23,42,.45)); }
+  100% { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(8,120,232,.35)) drop-shadow(0 0 4px rgba(0,0,0,.35)); }
 }
 @keyframes mod-aurora {
-  0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(127,29,29,.32)) drop-shadow(0 0 4px rgba(37,99,235,.2)); }
-  50%  { background-position: 100% 50%; filter: drop-shadow(0 0 4px rgba(153,27,27,.38)) drop-shadow(0 0 6px rgba(59,130,246,.28)); }
-  100% { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(127,29,29,.32)) drop-shadow(0 0 4px rgba(37,99,235,.2)); }
+  0%   { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(127,29,29,.4)) drop-shadow(0 0 4px rgba(37,99,235,.28)); }
+  50%  { background-position: 100% 50%; filter: drop-shadow(0 0 5px rgba(153,27,27,.5)) drop-shadow(0 0 7px rgba(59,130,246,.4)); }
+  100% { background-position: 0% 50%;   filter: drop-shadow(0 0 2px rgba(127,29,29,.4)) drop-shadow(0 0 4px rgba(37,99,235,.28)); }
+}
+@keyframes admin-smoke-drift {
+  0%   { transform: translateY(4px) scale(0.65); opacity: 0; }
+  25%  { opacity: 0.55; }
+  70%  { opacity: 0.25; }
+  100% { transform: translateY(-14px) scale(1.35); opacity: 0; }
 }
 .badge-admin {
   background: linear-gradient(90deg,
@@ -408,20 +414,58 @@
   animation: mod-aurora 4.6s ease-in-out infinite;
   letter-spacing: 0.1em;
 }
-.name-admin {
-  background: none;
-  color: #38bdf8;
-  -webkit-text-fill-color: #38bdf8;
-  font-weight: 800;
-}
-.name-mod {
+/* Admin: siyah–mavi kayan isim + üstte duman */
+.name-admin,
+.cmc-name.name-admin {
+  position: relative;
+  display: inline-block;
+  overflow: visible;
   background: linear-gradient(105deg,
-    #7f1d1d 0%, #9f1239 24%, #1e3a8a 52%, #2563eb 74%, #7f1d1d 100%);
-  background-size: 240% auto;
+    #000000 0%, #0a0a0a 14%, #0f172a 32%, #1e3a8a 48%, #0878e8 62%, #0b1220 82%, #000000 100%);
+  background-size: 280% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: mod-aurora 4.8s ease-in-out infinite;
+  animation: admin-flare 3.6s ease-in-out infinite;
+  font-weight: 800;
+}
+.cmc-name.name-admin::before,
+.cmc-name.name-admin::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 999px;
+  filter: blur(3px);
+  animation: admin-smoke-drift 2.8s ease-out infinite;
+}
+.cmc-name.name-admin::before {
+  width: 12px;
+  height: 8px;
+  left: 8%;
+  top: -7px;
+  background: radial-gradient(circle, rgba(148, 163, 184, 0.65) 0%, rgba(15, 23, 42, 0.35) 45%, transparent 72%);
+}
+.cmc-name.name-admin::after {
+  width: 16px;
+  height: 10px;
+  left: 42%;
+  top: -9px;
+  animation-delay: 0.9s;
+  background: radial-gradient(circle, rgba(8, 120, 232, 0.45) 0%, rgba(30, 58, 138, 0.3) 40%, transparent 70%);
+}
+/* Moderatör: bordo–mavi */
+.name-mod,
+.cmc-name.name-mod {
+  position: relative;
+  display: inline-block;
+  background: linear-gradient(105deg,
+    #4c0519 0%, #7f1d1d 18%, #9f1239 36%, #1e3a8a 58%, #2563eb 76%, #7f1d1d 100%);
+  background-size: 260% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: mod-aurora 4.2s ease-in-out infinite;
   font-weight: 800;
 }
 .name-user {
@@ -2988,14 +3032,10 @@ html:not(.dark) .og-pt-row {
   white-space: nowrap;
   max-width: 7.5rem;
 }
-/* İsimler her zaman okunaklı (gradient fill kapalı) */
 .cmc-name.name-admin,
 .cmc-name.name-mod,
 .cmc-name.name-vip {
-  color: var(--cmc-name);
-  -webkit-text-fill-color: var(--cmc-name);
-  background: none;
-  max-width: 10rem;
+  max-width: 11rem;
 }
 .cmc-role-pill {
   font-size: 0.46rem;

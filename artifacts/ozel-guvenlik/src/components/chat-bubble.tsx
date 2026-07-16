@@ -1080,7 +1080,7 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                         name={stickyHuman.displayName || stickyHuman.username}
                         role={stickyHuman.userRole ?? "user"}
                         isVip={stickyHuman.isVip}
-                        frame={stickyHuman.avatarFrame}
+                        frame="none"
                         size={32}
                         online
                       />

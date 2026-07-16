@@ -641,26 +641,34 @@ html:not(.dark) .cmc--own .cmc-bubble {
   background: #e6f3ff !important;
 }
 
-html:not(.dark) :is(.cmc-name, .cmc-text, .cmc-time, .cmc-reply__text) {
+html:not(.dark) :is(.cmc-name:not(.name-admin):not(.name-mod):not(.name-vip), .cmc-text, .cmc-time, .cmc-reply__text) {
   color: #17324f !important;
   text-shadow: none !important;
   -webkit-text-fill-color: #17324f !important;
-  background-image: none !important;
-  background-clip: border-box !important;
-  -webkit-background-clip: border-box !important;
 }
 
-/* Gradient isimler beyaz temada görünmez kalmasın */
+/* Admin / mod / vip efektli isimler açık temada da korunsun */
 html:not(.dark) .cmc-name.name-admin,
+html:not(.dark) .name-admin {
+  background: linear-gradient(105deg,
+    #000000 0%, #0a0a0a 14%, #0f172a 32%, #1e3a8a 48%, #0878e8 62%, #0b1220 82%, #000000 100%) !important;
+  background-size: 280% auto !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  animation: admin-flare 3.6s ease-in-out infinite !important;
+}
 html:not(.dark) .cmc-name.name-mod,
-html:not(.dark) .cmc-name.name-vip,
-html:not(.dark) .name-admin,
-html:not(.dark) .name-mod,
-html:not(.dark) .name-vip {
-  color: #0878e8 !important;
-  -webkit-text-fill-color: #0878e8 !important;
-  background: none !important;
-  background-image: none !important;
+html:not(.dark) .name-mod {
+  background: linear-gradient(105deg,
+    #4c0519 0%, #7f1d1d 18%, #9f1239 36%, #1e3a8a 58%, #2563eb 76%, #7f1d1d 100%) !important;
+  background-size: 260% auto !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  animation: mod-aurora 4.2s ease-in-out infinite !important;
 }
 
 html:not(.dark) :is(.cmc--admin, .cmc--vip, .cmc--moderator) {
