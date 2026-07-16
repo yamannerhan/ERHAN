@@ -3327,9 +3327,12 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [pairingMode, setPairingMode] = useState(false);
   const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
   const [sessionState, setSessionState] = useState<string>("IDLE");
+  const [connectionStatus, setConnectionStatus] = useState<string>("IDLE");
+  const [syncStatus, setSyncStatus] = useState<string>("NOT_STARTED");
   const [chatCount, setChatCount] = useState(0);
   const [groupCountUi, setGroupCountUi] = useState(0);
   const [whatsappState, setWhatsappState] = useState<string | null>(null);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const [trackedSessionId, setTrackedSessionId] = useState<string | null>(null);
   const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
   const [discoveryDiagnostics, setDiscoveryDiagnostics] = useState<{
@@ -3367,54 +3370,68 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         mode?: "qr" | "pairing_code";
         sessionState?: string;
         status?: string;
+        connectionStatus?: string;
+        syncStatus?: string;
         expiresInSeconds?: number | null;
         chatCount?: number;
         groupCount?: number;
         whatsappState?: string | null;
+        lastSyncError?: string | null;
         sessionId?: string;
         updatedAt?: string;
       };
       if (trackedSessionId && nextStatus.sessionId && nextStatus.sessionId !== trackedSessionId) {
-        // Yanlış session — state temizle ve yeni sessionId'yi takip et
         setPairingCode(null);
         setQr(null);
         setTrackedSessionId(nextStatus.sessionId);
       } else if (nextStatus.sessionId) {
         setTrackedSessionId(nextStatus.sessionId);
       }
-      const isConn = !!(nextStatus.connected ?? nextStatus.ready);
+      const connStatus = nextStatus.connectionStatus ?? "";
+      const sync = nextStatus.syncStatus ?? "";
       const state = nextStatus.sessionState ?? nextStatus.status ?? "";
+      const syncReady = !!(nextStatus.ready || sync === "READY");
+      const waConnected = connStatus === "CONNECTED"
+        || nextStatus.whatsappState === "CONNECTED"
+        || !!(nextStatus.connected && (nextStatus.authAccepted || syncReady))
+        || state === "SYNCING"
+        || state === "SYNC_TIMEOUT";
+      const realFailure = connStatus === "FAILED"
+        || connStatus === "DISCONNECTED"
+        || state === "FAILED"
+        || state === "DISCONNECTED";
       setSessionState(state);
+      setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : "IDLE"));
+      setSyncStatus(sync || (syncReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
       setWhatsappState(nextStatus.whatsappState ?? null);
+      setLastSyncError(nextStatus.lastSyncError ?? null);
       setChatCount(nextStatus.chatCount ?? 0);
       setGroupCountUi(nextStatus.groupCount ?? 0);
       const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
-      const isPairing = mode === "pairing_code" && !isConn && !nextStatus.authAccepted && state !== "SYNCING" && state !== "AUTHENTICATED" && state !== "SYNC_TIMEOUT";
-      const authPending = state === "AUTHENTICATED"
-        || state === "SYNCING"
-        || nextStatus.authAccepted === true;
-      const syncFailed = state === "SYNC_TIMEOUT" || state === "FAILED" || state === "DISCONNECTED";
-      setConnected(isConn);
-      setPairingMode(isPairing && !authPending && !syncFailed);
-      setQr((isPairing || authPending || isConn) ? null : (nextStatus.qr ?? null));
+      const isPairing = mode === "pairing_code" && !waConnected && !nextStatus.authAccepted
+        && state !== "SYNCING" && state !== "AUTHENTICATED" && state !== "SYNC_TIMEOUT";
+      const authPending = waConnected && !syncReady;
+      setConnected(syncReady);
+      setPairingMode(isPairing && !authPending && !realFailure);
+      setQr((isPairing || authPending || syncReady || waConnected) ? null : (nextStatus.qr ?? null));
       setPairingCode((prev) => {
-        if (isConn || authPending || syncFailed) return null;
+        if (syncReady || authPending || waConnected || realFailure) return null;
         if (!isPairing) return null;
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
         return prev;
       });
       const userFacingError = (() => {
-        if (isConn) return "";
-        if (state === "SYNC_TIMEOUT") {
+        if (syncReady) return "";
+        if (waConnected) {
           return nextStatus.error
-            || "Senkron zaman aşımı. Yeniden bağlanmayı deneyin.";
+            || "WhatsApp bağlantısı başarılı. Sohbetler arka planda yükleniyor. Telefonu yeniden bağlamayın.";
         }
-        if (nextStatus.pairingCode && !authPending) return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
-        if (authPending) return "Telefon doğrulandı. Sohbetler yükleniyor.";
+        if (nextStatus.pairingCode) return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
         if (state === "STARTING" || state === "PAIRING_CODE_REQUESTING" || nextStatus.starting) {
           return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
         }
         if (state === "QR_READY") return "QR kodu hazır.";
+        if (realFailure) return nextStatus.error || "Bağlantı hatası.";
         const raw = nextStatus.error ?? "";
         if (/session|INITIALIZING|requestId|uuid|ozelguvenlik/i.test(raw)) {
           return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
@@ -3422,12 +3439,13 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         return raw;
       })();
       setErrorLog(userFacingError);
-      if (isConn) setQrStatus("ready");
-      else if (syncFailed) setQrStatus("failed");
-      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting || authPending) setQrStatus("connecting");
-      else if (nextStatus.error && state === "FAILED") setQrStatus("failed");
+      if (syncReady) setQrStatus("ready");
+      else if (realFailure) setQrStatus("failed");
+      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting || authPending || waConnected) {
+        setQrStatus("connecting");
+      }
 
-      if (isConn) {
+      if (syncReady) {
         const groupList = await apiCall("/admin/whatsapp/groups", "GET");
         const parsed = groupList as {
           groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
@@ -3459,19 +3477,46 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   useEffect(() => {
     void refresh();
     const needsFastPoll = !connected && (
-      sessionState === "SYNCING"
+      connectionStatus === "CONNECTED"
+      || syncStatus === "LOADING"
+      || syncStatus === "RETRYING"
+      || syncStatus === "WAITING"
+      || syncStatus === "TIMED_OUT"
+      || sessionState === "SYNCING"
       || sessionState === "AUTHENTICATED"
       || sessionState === "STARTING"
       || sessionState === "PAIRING_CODE_READY"
       || sessionState === "PAIRING_CODE_REQUESTING"
       || sessionState === "QR_READY"
+      || sessionState === "SYNC_TIMEOUT"
       || pairingMode
       || !!pairingCode
       || qrStatus === "connecting"
     );
     const timer = window.setInterval(() => { void refresh(); }, needsFastPoll ? 2000 : 4000);
     return () => window.clearInterval(timer);
-  }, [qrStatus, pairingMode, pairingCode, connected, sessionState]);
+  }, [qrStatus, pairingMode, pairingCode, connected, sessionState, connectionStatus, syncStatus]);
+
+  const reloadChats = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await apiCall("/admin/whatsapp/reload-chats", "POST");
+      toast({
+        title: "Sohbet senkronu",
+        description: "Mevcut bağlantı üzerinde sohbetler yeniden yükleniyor. Telefonu yeniden bağlamayın.",
+      });
+      await refresh();
+    } catch (error) {
+      toast({
+        title: "Yeniden yükleme başarısız",
+        description: error instanceof Error ? error.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const connect = async (usePairing: boolean) => {
     if (loading) return;
@@ -3712,13 +3757,21 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
-              <span className={`text-xs font-bold ${connected ? "text-emerald-400" : sessionState === "SYNC_TIMEOUT" || sessionState === "FAILED" ? "text-rose-400" : "text-amber-400"}`}>
+              <span className={`text-xs font-bold ${
+                connected
+                  ? "text-emerald-400"
+                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
+                    ? "text-rose-400"
+                    : connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT"
+                      ? "text-sky-300"
+                      : "text-amber-400"
+              }`}>
                 {connected
                   ? "Bağlı"
-                  : sessionState === "SYNC_TIMEOUT" || sessionState === "FAILED"
+                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
                     ? "Başarısız"
-                    : sessionState === "SYNCING" || sessionState === "AUTHENTICATED" || errorLog?.includes("yükleniyor") || errorLog?.includes("doğrulandı")
-                      ? "Senkron…"
+                    : connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT"
+                      ? "Bağlı · Senkron…"
                       : qrStatus === "connecting"
                         ? "Bekleniyor…"
                         : "Bağlı değil"}
@@ -3735,25 +3788,36 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   Temiz tarama için «Sıfırla / Tekrar Tara»; sadece yeni mesaj için «Şimdi Tara».
                 </p>
               </div>
-            ) : sessionState === "SYNC_TIMEOUT" || (sessionState === "FAILED" && !!errorLog) ? (
+            ) : (connectionStatus === "CONNECTED" || syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "TIMED_OUT" || sessionState === "SYNCING" || sessionState === "SYNC_TIMEOUT") ? (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100 space-y-3">
+                <p className="font-bold">WhatsApp bağlantısı başarılı.</p>
+                <p className="text-xs text-sky-200/90">
+                  Sohbetler arka planda yükleniyor. İlk bağlantıda birkaç dakika sürebilir.
+                </p>
+                <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın.</p>
+                {whatsappState && <p className="text-[10px] text-slate-400">WhatsApp durumu: {whatsappState} · sync: {syncStatus}</p>}
+                {lastSyncError && <p className="text-[10px] text-slate-400">Son senkron notu: {lastSyncError}</p>}
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void reloadChats()}
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
+                >
+                  Sohbetleri Yeniden Yükle
+                </button>
+              </div>
+            ) : (connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "FAILED" || sessionState === "DISCONNECTED") && !!errorLog ? (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100 space-y-3">
-                <p className="font-bold">Bağlantı tamamlanamadı</p>
-                <p className="text-xs text-rose-200/90">{errorLog || "Senkron zaman aşımı."}</p>
+                <p className="font-bold">Bağlantı hatası</p>
+                <p className="text-xs text-rose-200/90">{errorLog}</p>
                 <button
                   type="button"
                   disabled={loading}
                   onClick={() => void connect(Boolean(form.phoneNumber.trim()))}
                   className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
                 >
-                  Yeniden Dene
+                  Yeniden Bağlan
                 </button>
-              </div>
-            ) : (sessionState === "SYNCING" || sessionState === "AUTHENTICATED" || errorLog?.includes("doğrulandı") || errorLog?.includes("yükleniyor")) && !pairingCode ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 space-y-2">
-                <p className="font-bold">Telefon doğrulandı — sohbetler yükleniyor…</p>
-                <p className="text-xs text-amber-200/90">{errorLog || "WhatsApp senkronize ediliyor."}</p>
-                {whatsappState && <p className="text-[10px] text-slate-400">WhatsApp durumu: {whatsappState}</p>}
-                <p className="text-[10px] text-slate-400">Sayfayı kapatmayın. En fazla ~90 sn sürer.</p>
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">

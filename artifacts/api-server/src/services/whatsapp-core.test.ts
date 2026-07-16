@@ -210,7 +210,8 @@ test("CONNECTED + getChats smoke test READY yapar (0 sohbet FAILED değildir)", 
   await __testOnly_tryPromoteConnectedToReady("fallback_poll");
   const status = getWhatsAppStatus();
   assert.equal(status.ready, true);
-  assert.equal(status.sessionState, "READY");
+  assert.equal(status.connectionStatus, "CONNECTED");
+  assert.equal(status.syncStatus, "READY");
   assert.equal(status.chatCount, 0);
   assert.equal(status.groupCount, 0);
   await __testOnly_resetWhatsAppClient();
@@ -240,7 +241,7 @@ test("ready eventi kaçınca getState fallback READY yapar", async () => {
   await __testOnly_resetWhatsAppClient();
 });
 
-test("getChats hata verirse READY yapılmaz", async () => {
+test("getChats timeout bağlantıyı FAILED yapmaz", async () => {
   await __testOnly_resetWhatsAppClient();
   const c = mockWaClient({ state: "CONNECTED", failGetChats: true });
   __testOnly_setSessionForTests({
@@ -252,7 +253,95 @@ test("getChats hata verirse READY yapılmaz", async () => {
   await __testOnly_tryPromoteConnectedToReady("fallback_poll");
   const status = getWhatsAppStatus();
   assert.equal(status.ready, false);
-  assert.equal(status.sessionState, "SYNCING");
+  assert.equal(status.connectionStatus, "CONNECTED");
+  assert.notEqual(status.connectionStatus, "FAILED");
+  assert.ok(status.syncStatus === "RETRYING" || status.syncStatus === "LOADING");
+  assert.ok(status.lastSyncError);
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("ikinci getChats denemesinde başarı", async () => {
+  await __testOnly_resetWhatsAppClient();
+  let calls = 0;
+  const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  const c = {
+    pupPage: { isClosed: () => false },
+    pupBrowser: { isConnected: () => true },
+    info: { wid: { user: "90505" } },
+    initialize: async () => undefined,
+    destroy: async () => undefined,
+    removeAllListeners: () => { listeners.clear(); },
+    getState: async () => "CONNECTED",
+    getChats: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("GET_CHATS_TIMEOUT");
+      return [{ id: { _serialized: "1@g.us" }, isGroup: true }];
+    },
+    requestPairingCode: async () => "ABCD1234",
+    on(event: string, fn: (...args: unknown[]) => void) {
+      const list = listeners.get(event) ?? [];
+      list.push(fn);
+      listeners.set(event, list);
+    },
+    emit() { /* noop */ },
+  };
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "SYNCING",
+    authAccepted: true,
+    client: c,
+  });
+  await __testOnly_tryPromoteConnectedToReady("first");
+  assert.equal(getWhatsAppStatus().ready, false);
+  assert.equal(getWhatsAppStatus().connectionStatus, "CONNECTED");
+  await __testOnly_tryPromoteConnectedToReady("second");
+  assert.equal(getWhatsAppStatus().ready, true);
+  assert.equal(getWhatsAppStatus().groupCount, 1);
+  assert.equal(calls, 2);
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("aynı anda tek getChats çağrısı", async () => {
+  await __testOnly_resetWhatsAppClient();
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  const c = {
+    pupPage: { isClosed: () => false },
+    pupBrowser: { isConnected: () => true },
+    info: { wid: { user: "90505" } },
+    initialize: async () => undefined,
+    destroy: async () => undefined,
+    removeAllListeners: () => { listeners.clear(); },
+    getState: async () => "CONNECTED",
+    getChats: async () => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await new Promise((r) => setTimeout(r, 40));
+      concurrent -= 1;
+      return [];
+    },
+    requestPairingCode: async () => "ABCD1234",
+    on(event: string, fn: (...args: unknown[]) => void) {
+      const list = listeners.get(event) ?? [];
+      list.push(fn);
+      listeners.set(event, list);
+    },
+    emit() { /* noop */ },
+  };
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "SYNCING",
+    authAccepted: true,
+    client: c,
+  });
+  await Promise.all([
+    __testOnly_tryPromoteConnectedToReady("a"),
+    __testOnly_tryPromoteConnectedToReady("b"),
+    __testOnly_tryPromoteConnectedToReady("c"),
+  ]);
+  assert.equal(maxConcurrent, 1);
+  assert.equal(getWhatsAppStatus().ready, true);
   await __testOnly_resetWhatsAppClient();
 });
 

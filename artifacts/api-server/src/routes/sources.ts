@@ -7,7 +7,7 @@ import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScra
 import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import {
   startWhatsAppClient, stopWhatsAppClient, isWhatsAppReady, getWhatsAppStatus, fetchWhatsAppGroups,
-  getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession, WhatsAppStartError,
+  getWhatsAppDiscoveryDiagnostics, hasWhatsAppLocalSession, WhatsAppStartError, reloadWhatsAppChats,
 } from "../services/whatsapp-client";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
 import { logger } from "../lib/logger";
@@ -289,6 +289,22 @@ router.get("/whatsapp/session/status", authMiddleware, requireAdmin, async (_req
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.json(getWhatsAppStatus());
+});
+
+router.post("/admin/whatsapp/reload-chats", authMiddleware, requireAdmin, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const status = await reloadWhatsAppChats();
+    res.json({ success: true, message: "Sohbet senkronu yeniden başlatıldı.", ...status });
+  } catch (error) {
+    const status = error instanceof WhatsAppStartError ? error.statusCode : 500;
+    const code = error instanceof WhatsAppStartError ? error.code : "UNEXPECTED_ERROR";
+    res.status(status).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      code,
+    });
+  }
 });
 
 router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, res) => {
