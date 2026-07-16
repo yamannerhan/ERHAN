@@ -53,13 +53,17 @@ RUN mkdir -p \
       /app/data/company-logos \
       /app/data/known-company-logos \
       /app/.wwebjs_auth \
-    && chown -R node:node /app/uploads /app/data /app/.wwebjs_auth
+      /data/whatsapp-auth \
+    && chown -R node:node /app/uploads /app/data /app/.wwebjs_auth /data/whatsapp-auth
 
 ENV NODE_ENV=production
 ENV BASE_PATH=/
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Railway volume mount: WHATSAPP_AUTH_PATH=/data/whatsapp-auth
+ENV WHATSAPP_AUTH_PATH=/data/whatsapp-auth
+ENV WWEBJS_AUTH_PATH=/data/whatsapp-auth
 
 EXPOSE 8080
 USER node

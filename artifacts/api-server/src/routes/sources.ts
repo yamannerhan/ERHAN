@@ -277,10 +277,22 @@ router.post("/admin/scrape/run", runScrapeEndpoint);
 // ── WhatsApp endpoints ─────────────────────────────────────────────
 
 router.get("/admin/whatsapp/status", authMiddleware, requireAdmin, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.json(getWhatsAppStatus());
+});
+
+/** Alias — frontend polling için (aynı activeClient / sessionId) */
+router.get("/whatsapp/session/status", authMiddleware, requireAdmin, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.json(getWhatsAppStatus());
 });
 
 router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const requestId = crypto.randomUUID();
   try {
     const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber.trim() : undefined;
@@ -298,6 +310,7 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
         ? { phoneNumber: phoneNumber || "", mode: "pairing_code" }
         : { mode: "qr" },
     );
+    const status = getWhatsAppStatus();
     const responseBody = {
       success: true,
       mode: result.mode,
@@ -307,9 +320,14 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
       pairingCode: result.pairingCode,
       expiresInSeconds: result.expiresInSeconds ?? null,
       qr: result.mode === "qr" ? result.qr : null,
+      sessionId: status.sessionId,
+      clientInstanceId: status.clientInstanceId,
+      ready: status.ready,
+      chatCount: status.chatCount,
+      groupCount: status.groupCount,
     };
     logger.info(
-      { requestId, httpStatus: 200, mode: result.mode, status: result.status },
+      { requestId, httpStatus: 200, mode: result.mode, status: result.status, clientInstanceId: status.clientInstanceId },
       "wa endpoint: başarılı response",
     );
     res.status(200).json(responseBody);
@@ -317,7 +335,6 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
     const status = error instanceof WhatsAppStartError ? error.statusCode : 500;
     const code = error instanceof WhatsAppStartError ? error.code : "UNEXPECTED_ERROR";
     const message = error instanceof Error ? error.message : String(error);
-    // Kullanıcıya requestId/sessionId gösterme — sadece log
     const responseBody = {
       success: false,
       error: message,

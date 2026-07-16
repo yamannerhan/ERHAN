@@ -14,18 +14,35 @@ import {
   __testOnly_resetWhatsAppClient,
   __testOnly_setClientFactory,
   __testOnly_setSessionForTests,
+  __testOnly_tryPromoteConnectedToReady,
+  __testOnly_getAuthPath,
 } from "./whatsapp-client";
 
 const nowSeconds = Math.floor(Date.now() / 1000);
 
-function mockWaClient(opts?: { pairingCode?: string; failPairing?: boolean }) {
+function mockWaClient(opts?: {
+  pairingCode?: string;
+  failPairing?: boolean;
+  state?: string;
+  chats?: Array<{ id?: { _serialized?: string }; isGroup?: boolean }>;
+  failGetChats?: boolean;
+  noInfo?: boolean;
+}) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   return {
     pupPage: { isClosed: () => false },
     pupBrowser: { isConnected: () => true },
+    info: opts?.noInfo ? undefined : { wid: { user: "905052661996" } },
     initialize: async () => undefined,
     destroy: async () => undefined,
     removeAllListeners: () => { listeners.clear(); },
+    getState: async () => opts?.state ?? "CONNECTED",
+    getChats: opts?.failGetChats
+      ? async () => { throw new Error("getChats not ready"); }
+      : async () => opts?.chats ?? [
+        { id: { _serialized: "120363@g.us" }, isGroup: true },
+        { id: { _serialized: "90505@c.us" }, isGroup: false },
+      ],
     requestPairingCode: opts?.failPairing
       ? async () => { throw new Error("pairing failed"); }
       : async () => opts?.pairingCode ?? "ABCD1234",
@@ -179,6 +196,87 @@ test("stale STARTING temizliği FAILED yapar ve yeniden başlatmaya izin verir",
   assert.equal(result.mode, "qr");
   assert.ok(result.success);
   await __testOnly_resetWhatsAppClient();
+});
+
+test("CONNECTED + getChats smoke test READY yapar (0 sohbet FAILED değildir)", async () => {
+  await __testOnly_resetWhatsAppClient();
+  const c = mockWaClient({ state: "CONNECTED", chats: [] });
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "SYNCING",
+    authAccepted: true,
+    client: c,
+  });
+  await __testOnly_tryPromoteConnectedToReady("fallback_poll");
+  const status = getWhatsAppStatus();
+  assert.equal(status.ready, true);
+  assert.equal(status.sessionState, "READY");
+  assert.equal(status.chatCount, 0);
+  assert.equal(status.groupCount, 0);
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("ready eventi kaçınca getState fallback READY yapar", async () => {
+  await __testOnly_resetWhatsAppClient();
+  const c = mockWaClient({
+    state: "CONNECTED",
+    chats: [
+      { id: { _serialized: "1@g.us" }, isGroup: true },
+      { id: { _serialized: "2@g.us" }, isGroup: true },
+      { id: { _serialized: "3@c.us" }, isGroup: false },
+    ],
+  });
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "AUTHENTICATED",
+    authAccepted: true,
+    client: c,
+  });
+  await __testOnly_tryPromoteConnectedToReady("change_state");
+  const status = getWhatsAppStatus();
+  assert.equal(status.ready, true);
+  assert.equal(status.chatCount, 3);
+  assert.equal(status.groupCount, 2);
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("getChats hata verirse READY yapılmaz", async () => {
+  await __testOnly_resetWhatsAppClient();
+  const c = mockWaClient({ state: "CONNECTED", failGetChats: true });
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "SYNCING",
+    authAccepted: true,
+    client: c,
+  });
+  await __testOnly_tryPromoteConnectedToReady("fallback_poll");
+  const status = getWhatsAppStatus();
+  assert.equal(status.ready, false);
+  assert.equal(status.sessionState, "SYNCING");
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("aynı client instance status ve promote için kullanılır", async () => {
+  await __testOnly_resetWhatsAppClient();
+  const c = mockWaClient({ state: "CONNECTED" });
+  __testOnly_setSessionForTests({
+    connectionMode: "pairing_code",
+    sessionState: "SYNCING",
+    authAccepted: true,
+    client: c,
+  });
+  const before = getWhatsAppStatus().clientInstanceId;
+  await __testOnly_tryPromoteConnectedToReady("test");
+  const after = getWhatsAppStatus().clientInstanceId;
+  assert.equal(before, after);
+  assert.ok(before);
+  await __testOnly_resetWhatsAppClient();
+});
+
+test("auth path WHATSAPP_AUTH_PATH veya WWEBJS_AUTH_PATH kullanır", () => {
+  const authPath = __testOnly_getAuthPath();
+  assert.ok(typeof authPath === "string" && authPath.length > 0);
+  assert.match(authPath, /whatsapp-auth|wwebjs_auth/);
 });
 
 test("mock client.getChannels sonucu kanal kaydı oluşturur", async () => {
