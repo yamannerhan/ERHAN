@@ -1,34 +1,20 @@
+import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { ChevronRight, Newspaper } from "lucide-react";
 import "./home-news-cards.css";
 
-type HomeAnnouncement = {
+type NewsItem = {
   id: number;
-  content?: string | null;
-  createdAt?: string | Date | null;
+  title: string;
+  slug: string;
+  excerpt?: string | null;
+  coverImage?: string | null;
+  category?: string | null;
+  publishedAt?: string | null;
+  sourcePublishedAt?: string | null;
 };
 
-const SAMPLE_NEWS = [
-  {
-    id: -1,
-    content: "Özel Güvenlik Kimlik Yenileme İşlemleri 2026",
-    relative: "1 saat önce",
-    imageName: "security-id-renewal",
-  },
-  {
-    id: -2,
-    content: "2026 Yılı ÖGG Maaşları ve Çalışma Koşulları",
-    relative: "3 saat önce",
-    imageName: "security-salaries",
-  },
-  {
-    id: -3,
-    content: "Güncel Özel Güvenlik Sınav Takvimi Açıklandı",
-    relative: "5 saat önce",
-    imageName: "security-exam",
-  },
-] as const;
-
-function relativeDate(value?: string | Date | null): string {
+function relativeDate(value?: string | null): string {
   if (!value) return "Güncel";
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "Güncel";
@@ -39,16 +25,31 @@ function relativeDate(value?: string | Date | null): string {
   return days === 1 ? "Dün" : `${days} gün önce`;
 }
 
-export function HomeNewsCards({ announcements }: { announcements: HomeAnnouncement[] }) {
-  const liveItems = announcements.filter((item) => item.content?.trim()).slice(0, 3);
-  const items = [
-    ...liveItems.map((item, index) => ({
-        ...item,
-        relative: relativeDate(item.createdAt),
-        imageName: SAMPLE_NEWS[index]?.imageName ?? SAMPLE_NEWS[0].imageName,
-      })),
-    ...SAMPLE_NEWS.slice(liveItems.length),
-  ].slice(0, 3);
+function coverSrc(url?: string | null): string {
+  if (!url) return "/news/security-exam.png";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) return url;
+  return `/news/security-exam.png`;
+}
+
+export function HomeNewsCards() {
+  const [items, setItems] = useState<NewsItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/news/home");
+        const json = await res.json() as { articles?: NewsItem[] };
+        if (!cancelled) setItems(Array.isArray(json.articles) ? json.articles.slice(0, 3) : []);
+      } catch {
+        if (!cancelled) setItems([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <section className="og-home-news" aria-labelledby="home-news-title">
@@ -57,42 +58,42 @@ export function HomeNewsCards({ announcements }: { announcements: HomeAnnounceme
           <Newspaper aria-hidden />
           Haberler
         </h2>
-        <span className="og-home-news__all" aria-hidden>
+        <Link href="/haberler" className="og-home-news__all">
           Tümünü Gör <ChevronRight aria-hidden />
-        </span>
+        </Link>
       </div>
       <div className="og-home-news__grid">
-        {items.map((item) => (
-          <article
-            key={item.id}
-            className="og-home-news__card"
-          >
-            <span className="og-home-news__visual" aria-hidden>
-              <picture>
-                <source
-                  type="image/avif"
-                  srcSet={`/news/${item.imageName}-320.avif 320w, /news/${item.imageName}-640.avif 640w`}
-                  sizes="33vw"
-                />
-                <source
-                  type="image/webp"
-                  srcSet={`/news/${item.imageName}-320.webp 320w, /news/${item.imageName}-640.webp 640w`}
-                  sizes="33vw"
-                />
-                <img
-                  src={`/news/${item.imageName}.png`}
-                  alt=""
-                  width={640}
-                  height={280}
-                  loading="lazy"
-                  decoding="async"
-                />
-              </picture>
-              <span>HABER</span>
-            </span>
-            <strong>{item.content!.trim()}</strong>
-            <small>{item.relative}</small>
+        {loading && [1, 2, 3].map((i) => (
+          <article key={i} className="og-home-news__card og-home-news__card--skeleton" aria-hidden>
+            <span className="og-home-news__visual" />
+            <strong>&nbsp;</strong>
+            <small>&nbsp;</small>
           </article>
+        ))}
+        {!loading && items.length === 0 && (
+          <p className="og-home-news__empty">Henüz yayınlanmış haber yok. Yakında güncellenecek.</p>
+        )}
+        {!loading && items.map((item) => (
+          <Link key={item.id} href={`/haberler/${item.slug}`} className="og-home-news__card">
+            <span className="og-home-news__visual" aria-hidden>
+              <img
+                src={coverSrc(item.coverImage)}
+                alt=""
+                width={640}
+                height={280}
+                loading="lazy"
+                decoding="async"
+                onError={(e) => { e.currentTarget.src = "/news/security-exam.png"; }}
+              />
+              <span>{item.category || "HABER"}</span>
+            </span>
+            <strong>{item.title}</strong>
+            {item.excerpt ? <em className="og-home-news__excerpt">{item.excerpt}</em> : null}
+            <small>
+              {relativeDate(item.publishedAt || item.sourcePublishedAt)}
+              <span className="og-home-news__read">Haberi Oku</span>
+            </small>
+          </Link>
         ))}
       </div>
     </section>

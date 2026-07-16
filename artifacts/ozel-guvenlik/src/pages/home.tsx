@@ -535,7 +535,7 @@ export default function Home() {
           onNearClick={handleNearClick}
         />
         </div>
-        <HomeNewsCards announcements={announcements} />
+        <HomeNewsCards />
         <div className="mobile-home mt-4">
           <LiveSupportBar />
         </div>

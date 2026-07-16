@@ -23,6 +23,7 @@ import moderatorRouter from "./moderator";
 import publisherVerifyRouter from "./publisher-verify";
 import { whatsappRouter } from "../modules/whatsapp";
 import jobMatchRouter from "./job-match";
+import newsRouter from "./news";
 
 const router: IRouter = Router();
 
@@ -30,6 +31,7 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(nearbyListingsRouter);
 router.use(jobMatchRouter);
+router.use(newsRouter);
 router.use(listingsRouter);
 router.use(chatRouter);
 router.use(usersRouter);

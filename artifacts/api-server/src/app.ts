@@ -26,6 +26,7 @@ import {
 import {
   buildSitemapXml,
   generateBlogSitemapXml,
+  generateNewsSitemapXml,
   generateCategoriesSitemapXml,
   generateCitiesSitemapXml,
   generateCompaniesSitemapXml,
@@ -226,6 +227,7 @@ app.get("/sitemap-districts.xml", asyncSitemap(generateDistrictsSitemapXml));
 app.get("/sitemap-categories.xml", asyncSitemap(generateCategoriesSitemapXml));
 app.get("/sitemap-companies.xml", asyncSitemap(generateCompaniesSitemapXml));
 app.get("/sitemap-blog.xml", (_req, res) => sendXml(res, generateBlogSitemapXml()));
+app.get("/sitemap-news.xml", asyncSitemap(generateNewsSitemapXml));
 app.get("/sitemap-jobs-:page.xml", (req, res) => {
   void (async () => {
     const page = Number(req.params["page"]);

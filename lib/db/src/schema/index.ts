@@ -25,3 +25,4 @@ export * from "./known-companies";
 export * from "./publisher-verification";
 export * from "./whatsapp";
 export * from "./job-preferences";
+export * from "./news";

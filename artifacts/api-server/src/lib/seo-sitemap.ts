@@ -1,5 +1,5 @@
-import { db, listingsTable } from "@workspace/db";
-import { asc } from "drizzle-orm";
+import { db, listingsTable, newsArticlesTable } from "@workspace/db";
+import { and, asc, desc, eq, lte, or, sql } from "drizzle-orm";
 import {
   SEO_BASE_URL,
   SEO_DISTRICTS,
@@ -217,6 +217,7 @@ function sitemapIndexEntries(snapshot: SitemapSnapshot): SitemapEntry[] {
     { url: `${SEO_BASE_URL}/sitemap-categories.xml`, lastmod: categoriesLastmod },
     { url: `${SEO_BASE_URL}/sitemap-companies.xml`, lastmod: companiesLastmod },
     { url: `${SEO_BASE_URL}/sitemap-blog.xml`, lastmod: BLOG_CONTENT_LASTMOD },
+    { url: `${SEO_BASE_URL}/sitemap-news.xml`, lastmod: SITEMAP_POLICY_LASTMOD },
   ];
   snapshot.jobPageLastmods.forEach((lastmod, index) => {
     entries.push({ url: `${SEO_BASE_URL}/sitemap-jobs-${index + 1}.xml`, lastmod });
@@ -243,6 +244,7 @@ export async function generatePagesSitemapXml(): Promise<string> {
   return buildSitemapXml([
     { url: `${SEO_BASE_URL}/`, lastmod: dynamicLastmod },
     { url: `${SEO_BASE_URL}/ilanlar`, lastmod: dynamicLastmod },
+    { url: `${SEO_BASE_URL}/haberler`, lastmod: dynamicLastmod },
     { url: `${SEO_BASE_URL}/blog`, lastmod: BLOG_CONTENT_LASTMOD },
   ]);
 }
@@ -285,6 +287,32 @@ export function generateBlogSitemapXml(): string {
     ...SEO_BLOG_POSTS.map((post) => ({
       url: `${SEO_BASE_URL}/blog/${post.slug}`,
       lastmod: post.publishedAt,
+    })),
+  ]);
+}
+
+export async function generateNewsSitemapXml(): Promise<string> {
+  const now = new Date();
+  const rows = await db.select({
+    slug: newsArticlesTable.slug,
+    publishedAt: newsArticlesTable.publishedAt,
+    updatedAt: newsArticlesTable.updatedAt,
+  })
+    .from(newsArticlesTable)
+    .where(and(
+      eq(newsArticlesTable.status, "published"),
+      or(
+        sql`${newsArticlesTable.publishedAt} IS NULL`,
+        lte(newsArticlesTable.publishedAt, now),
+      )!,
+    ))
+    .orderBy(desc(newsArticlesTable.publishedAt), desc(newsArticlesTable.id))
+    .limit(500);
+  return buildSitemapXml([
+    { url: `${SEO_BASE_URL}/haberler`, lastmod: rows[0]?.updatedAt ?? SITEMAP_POLICY_LASTMOD },
+    ...rows.map((row) => ({
+      url: `${SEO_BASE_URL}/haberler/${row.slug}`,
+      lastmod: row.updatedAt ?? row.publishedAt,
     })),
   ]);
 }

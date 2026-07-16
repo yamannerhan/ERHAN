@@ -18,6 +18,7 @@ import {
   purgeDemoListings,
   reparseImportedListings,
 } from "./workers/scraper";
+import { startNewsWorker, stopNewsWorker } from "./news/scanner";
 import { initTelegramClient, shutdownTelegramClient } from "./services/telegram-client";
 import { initWhatsAppClient, stopWhatsAppClient } from "./modules/whatsapp";
 import { db, pool, usersTable, listingsTable, adminSettingsTable, chatMessagesTable, chatRulesTable, sourcesTable, supportTicketsTable } from "@workspace/db";
@@ -1118,6 +1119,9 @@ void import("./lib/bot-public-announce")
 void import("./lib/job-match/ensure")
   .then((m) => m.ensureJobPreferencesSchema())
   .catch((err) => logger.warn({ err }, "job-match schema bootstrap skipped"));
+void import("./news/ensure")
+  .then((m) => m.ensureNewsSchema())
+  .catch((err) => logger.warn({ err }, "news schema bootstrap skipped"));
 void import("./lib/wipe-notifications-once")
   .then((m) => m.wipeAllNotificationsOnce())
   .catch((err) => logger.warn({ err }, "notifications wipe once skipped"));
@@ -1219,6 +1223,13 @@ httpServer.listen(port, "0.0.0.0", (err?: Error) => {
   void import("./lib/levels").then((m) => m.ensureGamificationSchema())
     .then(() => logger.info("Gamification schema ready"))
     .catch((e) => logger.warn({ err: e }, "Gamification schema ensure failed"));
+  // Haber tarayıcı bot worker'dan bağımsız (advisory lock ile çift tarama engelli)
+  if (process.env["NEWS_WORKER"] !== "0") {
+    setTimeout(() => {
+      try { startNewsWorker(); }
+      catch (e) { logger.warn({ err: e }, "news worker start failed"); }
+    }, 2_000);
+  }
   if (process.env["RUN_BOT_WORKERS"] !== "0") {
     setTimeout(() => { void bootstrapWorkers(); }, 1500);
   } else {
@@ -1251,6 +1262,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   await Promise.allSettled([
     stopScraperWorker(),
+    Promise.resolve(stopNewsWorker()),
     shutdownTelegramClient(),
     stopWhatsAppClient(),
   ]);

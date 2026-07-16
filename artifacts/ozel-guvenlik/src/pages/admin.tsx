@@ -31,6 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ManagementTeamAdminSection } from "@/components/management-team-admin";
 import { ChatBannersAdminSection } from "@/components/chat-banners-admin";
 import { HomeBannersAdminSection } from "@/components/home-banners-admin";
+import { NewsAdminSection } from "@/components/news-admin";
 import { KnownCompaniesAdminSection } from "@/components/known-companies-admin";
 import { FeaturedListingsAdminSection } from "@/components/featured-listings-admin";
 import { VerifiedPublishersAdminSection } from "@/components/verified-publishers-admin";
@@ -3860,7 +3861,7 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
 type AdminTab =
   | "dashboard" | "ilanlar" | "one-cikan" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "dogrulanmis-hesaplar" | "yetkiler" | "ilan-haklari" | "yonetim-ekibi" | "anasayfa-banner" | "hazir-sirketler" | "sohbet-banner"
-  | "telegram" | "url-pool" | "eleman" | "mesajlar" | "destek"
+  | "telegram" | "url-pool" | "eleman" | "mesajlar" | "destek" | "haberler"
   | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar" | "konum-dogrulama";
 
 interface SidebarItem {
@@ -3884,6 +3885,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
       { id: "one-cikan", label: "Öne Çıkanlar", icon: Star },
       { id: "ilan-olustur", label: "İlan Oluştur", icon: Plus },
       { id: "anasayfa-banner", label: "Anasayfa Banner", icon: Image },
+      { id: "haberler", label: "Haber Yönetimi", icon: FileText },
       { id: "hazir-sirketler", label: "Hazır Şirket Logoları", icon: Building2 },
       { id: "cv-olustur", label: "CV Oluştur", icon: FileText, href: "/cv-olustur" },
       { id: "part-time", label: "İş Arayanlar", icon: Clock, href: "/part-time" },
@@ -5549,6 +5551,12 @@ export default function AdminDashboard() {
         {activeTab === "anasayfa-banner" && (
           <Section title="Anasayfa Banner" icon={Image}>
             <HomeBannersAdminSection apiCall={apiCall} toast={toast} getToken={getToken} />
+          </Section>
+        )}
+
+        {activeTab === "haberler" && (
+          <Section title="Haber Yönetimi" icon={FileText}>
+            <NewsAdminSection />
           </Section>
         )}
 
