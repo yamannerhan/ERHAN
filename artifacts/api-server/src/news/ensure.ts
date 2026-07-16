@@ -16,7 +16,7 @@ export async function ensureNewsSchema(): Promise<void> {
         provider_key TEXT NOT NULL DEFAULT 'ozel_guvenlik_ajans',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         scan_interval_minutes INTEGER NOT NULL DEFAULT 30,
-        initial_lookback_days INTEGER NOT NULL DEFAULT 20,
+        initial_lookback_days INTEGER NOT NULL DEFAULT 5,
         import_mode TEXT NOT NULL DEFAULT 'full',
         download_images BOOLEAN NOT NULL DEFAULT FALSE,
         show_source BOOLEAN NOT NULL DEFAULT FALSE,
@@ -49,6 +49,7 @@ export async function ensureNewsSchema(): Promise<void> {
         source_published_at TIMESTAMPTZ,
         imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         published_at TIMESTAMPTZ,
+        archived_at TIMESTAMPTZ,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         status TEXT NOT NULL DEFAULT 'draft',
         publication_type TEXT NOT NULL DEFAULT 'excerpt',
@@ -86,8 +87,11 @@ export async function ensureNewsSchema(): Promise<void> {
       ON news_articles (source_url) WHERE source_url IS NOT NULL
     `);
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS news_articles_source_hash_uidx ON news_articles (source_hash)`);
+    await db.execute(sql`ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_articles_status_pub_idx ON news_articles (status, published_at)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS news_articles_archived_idx ON news_articles (status, archived_at)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_sources_active_idx ON news_sources (is_active)`);
+    await db.execute(sql`ALTER TABLE news_sources ALTER COLUMN initial_lookback_days SET DEFAULT 5`);
     ready = true;
   } catch (e) {
     logger.warn({ err: e }, "news: schema ensure failed");

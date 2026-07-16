@@ -29,6 +29,8 @@ function proxyInlineImages(html: string | null | undefined): string | null {
         const host = new URL(url).hostname.toLowerCase();
         if (
           host.includes("ozelguvenlikajans")
+          || host.includes("ogghaber")
+          || host.includes("egm.gov.tr")
           || host.includes("guvenlikakademi")
           || host.endsWith(".wp.com")
         ) {
@@ -58,6 +60,10 @@ function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
     isFeatured: row.isFeatured,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
+    sourceName: row.sourceName,
+    sourceUrl: row.isManual && row.sourceUrl && !row.sourceUrl.startsWith("manual://")
+      ? row.sourceUrl
+      : null,
     /** Manuel haberlerde adminin eklediği dış link */
     externalUrl: row.isManual && row.sourceUrl && !row.sourceUrl.startsWith("manual://")
       ? row.sourceUrl
@@ -88,6 +94,10 @@ router.get("/news/image", async (req, res) => {
     const allowed =
       host === "ozelguvenlikajans.com"
       || host.endsWith(".ozelguvenlikajans.com")
+      || host === "ogghaber.net"
+      || host.endsWith(".ogghaber.net")
+      || host === "egm.gov.tr"
+      || host.endsWith(".egm.gov.tr")
       || host === "guvenlikakademi.com"
       || host.endsWith(".guvenlikakademi.com")
       || host.endsWith(".wp.com")
@@ -210,7 +220,7 @@ router.get("/news/:slug", async (req, res) => {
     res.json({
       article: {
         ...publicArticle(row),
-        showSource: false,
+        showSource: true,
         showSourceLink: false,
       },
     });
@@ -235,6 +245,7 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
   const body = req.body as {
     title?: string; excerpt?: string; content?: string; coverImage?: string;
     category?: string; status?: string; publishedAt?: string; linkUrl?: string; sourceUrl?: string;
+    sourceName?: string;
   };
   const title = String(body.title || "").trim();
   if (!title) {
@@ -265,6 +276,7 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
     content: body.content ? sanitizeNewsHtml(body.content) : null,
     coverImage: body.coverImage || null,
     category: body.category || "Genel Haberler",
+    sourceName: body.sourceName?.trim() || "Manuel",
     sourceUrl: linkUrl,
     sourceHash: hash,
     status,
@@ -345,6 +357,16 @@ router.post("/admin/news/repair", authMiddleware, requireAdmin, async (_req, res
   res.json({ success: true, message: "Haber kapak/içerik onarımı başlatıldı" });
 });
 
+router.post("/admin/news/lifecycle", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const { runNewsLifecycle } = await import("../news/scanner");
+    const result = await runNewsLifecycle();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : "Lifecycle failed" });
+  }
+});
+
 /** Otomatik haberleri silip kaynaklardan sıfırdan yeniden çeker (manuel haberler kalır) */
 router.post("/admin/news/reset", authMiddleware, requireAdmin, async (_req, res) => {
   try {
@@ -383,6 +405,18 @@ router.post("/cron/news-scan", async (req, res) => {
   }
   void runNewsScanCycle(true).catch(() => undefined);
   res.json({ success: true });
+});
+
+router.post("/cron/news-lifecycle", async (req, res) => {
+  const secret = process.env["CRON_SECRET"] || process.env["NEWS_CRON_SECRET"];
+  const header = String(req.headers["x-cron-secret"] || "");
+  if (!secret || header !== secret) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { runNewsLifecycle } = await import("../news/scanner");
+  const result = await runNewsLifecycle();
+  res.json({ success: true, ...result });
 });
 
 export default router;

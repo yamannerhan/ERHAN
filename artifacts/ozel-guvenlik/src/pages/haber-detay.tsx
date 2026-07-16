@@ -17,6 +17,8 @@ type Article = {
   metaTitle?: string | null;
   metaDescription?: string | null;
   externalUrl?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
 };
 
 export default function HaberDetayPage() {
@@ -96,6 +98,7 @@ export default function HaberDetayPage() {
               {(article.publishedAt || article.sourcePublishedAt)
                 ? new Date(article.publishedAt || article.sourcePublishedAt || "").toLocaleString("tr-TR")
                 : ""}
+              {article.sourceName ? ` · ${article.sourceName}` : ""}
             </p>
             {article.coverImage && (
               <img

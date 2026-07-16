@@ -22,7 +22,7 @@
     "test:security": "tsx --test src/lib/security.test.ts",
     "test:seo": "tsx --test src/lib/seo-sitemap.test.ts",
     "test:job-match": "tsx --test src/lib/job-match/scoring.test.ts",
-    "test:news": "tsx --test src/news/utils.test.ts src/news/providers/ozel-guvenlik-ajans.test.ts",
+    "test:news": "tsx --test src/news/utils.test.ts src/news/dedup.test.ts src/news/providers/ozel-guvenlik-ajans.test.ts src/news/providers/multi-source.test.ts",
     "test:url-pool": "tsx --test src/workers/url-pool-filter.test.ts",
     "audit:bot-db": "tsx src/commands/botDatabaseAudit.ts",
     "locations:sync": "pnpm exec tsx --tsconfig ./tsconfig.json ./src/commands/locationsSync.ts",

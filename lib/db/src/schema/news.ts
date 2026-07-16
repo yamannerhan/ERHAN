@@ -12,7 +12,7 @@ export const newsSourcesTable = pgTable(
     providerKey: text("provider_key").notNull().default("ozel_guvenlik_ajans"),
     isActive: boolean("is_active").notNull().default(true),
     scanIntervalMinutes: integer("scan_interval_minutes").notNull().default(30),
-    initialLookbackDays: integer("initial_lookback_days").notNull().default(20),
+    initialLookbackDays: integer("initial_lookback_days").notNull().default(5),
     /** full | excerpt */
     importMode: text("import_mode").notNull().default("full"),
     downloadImages: boolean("download_images").notNull().default(false),
@@ -53,8 +53,9 @@ export const newsArticlesTable = pgTable(
     sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
     importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-    /** draft | published | hidden | failed */
+    /** draft | published | hidden | archived | failed */
     status: text("status").notNull().default("draft"),
     /** full | excerpt | manual */
     publicationType: text("publication_type").notNull().default("excerpt"),

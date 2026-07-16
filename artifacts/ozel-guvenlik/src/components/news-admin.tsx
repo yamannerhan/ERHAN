@@ -52,10 +52,13 @@ type Article = {
   sourceName?: string | null;
   coverImage?: string | null;
   excerpt?: string | null;
+  content?: string | null;
+  sourceUrl?: string | null;
 };
 
 type Log = {
   id: number;
+  sourceId?: number | null;
   status: string;
   startedAt: string;
   finishedAt?: string | null;
@@ -63,7 +66,18 @@ type Log = {
   duplicateCount: number;
   failedCount: number;
   discoveredCount: number;
+  skippedCount?: number;
   errorMessage?: string | null;
+};
+
+const emptyForm = {
+  title: "",
+  excerpt: "",
+  content: "",
+  linkUrl: "",
+  coverImage: "",
+  category: "Genel Haberler",
+  status: "draft",
 };
 
 export function NewsAdminSection() {
@@ -74,14 +88,8 @@ export function NewsAdminSection() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [form, setForm] = useState({
-    title: "",
-    excerpt: "",
-    content: "",
-    linkUrl: "",
-    category: "Genel Haberler",
-    status: "draft",
-  });
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -107,8 +115,8 @@ export function NewsAdminSection() {
     setScanning(true);
     try {
       await api("/admin/news/scan-now", "POST");
-      toast({ title: "Tarama başlatıldı", description: "Birkaç dakika içinde sonuçlar güncellenir." });
-      setTimeout(() => { void load(); }, 4000);
+      toast({ title: "Tarama başlatıldı", description: "4 kaynak sırayla taranıyor." });
+      setTimeout(() => { void load(); }, 5000);
     } catch (e) {
       toast({ title: "Tarama başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     } finally {
@@ -120,7 +128,7 @@ export function NewsAdminSection() {
     setScanning(true);
     try {
       await api("/admin/news/repair", "POST");
-      toast({ title: "Onarım başladı", description: "Eksik kapak ve haber metinleri yeniden çekiliyor." });
+      toast({ title: "Onarım başladı" });
       setTimeout(() => { void load(); }, 8000);
     } catch (e) {
       toast({ title: "Onarım başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
@@ -131,19 +139,16 @@ export function NewsAdminSection() {
 
   const resetNow = async () => {
     const ok = window.confirm(
-      "Tüm otomatik haberler silinecek ve kaynaklardan sıfırdan yeniden yüklenecek.\nManuel eklediğin haberler kalır.\nDevam edilsin mi?",
+      "Tüm otomatik haberler silinecek ve 4 kaynaktan (5 gün) yeniden yüklenecek.\nManuel haberler kalır.\nDevam?",
     );
     if (!ok) return;
     setScanning(true);
     try {
       const res = await api("/admin/news/reset", "POST") as { deleted?: number; message?: string };
-      toast({
-        title: "Haberler sıfırlandı",
-        description: res.message || `${res.deleted ?? 0} haber silindi; yeniden tarama sürüyor.`,
-      });
+      toast({ title: "Sıfırlandı", description: res.message });
       setArticles([]);
-      setTimeout(() => { void load(); }, 12_000);
-      setTimeout(() => { void load(); }, 45_000);
+      setTimeout(() => { void load(); }, 15_000);
+      setTimeout(() => { void load(); }, 60_000);
     } catch (e) {
       toast({ title: "Sıfırlama başarısız", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     } finally {
@@ -161,15 +166,43 @@ export function NewsAdminSection() {
     }
   };
 
-  const createManual = async () => {
+  const startEdit = (a: Article) => {
+    setEditingId(a.id);
+    setForm({
+      title: a.title || "",
+      excerpt: a.excerpt || "",
+      content: a.content || "",
+      linkUrl: a.sourceUrl || "",
+      coverImage: a.coverImage || "",
+      category: a.category || "Genel Haberler",
+      status: a.status || "draft",
+    });
+    setTab("create");
+  };
+
+  const saveArticle = async () => {
     try {
-      await api("/admin/news", "POST", form);
-      toast({ title: "Haber eklendi" });
-      setForm({ title: "", excerpt: "", content: "", linkUrl: "", category: "Genel Haberler", status: "draft" });
+      if (editingId) {
+        await api(`/admin/news/${editingId}`, "PATCH", {
+          title: form.title,
+          excerpt: form.excerpt,
+          content: form.content,
+          coverImage: form.coverImage || null,
+          category: form.category,
+          status: form.status,
+          sourceUrl: form.linkUrl || null,
+        });
+        toast({ title: "Haber güncellendi" });
+      } else {
+        await api("/admin/news", "POST", form);
+        toast({ title: "Haber eklendi" });
+      }
+      setForm(emptyForm);
+      setEditingId(null);
       setTab("list");
       await load();
     } catch (e) {
-      toast({ title: "Eklenemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+      toast({ title: "Kaydedilemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
   };
 
@@ -178,13 +211,27 @@ export function NewsAdminSection() {
     await load();
   };
 
+  const deleteArticle = async (id: number) => {
+    if (!window.confirm("Bu haber silinsin mi?")) return;
+    try {
+      await api(`/admin/news/${id}`, "DELETE");
+      toast({ title: "Haber silindi" });
+      await load();
+    } catch (e) {
+      toast({ title: "Silinemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  const sourceName = (id?: number | null) =>
+    sources.find((s) => s.id === id)?.name || (id ? `#${id}` : "—");
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-[#131831]/90 p-5 flex flex-wrap gap-3 items-start justify-between">
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
           <p className="text-xs text-slate-400 mt-1">
-            Kaynak: ozelguvenlikajans.com/haberler/guncel · tam içerik · otomatik yayın · 20 gün · manuel haberlerde link eklenebilir
+            4 kaynak · 5 gün lookback · 30 dk tarama · 20g arşiv + 7g silme · mükerrer engeli
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -205,14 +252,20 @@ export function NewsAdminSection() {
       <div className="flex flex-wrap gap-2">
         {([
           ["list", "Tüm Haberler"],
-          ["create", "Yeni Haber"],
+          ["create", editingId ? "Haberi Düzenle" : "Yeni Haber"],
           ["sources", "Kaynaklar"],
           ["logs", "Tarama Geçmişi"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => {
+              if (id === "create" && tab !== "create") {
+                setEditingId(null);
+                setForm(emptyForm);
+              }
+              setTab(id);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === id ? "bg-sky-500 text-black" : "bg-white/10 text-slate-200"}`}
           >
             {label}
@@ -234,19 +287,20 @@ export function NewsAdminSection() {
                   <span className={a.coverImage ? "text-emerald-400" : "text-amber-400"}>
                     {a.coverImage ? "kapak ✓" : "kapak yok"}
                   </span>
-                  {" · "}
-                  <span className={(a.excerpt?.length || 0) >= 40 ? "text-emerald-400" : "text-amber-400"}>
-                    {(a.excerpt?.length || 0) >= 40 ? "özet ✓" : "özet yok"}
-                  </span>
                 </div>
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
+                <button type="button" className="text-[10px] px-2 py-1 rounded bg-white/10 text-slate-200" onClick={() => startEdit(a)}>Düzenle</button>
                 {a.status !== "published" && (
                   <button type="button" className="text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-300" onClick={() => void setStatus(a.id, "published")}>Yayınla</button>
                 )}
                 {a.status === "published" && (
-                  <button type="button" className="text-[10px] px-2 py-1 rounded bg-amber-500/20 text-amber-300" onClick={() => void setStatus(a.id, "hidden")}>Gizle</button>
+                  <button type="button" className="text-[10px] px-2 py-1 rounded bg-amber-500/20 text-amber-300" onClick={() => void setStatus(a.id, "draft")}>Taslak</button>
                 )}
+                {a.status === "published" && (
+                  <button type="button" className="text-[10px] px-2 py-1 rounded bg-slate-500/20 text-slate-300" onClick={() => void setStatus(a.id, "hidden")}>Gizle</button>
+                )}
+                <button type="button" className="text-[10px] px-2 py-1 rounded bg-rose-500/20 text-rose-300" onClick={() => void deleteArticle(a.id)}>Sil</button>
                 <a href={`/haberler/${a.slug}`} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 rounded bg-sky-500/20 text-sky-300">Aç</a>
               </div>
             </div>
@@ -258,11 +312,23 @@ export function NewsAdminSection() {
       {tab === "create" && (
         <div className="rounded-xl border border-white/10 bg-[#131831]/80 p-4 space-y-3">
           <Input placeholder="Başlık" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="bg-white/5 border-white/10" />
-          <Input placeholder="Özet" value={form.excerpt} onChange={(e) => setForm((f) => ({ ...f, excerpt: e.target.value }))} className="bg-white/5 border-white/10" />
+          <Input placeholder="Özet / açıklama" value={form.excerpt} onChange={(e) => setForm((f) => ({ ...f, excerpt: e.target.value }))} className="bg-white/5 border-white/10" />
           <Input
-            placeholder="Link (isteğe bağlı — https://...)"
+            placeholder="Kapak resmi URL (isteğe bağlı)"
+            value={form.coverImage}
+            onChange={(e) => setForm((f) => ({ ...f, coverImage: e.target.value }))}
+            className="bg-white/5 border-white/10"
+          />
+          <Input
+            placeholder="Haber linki (isteğe bağlı — https://...)"
             value={form.linkUrl}
             onChange={(e) => setForm((f) => ({ ...f, linkUrl: e.target.value }))}
+            className="bg-white/5 border-white/10"
+          />
+          <Input
+            placeholder="Kategori"
+            value={form.category}
+            onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
             className="bg-white/5 border-white/10"
           />
           <textarea
@@ -271,82 +337,68 @@ export function NewsAdminSection() {
             onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
             className="w-full min-h-[120px] rounded-lg bg-white/5 border border-white/10 p-2 text-sm text-white"
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className="rounded-lg bg-white/5 border border-white/10 text-sm px-2 py-2 text-white">
               <option value="draft">Taslak</option>
               <option value="published">Yayınla</option>
+              <option value="hidden">Gizli</option>
             </select>
-            <Button onClick={() => void createManual()}>Kaydet</Button>
+            <Button onClick={() => void saveArticle()}>{editingId ? "Güncelle" : "Kaydet"}</Button>
+            {editingId && (
+              <Button variant="secondary" onClick={() => { setEditingId(null); setForm(emptyForm); }}>İptal</Button>
+            )}
           </div>
         </div>
       )}
 
-      {tab === "sources" && sources.map((s) => (
-        <div key={s.id} className="rounded-xl border border-white/10 bg-[#131831]/80 p-4 space-y-3 text-sm text-slate-200">
-          <div className="font-bold text-white">{s.name}</div>
-          <label className="block text-xs text-slate-400">Kaynak adı</label>
-          <Input
-            defaultValue={s.name}
-            onBlur={(e) => void saveSource(s, { name: e.target.value })}
-            className="bg-white/5 border-white/10 h-8 text-xs"
-          />
-          <label className="block text-xs text-slate-400">Ana site adresi</label>
-          <Input
-            defaultValue={s.baseUrl}
-            onBlur={(e) => void saveSource(s, { baseUrl: e.target.value })}
-            className="bg-white/5 border-white/10 h-8 text-xs"
-          />
-          <label className="block text-xs text-slate-400">Liste / Sitemap URL</label>
-          <Input
-            defaultValue={s.listingUrl || ""}
-            onBlur={(e) => void saveSource(s, { listingUrl: e.target.value })}
-            className="bg-white/5 border-white/10 h-8 text-xs"
-          />
-          <div className="flex flex-wrap gap-3 text-xs">
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" checked={s.isActive} onChange={(e) => void saveSource(s, { isActive: e.target.checked })} /> Aktif
-            </label>
-            <label className="flex items-center gap-1.5">
-              Aktarım
-              <select
-                value={s.importMode}
-                onChange={(e) => void saveSource(s, { importMode: e.target.value })}
-                className="bg-white/5 border border-white/10 rounded px-1 py-0.5"
-              >
-                <option value="excerpt">Sadece özet</option>
-                <option value="full">Tam içerik</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-1.5">
-              Yayın
-              <select
-                value={s.publishMode}
-                onChange={(e) => void saveSource(s, { publishMode: e.target.value })}
-                className="bg-white/5 border border-white/10 rounded px-1 py-0.5"
-              >
-                <option value="draft">Önce taslak</option>
-                <option value="auto">Otomatik yayınla</option>
-              </select>
-            </label>
-          </div>
-          <div className="text-[10px] text-slate-500">
-            Son tarama: {s.lastScanAt ? new Date(s.lastScanAt).toLocaleString("tr-TR") : "—"}
-            {s.lastError ? ` · Hata: ${s.lastError}` : ""}
-            {s.initialScanDone ? " · İlk tarama tamam" : " · İlk tarama bekleniyor"}
-          </div>
-          <Button size="sm" onClick={() => void api(`/admin/news-sources/${s.id}/scan-now`, "POST").then(() => toast({ title: "Kaynak taraması başladı" }))}>
-            Bu kaynağı tara
-          </Button>
+      {tab === "sources" && (
+        <div className="space-y-3">
+          {sources.map((s) => (
+            <div key={s.id} className="rounded-xl border border-white/10 bg-[#131831]/80 p-4 space-y-3 text-sm text-slate-200">
+              <div className="font-bold text-white flex justify-between gap-2">
+                <span>{s.name}</span>
+                <span className={`text-[10px] ${s.isActive ? "text-emerald-400" : "text-slate-500"}`}>{s.isActive ? "aktif" : "pasif"}</span>
+              </div>
+              <div className="text-[11px] text-slate-400 break-all">{s.listingUrl || s.baseUrl}</div>
+              <div className="flex flex-wrap gap-3 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={s.isActive} onChange={(e) => void saveSource(s, { isActive: e.target.checked })} /> Aktif
+                </label>
+                <label className="flex items-center gap-1.5">
+                  Lookback (gün)
+                  <Input
+                    type="number"
+                    className="w-16 h-7 bg-white/5 border-white/10 text-xs"
+                    defaultValue={s.initialLookbackDays}
+                    onBlur={(e) => void saveSource(s, { initialLookbackDays: Number(e.target.value) || 5 })}
+                  />
+                </label>
+              </div>
+              <div className="text-[10px] text-slate-500">
+                Son tarama: {s.lastScanAt ? new Date(s.lastScanAt).toLocaleString("tr-TR") : "—"}
+                {s.lastError ? ` · Hata: ${s.lastError}` : " · Hata yok"}
+              </div>
+              <Button size="sm" onClick={() => void api(`/admin/news-sources/${s.id}/scan-now`, "POST").then(() => toast({ title: "Kaynak taraması başladı" }))}>
+                Bu kaynağı tara
+              </Button>
+            </div>
+          ))}
+          {!sources.length && <p className="text-xs text-slate-500">Kaynak yok — sunucu açılışında otomatik eklenir.</p>}
         </div>
-      ))}
+      )}
 
       {tab === "logs" && (
         <div className="space-y-2">
           {logs.map((l) => (
             <div key={l.id} className="rounded-lg border border-white/10 p-3 text-xs text-slate-300">
-              <div className="font-bold text-white">{l.status} · {new Date(l.startedAt).toLocaleString("tr-TR")}</div>
-              <div>Bulunan {l.discoveredCount} · Eklenen {l.importedCount} · Çift {l.duplicateCount} · Hata {l.failedCount}</div>
-              {l.errorMessage && <div className="text-rose-300">{l.errorMessage}</div>}
+              <div className="font-bold text-white">
+                {l.status} · {sourceName(l.sourceId)} · {new Date(l.startedAt).toLocaleString("tr-TR")}
+              </div>
+              <div>
+                Bulunan {l.discoveredCount} · Eklenen {l.importedCount} · Mükerrer {l.duplicateCount}
+                {" · "}Atlanan {l.skippedCount ?? 0} · Hata {l.failedCount}
+              </div>
+              {l.errorMessage && <div className="text-rose-300 mt-1">Kaynak hatası: {l.errorMessage}</div>}
             </div>
           ))}
           {!logs.length && <p className="text-xs text-slate-500">Henüz log yok.</p>}
