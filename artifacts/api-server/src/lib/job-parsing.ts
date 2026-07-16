@@ -623,6 +623,36 @@ export function buildListingRequirements(input: {
   ].filter(Boolean).join("\n");
 }
 
+/** Mesaj havuzu ilanı: ayıklanmış özet + temiz gövde */
+export function formatPoolListingDescription(input: {
+  text: string;
+  city?: string | null;
+  salary?: string | null;
+  phone?: string | null;
+  company?: string | null;
+  gender?: string | null;
+  workType?: string | null;
+  contactName?: string | null;
+}): string {
+  const summary: string[] = [];
+  if (input.city) summary.push(`Konum: ${input.city}`);
+  if (input.company && input.company !== "Belirtilmemiş") summary.push(`Firma / Proje: ${input.company}`);
+  if (input.salary) summary.push(`Maaş: ${input.salary}`);
+  if (input.workType) summary.push(`Çalışma: ${input.workType}`);
+  if (input.gender) summary.push(`Cinsiyet: ${input.gender}`);
+  if (input.contactName) summary.push(`İletişim: ${input.contactName}`);
+  if (input.phone) summary.push(`Telefon: ${input.phone}`);
+
+  const body = String(input.text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!summary.length) return body;
+  return `${summary.join("\n")}\n\n———\n\n${body}`.trim();
+}
+
 export function createSmartListingImage(text: string, title: string): string {
   const project = extractProjectType(text);
   const location = extractLocation(text);

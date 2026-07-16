@@ -27,7 +27,7 @@ import {
   poolMessageExternalId,
   poolMessageSourceUrl,
 } from "../services/url-pool-client";
-import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, formatPoolListingDescription } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -641,6 +641,20 @@ async function processMessage(
   const parsedCo = extractCompany(text);
   const brand = (await matchKnownCompany(parsedCo)) || matchKnownCompanyInBlob(text);
   const companyName = brand?.name ?? (parsedCo !== "Belirtilmemiş" ? parsedCo : "Belirtilmemiş");
+  const contactName = extractContactName(text);
+  const listingDescription = source.platform === "url_pool"
+    ? formatPoolListingDescription({
+      text,
+      city,
+      salary,
+      phone: phoneField,
+      company: companyName,
+      gender,
+      workType,
+      contactName,
+    })
+    : text;
+
   const listingMeta = {
     sourceId: source.id,
     messageId,
@@ -675,7 +689,7 @@ async function processMessage(
         city,
         salary,
         phone: phoneField,
-        description: text,
+        description: listingDescription,
         applicationUrl: null,
         sourceUrl,
         platform: source.platform,
@@ -691,7 +705,7 @@ async function processMessage(
       city,
       salary: salary ?? undefined,
       workType,
-      description: text,
+      description: listingDescription,
       requirements: `Cinsiyet: ${gender ?? "Belirtilmemiş"}`,
       status: "active",
       isActive: true,
