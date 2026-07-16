@@ -19,9 +19,9 @@ const FILTER_CHIPS = [
 ] as const;
 
 const SORTS = [
-  { id: "distance", label: "En yakın" },
-  { id: "salary", label: "En yüksek maaş" },
+  { id: "distance", label: "En yakın + En yeni" },
   { id: "newest", label: "En yeni" },
+  { id: "salary", label: "En yüksek maaş" },
   { id: "views", label: "En çok görüntülenen" },
 ] as const;
 

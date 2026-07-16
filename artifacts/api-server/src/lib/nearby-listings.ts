@@ -1,6 +1,7 @@
 import { db, listingsTable } from "@workspace/db";
 import { and, eq, sql, isNotNull, ne, or, ilike, gte, isNull, desc } from "drizzle-orm";
 import { haversineKm, resolveGeoFromCityText } from "./geo-centers";
+import { listingDisplayDate } from "./listing-source";
 import { logger } from "./logger";
 import { NEARBY_RADII_KM, type NearbyRadiusKm, type NearbySort } from "./nearby-types";
 import { parseCoord, parseListingCoord, parseNearbyRadius, parseNearbySort } from "./nearby-validator";
@@ -275,9 +276,16 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
     }
   }
 
+  const publishMs = (row: (typeof scored)[0]) => listingDisplayDate(row.listing).getTime();
+
   scored.sort((a, b) => {
     if (q.sort === "newest") {
-      return new Date(b.listing.createdAt).getTime() - new Date(a.listing.createdAt).getTime();
+      // En yeni → en eski; eşitlikte daha yakın önde
+      const dateDiff = publishMs(b) - publishMs(a);
+      if (dateDiff !== 0) return dateDiff;
+      const da = a.sortDistanceKm ?? Number.POSITIVE_INFINITY;
+      const db_ = b.sortDistanceKm ?? Number.POSITIVE_INFINITY;
+      return da - db_;
     }
     if (q.sort === "views") {
       return (b.listing.viewCount ?? 0) - (a.listing.viewCount ?? 0);
@@ -287,13 +295,15 @@ export async function findNearbyListings(q: NearbyQuery): Promise<{
       const sb = Number(b.listing.salaryMin ?? b.listing.salaryMax ?? 0);
       return sb - sa;
     }
+    // Varsayılan "distance": en yakından uzağa, sonra en yeniden eskiye
     if (a.sortDistanceKm == null && b.sortDistanceKm == null) {
-      return b.listing.id - a.listing.id;
+      return publishMs(b) - publishMs(a);
     }
     if (a.sortDistanceKm == null) return 1;
     if (b.sortDistanceKm == null) return -1;
     const distanceDifference = a.sortDistanceKm - b.sortDistanceKm;
-    return distanceDifference !== 0 ? distanceDifference : b.listing.id - a.listing.id;
+    if (distanceDifference !== 0) return distanceDifference;
+    return publishMs(b) - publishMs(a);
   });
 
   const total = scored.length;

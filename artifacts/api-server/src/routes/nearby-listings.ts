@@ -133,9 +133,9 @@ router.get("/listings/nearby/meta", async (req, res): Promise<void> => {
     provinces: listProvinces(),
     radii: [5, 10, 25, 50, 100],
     sorts: [
-      { id: "distance", label: "En yakın" },
-      { id: "salary", label: "En yüksek maaş" },
+      { id: "distance", label: "En yakın + En yeni" },
       { id: "newest", label: "En yeni" },
+      { id: "salary", label: "En yüksek maaş" },
       { id: "views", label: "En çok görüntülenen" },
     ],
   });
