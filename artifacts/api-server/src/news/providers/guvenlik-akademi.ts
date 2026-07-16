@@ -315,6 +315,7 @@ export const guvenlikAkademiProvider: NewsProvider = {
   },
 };
 
+/** @deprecated use getProvider from ./providers/index */
 export function getProvider(key: string): NewsProvider | null {
   if (key === "guvenlik_akademi") return guvenlikAkademiProvider;
   return null;

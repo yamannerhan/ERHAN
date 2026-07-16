@@ -42,7 +42,7 @@ export default function HaberlerPage() {
   const totalPages = Math.max(1, Math.ceil(total / 12));
 
   return (
-    <Layout>
+    <Layout headerVariant="news">
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "1rem 1rem 5rem" }}>
         <h1 style={{ display: "flex", alignItems: "center", gap: 8, color: "#0b3d6e", fontSize: "1.35rem", fontWeight: 800 }}>
           <Newspaper className="w-6 h-6 text-sky-600" /> Haberler

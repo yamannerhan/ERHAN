@@ -198,7 +198,7 @@ export function Layout({
   headerVariant = "default",
 }: {
   children: React.ReactNode;
-  headerVariant?: "default" | "listings" | "parttime" | "create-listing";
+  headerVariant?: "default" | "listings" | "parttime" | "create-listing" | "news";
 }) {
   const { user, isAdmin, isModerator } = useAuth();
   const { isLite, isDesktop } = useDisplayMode();
@@ -397,7 +397,9 @@ export function Layout({
       ? { title: "İş Arayanlar", subtitle: "Saatlik, günlük ve kısa süreli işler", searchId: "og-parttime-search", titleLower: false }
       : !isDesktop && headerVariant === "create-listing"
         ? { title: "İlan Oluştur", subtitle: "Metni yapıştır, ilanı hızlıca oluştur", searchId: "og-create-listing-search", titleLower: false }
-        : null;
+        : !isDesktop && headerVariant === "news"
+          ? { title: "Haberler", subtitle: "Güncel özel güvenlik haberleri", searchId: null as string | null, titleLower: false }
+          : null;
 
   return (
     <div className="og-app min-h-screen bg-background text-foreground">
@@ -499,12 +501,12 @@ export function Layout({
           )}
 
           <div className="og-header-actions">
-            {customHeader && (
+            {customHeader?.searchId && (
               <button
                 type="button"
                 className="og-icon-btn p-2"
                 aria-label="Ara"
-                onClick={() => document.getElementById(customHeader.searchId)?.focus()}
+                onClick={() => document.getElementById(customHeader.searchId!)?.focus()}
               >
                 <Search className="w-[18px] h-[18px]" />
               </button>

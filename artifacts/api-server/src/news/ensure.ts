@@ -13,7 +13,7 @@ export async function ensureNewsSchema(): Promise<void> {
         name TEXT NOT NULL,
         base_url TEXT NOT NULL,
         listing_url TEXT,
-        provider_key TEXT NOT NULL DEFAULT 'guvenlik_akademi',
+        provider_key TEXT NOT NULL DEFAULT 'ozel_guvenlik_ajans',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         scan_interval_minutes INTEGER NOT NULL DEFAULT 30,
         initial_lookback_days INTEGER NOT NULL DEFAULT 20,

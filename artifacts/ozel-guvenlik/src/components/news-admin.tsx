@@ -74,7 +74,14 @@ export function NewsAdminSection() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [form, setForm] = useState({ title: "", excerpt: "", content: "", category: "Genel Haberler", status: "draft" });
+  const [form, setForm] = useState({
+    title: "",
+    excerpt: "",
+    content: "",
+    linkUrl: "",
+    category: "Genel Haberler",
+    status: "draft",
+  });
 
   const load = async () => {
     setLoading(true);
@@ -158,7 +165,7 @@ export function NewsAdminSection() {
     try {
       await api("/admin/news", "POST", form);
       toast({ title: "Haber eklendi" });
-      setForm({ title: "", excerpt: "", content: "", category: "Genel Haberler", status: "draft" });
+      setForm({ title: "", excerpt: "", content: "", linkUrl: "", category: "Genel Haberler", status: "draft" });
       setTab("list");
       await load();
     } catch (e) {
@@ -176,7 +183,9 @@ export function NewsAdminSection() {
       <div className="rounded-2xl border border-white/10 bg-[#131831]/90 p-5 flex flex-wrap gap-3 items-start justify-between">
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
-          <p className="text-xs text-slate-400 mt-1">Kaynak: sitemap + detay · tam içerik · otomatik yayın · 20 gün saklama · kaynak kullanıcıya gösterilmez</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Kaynak: ozelguvenlikajans.com/haberler/guncel · tam içerik · otomatik yayın · 20 gün · manuel haberlerde link eklenebilir
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw className="w-3.5 h-3.5 mr-1" /> Yenile</Button>
@@ -186,6 +195,9 @@ export function NewsAdminSection() {
           </Button>
           <Button size="sm" variant="secondary" onClick={() => void repairNow()} disabled={scanning}>
             Kapak / Metin Onar
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => void resetNow()} disabled={scanning}>
+            Sıfırla
           </Button>
         </div>
       </div>
@@ -247,6 +259,12 @@ export function NewsAdminSection() {
         <div className="rounded-xl border border-white/10 bg-[#131831]/80 p-4 space-y-3">
           <Input placeholder="Başlık" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="bg-white/5 border-white/10" />
           <Input placeholder="Özet" value={form.excerpt} onChange={(e) => setForm((f) => ({ ...f, excerpt: e.target.value }))} className="bg-white/5 border-white/10" />
+          <Input
+            placeholder="Link (isteğe bağlı — https://...)"
+            value={form.linkUrl}
+            onChange={(e) => setForm((f) => ({ ...f, linkUrl: e.target.value }))}
+            className="bg-white/5 border-white/10"
+          />
           <textarea
             placeholder="İçerik (HTML veya düz metin)"
             value={form.content}

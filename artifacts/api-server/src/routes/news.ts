@@ -27,7 +27,11 @@ function proxyInlineImages(html: string | null | undefined): string | null {
     (_m, pre: string, url: string, post: string) => {
       try {
         const host = new URL(url).hostname.toLowerCase();
-        if (host.includes("guvenlikakademi") || host.endsWith(".wp.com")) {
+        if (
+          host.includes("ozelguvenlikajans")
+          || host.includes("guvenlikakademi")
+          || host.endsWith(".wp.com")
+        ) {
           return `${pre}${toProxiedImage(url)}${post}`;
         }
       } catch { /* keep original */ }
@@ -54,6 +58,10 @@ function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
     isFeatured: row.isFeatured,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
+    /** Manuel haberlerde adminin eklediği dış link */
+    externalUrl: row.isManual && row.sourceUrl && !row.sourceUrl.startsWith("manual://")
+      ? row.sourceUrl
+      : null,
   };
 }
 
@@ -78,7 +86,9 @@ router.get("/news/image", async (req, res) => {
     }
     const host = parsed.hostname.toLowerCase();
     const allowed =
-      host === "guvenlikakademi.com"
+      host === "ozelguvenlikajans.com"
+      || host.endsWith(".ozelguvenlikajans.com")
+      || host === "guvenlikakademi.com"
       || host.endsWith(".guvenlikakademi.com")
       || host.endsWith(".wp.com")
       || host.endsWith(".googleusercontent.com");
@@ -224,7 +234,7 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
   await ensureNewsSchema();
   const body = req.body as {
     title?: string; excerpt?: string; content?: string; coverImage?: string;
-    category?: string; status?: string; publishedAt?: string;
+    category?: string; status?: string; publishedAt?: string; linkUrl?: string; sourceUrl?: string;
   };
   const title = String(body.title || "").trim();
   if (!title) {
@@ -236,7 +246,18 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
   if (clash) slug = `${slug}-${Date.now()}`;
   const now = new Date();
   const status = body.status === "published" ? "published" : "draft";
-  const hash = sourceHash({ sourceUrl: `manual://${slug}`, title, excerpt: body.excerpt || "" });
+  const linkRaw = String(body.linkUrl || body.sourceUrl || "").trim();
+  let linkUrl: string | null = null;
+  if (linkRaw) {
+    try {
+      const u = new URL(linkRaw);
+      if (["http:", "https:"].includes(u.protocol)) linkUrl = u.toString();
+    } catch {
+      res.status(400).json({ error: "Geçersiz link adresi" });
+      return;
+    }
+  }
+  const hash = sourceHash({ sourceUrl: linkUrl || `manual://${slug}`, title, excerpt: body.excerpt || "" });
   const [row] = await db.insert(newsArticlesTable).values({
     title,
     slug,
@@ -244,6 +265,7 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
     content: body.content ? sanitizeNewsHtml(body.content) : null,
     coverImage: body.coverImage || null,
     category: body.category || "Genel Haberler",
+    sourceUrl: linkUrl,
     sourceHash: hash,
     status,
     publicationType: "manual",

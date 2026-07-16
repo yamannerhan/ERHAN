@@ -9,7 +9,7 @@ export const newsSourcesTable = pgTable(
     name: text("name").notNull(),
     baseUrl: text("base_url").notNull(),
     listingUrl: text("listing_url"),
-    providerKey: text("provider_key").notNull().default("guvenlik_akademi"),
+    providerKey: text("provider_key").notNull().default("ozel_guvenlik_ajans"),
     isActive: boolean("is_active").notNull().default(true),
     scanIntervalMinutes: integer("scan_interval_minutes").notNull().default(30),
     initialLookbackDays: integer("initial_lookback_days").notNull().default(20),

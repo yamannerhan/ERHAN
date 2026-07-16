@@ -3,7 +3,8 @@ import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { ensureNewsSchema } from "./ensure";
 import { announceNewNews } from "../lib/news-announcements";
-import { getProvider } from "./providers/guvenlik-akademi";
+import { getProvider } from "./providers";
+import { DEFAULT_BASE, DEFAULT_LISTING } from "./providers/ozel-guvenlik-ajans";
 import { cleanNewsTitle, mapPool, resolveNewsImageUrl, sleep, slugifyTr, sourceHash } from "./utils";
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
@@ -63,20 +64,36 @@ export async function purgeExpiredNews(): Promise<number> {
   return deleted.length;
 }
 
-/** Mevcut kaynak/ayarları istenen çalışma moduna çeker */
+/** Aktif kaynak: Özel Güvenlik Ajans /haberler/guncel — eski akademi kaynağını kapatır */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
+
+  // Eski Güvenlik Akademi kaynağını pasifleştir
+  await db.update(newsSourcesTable).set({
+    isActive: false,
+    updatedAt: new Date(),
+  }).where(eq(newsSourcesTable.providerKey, "guvenlik_akademi"));
+
+  // Eski akademi haberlerini temizle (manuel haberler kalır)
+  await db.delete(newsArticlesTable).where(and(
+    eq(newsArticlesTable.isManual, false),
+    or(
+      sql`${newsArticlesTable.sourceUrl} ILIKE '%guvenlikakademi%'`,
+      sql`${newsArticlesTable.sourceName} ILIKE '%akademi%'`,
+    )!,
+  ));
+
   const [row] = await db.select()
     .from(newsSourcesTable)
-    .where(eq(newsSourcesTable.providerKey, "guvenlik_akademi"))
+    .where(eq(newsSourcesTable.providerKey, "ozel_guvenlik_ajans"))
     .limit(1);
 
   if (!row) {
     await db.insert(newsSourcesTable).values({
-      name: "Güvenlik Akademi",
-      baseUrl: "https://guvenlikakademi.com",
-      listingUrl: "https://guvenlikakademi.com/sitemap.xml",
-      providerKey: "guvenlik_akademi",
+      name: "Özel Güvenlik Ajans",
+      baseUrl: DEFAULT_BASE,
+      listingUrl: DEFAULT_LISTING,
+      providerKey: "ozel_guvenlik_ajans",
       isActive: true,
       scanIntervalMinutes: 30,
       initialLookbackDays: 20,
@@ -85,9 +102,15 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       showSource: false,
       showSourceLink: false,
       publishMode: "auto",
+      initialScanDone: false,
+      lastScanAt: null,
     });
   } else {
     await db.update(newsSourcesTable).set({
+      name: "Özel Güvenlik Ajans",
+      baseUrl: DEFAULT_BASE,
+      listingUrl: DEFAULT_LISTING,
+      isActive: true,
       initialLookbackDays: 20,
       importMode: "full",
       publishMode: "auto",
@@ -95,6 +118,19 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       showSourceLink: false,
       updatedAt: new Date(),
     }).where(eq(newsSourcesTable.id, row.id));
+  }
+
+  // Otomatik haber yoksa ilk taramayı zorla (kaynak değişimi sonrası)
+  const [autoCount] = await db.select({ n: sql<number>`count(*)::int` })
+    .from(newsArticlesTable)
+    .where(eq(newsArticlesTable.isManual, false));
+  if (!autoCount?.n) {
+    await db.update(newsSourcesTable).set({
+      initialScanDone: false,
+      lastScanAt: null,
+      lastError: null,
+      updatedAt: new Date(),
+    }).where(eq(newsSourcesTable.providerKey, "ozel_guvenlik_ajans"));
   }
 
   // Eski taslak / özet otomatik haberleri hemen yayınla
@@ -107,17 +143,6 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       updated_at = NOW()
     WHERE is_manual = FALSE
       AND (status = 'draft' OR publication_type = 'excerpt')
-  `);
-
-  // Başlıklardan kaynak site adını temizle
-  await db.execute(sql`
-    UPDATE news_articles
-    SET
-      title = TRIM(REGEXP_REPLACE(title, '\s*[\|\-–—·•]\s*[Gg][üu]venlik\s*[Aa]kademi(si)?(\.com)?\s*$', '', 'g')),
-      meta_title = TRIM(REGEXP_REPLACE(COALESCE(meta_title, title), '\s*[\|\-–—·•]\s*[Gg][üu]venlik\s*[Aa]kademi(si)?(\.com)?\s*$', '', 'g')),
-      updated_at = NOW()
-    WHERE title ~* 'güvenlik\s*akademi|guvenlikakademi'
-       OR COALESCE(meta_title, '') ~* 'güvenlik\s*akademi|guvenlikakademi'
   `);
 }
 
@@ -384,7 +409,12 @@ export async function repairNewsArticles(limit = 80): Promise<{ repaired: number
     if (!needs && !stale) continue;
 
     try {
-      const provider = getProvider("guvenlik_akademi");
+      const providerKey = row.sourceUrl?.includes("ozelguvenlikajans")
+        ? "ozel_guvenlik_ajans"
+        : row.sourceUrl?.includes("guvenlikakademi")
+          ? "guvenlik_akademi"
+          : "ozel_guvenlik_ajans";
+      const provider = getProvider(providerKey);
       if (!provider) { failed += 1; continue; }
       await sleep(300);
       const article = await provider.getArticleDetail(sourceUrl, {

@@ -16,6 +16,7 @@ type Article = {
   publicationType?: string | null;
   metaTitle?: string | null;
   metaDescription?: string | null;
+  externalUrl?: string | null;
 };
 
 export default function HaberDetayPage() {
@@ -82,7 +83,7 @@ export default function HaberDetayPage() {
     || (article?.excerpt ? `<p>${article.excerpt}</p>` : "");
 
   return (
-    <Layout>
+    <Layout headerVariant="news">
       <article style={{ maxWidth: 760, margin: "0 auto", padding: "1rem 1rem 5rem" }}>
         <Link href="/haberler" style={{ color: "#0878e8", fontSize: 13, fontWeight: 700 }}>← Tüm Haberler</Link>
         {error && <p style={{ color: "#b91c1c", marginTop: 16 }}>{error}</p>}
@@ -124,6 +125,26 @@ export default function HaberDetayPage() {
                 style={{ color: "#1e293b", fontSize: 15.5, lineHeight: 1.75 }}
                 dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
+            )}
+            {article.externalUrl && (
+              <p style={{ marginTop: 20 }}>
+                <a
+                  href={article.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    color: "#0878e8",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    textDecoration: "underline",
+                  }}
+                >
+                  Habere git →
+                </a>
+              </p>
             )}
             <style>{`
               .og-news-body p { margin: 0 0 1em; }
