@@ -27,7 +27,7 @@ import {
   poolMessageExternalId,
   poolMessageSourceUrl,
 } from "../services/url-pool-client";
-import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -382,20 +382,41 @@ async function touchListingSeen(listingId: number): Promise<void> {
     .where(eq(listingsTable.id, listingId));
 }
 
-/**
- * WhatsApp gruplarında ilanlar sıkça maaş veya telefon yazılmadan yalnızca
- * "özel güvenlik görevlisi aranıyor" biçiminde paylaşılır. Bu dar ek kural,
- * bu geçerli ilanları alır; iş arayan ve sponsorlu mesajları dışarıda tutar.
- */
-function isWhatsAppSecurityJobPosting(text: string): boolean {
-  if (text.trim().length < 20 || isSponsoredPost(text) || isJobSeekerPost(text)) return false;
-  const normalized = normalizeText(text)
+function asciiTr(text: string): string {
+  return normalizeText(text)
     .replace(/ç/g, "c").replace(/ğ/g, "g").replace(/ı/g, "i")
     .replace(/ö/g, "o").replace(/ş/g, "s").replace(/ü/g, "u");
-  const securityRole = /(?:ozel\s+guvenlik|ogg\b|5188|silahli\s+guvenlik|silahsiz\s+guvenlik|guvenlik\s+(?:gorevli(?:si|leri)?|personel(?:i|leri)?|eleman(?:i|lari)?|amiri|sorumlusu)|bay\s+guvenlik|bayan\s+guvenlik)/.test(normalized);
-  const hiringSignal = /(?:araniyor|aranmaktadir|aranan|alinacak|alinacaktir|alim\s+yapilacak|personel\s+alimi|eleman\s+alimi|ekip\s+arkadasi|basvurular|basvuru\s*(?:icin|:)|ise\s+alim|istihdam|ihtiyac\s+vardir|ihtiyacimiz\s+vardir|acil\s+(?:bay|bayan|personel)|is\s+ilani)/.test(normalized);
-  const listingDetails = /(?:\b(?:maas|ucret|yevmiye|vardiya|proje|servis|yemek|sgk|ssk)\b|(?:\+?90|0)?5\d{2}[\s().-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2})/.test(normalized);
-  return securityRole && (hiringSignal || listingDetails);
+}
+
+/**
+ * WhatsApp / havuz: maaş veya telefon olmasa da "özel güvenlik …" ilanlarını alır.
+ * İş arayan + sponsorlu + temizlik vb. dışarıda kalır.
+ */
+function isWhatsAppSecurityJobPosting(text: string): boolean {
+  if (text.trim().length < 18 || isSponsoredPost(text) || isJobSeekerPost(text) || isNonSecurityStaffPosting(text)) {
+    return false;
+  }
+  const normalized = asciiTr(text);
+  const securityRole = /(?:ozel\s+guvenlik|ogg\b|5188|silahli\s+guvenlik|silahsiz\s+guvenlik|guvenlik\s+(?:gorevli(?:si|leri)?|personel(?:i|leri)?|eleman(?:i|lari)?|amiri|sorumlusu|karti|kimlik)|bay\s+guvenlik|bayan\s+guvenlik|kimlikli\s+(?:bay|bayan)?\s*guvenlik|\bguvenlik\b)/.test(normalized);
+  const hiringSignal = /(?:araniyor|aranmaktadir|aranan|alinacak|alinacaktir|alim\s+yapilacak|personel\s+alimi|eleman\s+alimi|ekip\s+arkadasi|basvurular|basvuru\s*(?:icin|:)|ise\s+alim|istihdam|ihtiyac(?:imiz)?\s+var|acil\s+(?:bay|bayan|personel)|is\s+ilani|gorevlendirilmek|calisma\s+arkadas)/.test(normalized);
+  const listingDetails = /(?:\b(?:maas|ucret|yevmiye|vardiya|proje|servis|yemek|sgk|ssk|avm|fabrika|depo|site)\b|(?:\+?90|0)?5\d{2}[\s().-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2})/.test(normalized);
+  // Esnek: güvenlik rolü + (alım VEYA detay VEYA yeterince uzun ilan metni)
+  if (securityRole && (hiringSignal || listingDetails || text.trim().length >= 55)) return true;
+  // "Güvenlik" geçmese bile açık alım + telefon + iş detayı (havuz gürültüsü az)
+  if (hiringSignal && listingDetails && text.trim().length >= 40) return true;
+  return false;
+}
+
+/** Mesaj havuzu zaten ayıklı — sadece spam / iş arayan / temizlik elensin. */
+function isUrlPoolJobPosting(text: string): boolean {
+  if (text.trim().length < 25) return false;
+  if (isSponsoredPost(text) || isJobSeekerPost(text) || isNonSecurityStaffPosting(text)) return false;
+  if (isSecurityJobPosting(text) || isWhatsAppSecurityJobPosting(text)) return true;
+  const normalized = asciiTr(text);
+  // Havuzdaki çoğu mesaj güvenlik ilanı; gevşek güvenlik + iş sinyali yeter
+  const softSecurity = /\b(?:guvenlik|ogg|5188|koruma)\b/.test(normalized);
+  const softJob = /(?:araniyor|alinacak|basvuru|maas|ucret|proje|vardiya|personel|ilan|acil|ihtiyac|kimlik)/.test(normalized);
+  return softSecurity && softJob;
 }
 
 function extractTelegramUsername(url: string): string | null {
@@ -531,14 +552,17 @@ async function processMessage(
   isInitialScan = false,
 ): Promise<ProcessResult> {
   if (!text?.trim()) return "skipped";
-  const matchesSecurityJob = isSecurityJobPosting(text)
-    || ((source.platform === "whatsapp" || source.platform === "url_pool") && isWhatsAppSecurityJobPosting(text));
+  const matchesSecurityJob = source.platform === "url_pool"
+    ? isUrlPoolJobPosting(text)
+    : (
+      isSecurityJobPosting(text)
+      || (source.platform === "whatsapp" && isWhatsAppSecurityJobPosting(text))
+    );
   if (!matchesSecurityJob) return "skipped";
 
-  if (isInitialScan && postedAt) {
-    const maxAgeMs = (source.platform === "whatsapp" || source.platform === "url_pool")
-      ? WA_INITIAL_SCAN_MS
-      : INITIAL_SCAN_MS;
+  // Havuz zaten seçili mesajlar tutuyor — yaş kesme yok. WA eski geçmişi 730g ile sınırlı.
+  if (isInitialScan && postedAt && source.platform !== "url_pool") {
+    const maxAgeMs = source.platform === "whatsapp" ? WA_INITIAL_SCAN_MS : INITIAL_SCAN_MS;
     if (Date.now() - postedAt.getTime() > maxAgeMs) return "skipped";
   }
 
@@ -547,7 +571,11 @@ async function processMessage(
   const location = (source.platform === "whatsapp" || source.platform === "url_pool")
     ? extractLocation(text)
     : (explicitLocation ?? extractLocation(text));
-  if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
+  // Havuz: şehir hedefi zorunlu değil (otomatik yayın)
+  if (
+    source.platform !== "url_pool"
+    && !matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)
+  ) {
     return "skipped";
   }
 
@@ -598,7 +626,7 @@ async function processMessage(
     sourceUrl,
     legacy: location,
   });
-  const city = explicitLocation ? resolveListingCity(explicitLocation) : v2City.city;
+  const city = (explicitLocation ? resolveListingCity(explicitLocation) : v2City.city) || "Türkiye";
   const salary = extractSalary(text);
   // Bir bot mesajı tek ilanı temsil eder; sayfa/ileti geçmişinden taşan
   // numaraların aynı ilana eklenmesini önlemek için yalnızca ilk numarayı al.
@@ -2029,9 +2057,11 @@ export async function saveUrlPoolSource(poolUrl: string): Promise<{
       name: "İlan Havuzu",
       active: true,
       status: "active",
+      autoPublish: true,
+      requireApproval: false,
       lastError: null,
     }).where(eq(sourcesTable.id, source.id));
-    source = { ...source, url: base };
+    source = { ...source, url: base, autoPublish: true, requireApproval: false };
   }
 
   if (!source) throw new Error("Havuz kaynağı oluşturulamadı");
