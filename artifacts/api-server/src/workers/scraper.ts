@@ -9,8 +9,7 @@ import {
   resetAllWhatsAppSources as resetAllWhatsAppSourcesNew,
   resetSingleWhatsAppSource as resetSingleWhatsAppSourceNew,
   kickWhatsAppDeepScan as kickWhatsAppDeepScanNew,
-} from "../services/whatsapp";
-import { selectedWhatsAppSources } from "../services/whatsapp-core";
+} from "../modules/whatsapp";
 import { telegramSessionsTable } from "@workspace/db/schema";
 import {
   elemanCityCount,
@@ -1704,9 +1703,11 @@ async function runScraperCycleInner(force = false): Promise<void> {
     logger.info("scraper: Telegram tarama duraklatıldı (admin)");
   }
 
-  const whatsappSources = botPlatformEnabled("whatsapp") ? selectedWhatsAppSources(sources) : [];
-  if (whatsappSources.length > 0) {
-    await scanWhatsAppSources(whatsappSources, force);
+  if (botPlatformEnabled("whatsapp")) {
+    const whatsappSources = sources.filter((s) => s.platform === "whatsapp" && s.active);
+    if (whatsappSources.length > 0 || isWhatsAppReady() || hasWhatsAppLocalSession()) {
+      await scanWhatsAppSources(whatsappSources, force);
+    }
   }
 
   // Eleman taraması Telegram backfill durumundan bağımsız ilerler.

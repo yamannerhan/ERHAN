@@ -1,7 +1,6 @@
 import {
   db,
   listingsTable,
-  sourcesTable,
   importedPostsTable,
   whatsappProcessedMessagesTable,
   whatsappSourcesTable,
@@ -19,44 +18,11 @@ import {
 import { createDuplicateHash } from "../../lib/job-dedup";
 import { announceNewListing } from "../../lib/listing-announcements";
 import { logger } from "../../lib/logger";
-import { classifySecurityJob } from "./classifier";
-import { contentHash } from "./content-hash";
-import { addDays, unixSecondsToDate } from "./checkpoint";
-import { LISTING_TTL_DAYS, type ProcessMessageResult } from "./types";
-import { maskChatId } from "./phone";
+import { classifySecurityJob } from "./whatsapp.classifier.service";
+import { addDays, contentHash, maskChatId, unixSecondsToDate } from "./whatsapp.client";
+import { isMessageProcessed, markProcessed } from "./whatsapp.repository";
+import { EXPIRE_DAYS, type ProcessResult } from "./whatsapp.types";
 
-export async function ensureLegacySource(params: {
-  chatId: string;
-  chatName: string;
-  sessionId: string;
-}): Promise<number> {
-  const [existing] = await db.select()
-    .from(sourcesTable)
-    .where(and(eq(sourcesTable.platform, "whatsapp"), eq(sourcesTable.url, params.chatId)))
-    .limit(1);
-  if (existing) {
-    await db.update(sourcesTable)
-      .set({ name: params.chatName, active: true, status: "active" })
-      .where(eq(sourcesTable.id, existing.id));
-    return existing.id;
-  }
-  const [created] = await db.insert(sourcesTable).values({
-    name: params.chatName,
-    platform: "whatsapp",
-    url: params.chatId,
-    active: true,
-    status: "active",
-    autoPublish: true,
-    requireApproval: false,
-    checkInterval: 10,
-  }).returning();
-  return created.id;
-}
-
-/**
- * WhatsApp mesajını işle: classifier → dedup → listings yayını.
- * Yayın tarihi = mesaj tarihi; expires_at = mesaj + 15 gün.
- */
 export async function processWhatsAppMessage(params: {
   sessionId: string;
   sourceId: number;
@@ -66,26 +32,21 @@ export async function processWhatsAppMessage(params: {
   messageId: string;
   timestampSec: number;
   text: string;
-}): Promise<{ result: ProcessMessageResult; listingId?: number }> {
+}): Promise<{ result: ProcessResult; listingId?: number }> {
   const {
     sessionId, sourceId, chatId, chatName, legacySourceId,
     messageId, timestampSec, text,
   } = params;
 
-  const [already] = await db.select({ id: whatsappProcessedMessagesTable.id })
-    .from(whatsappProcessedMessagesTable)
-    .where(and(
-      eq(whatsappProcessedMessagesTable.sessionId, sessionId),
-      eq(whatsappProcessedMessagesTable.chatId, chatId),
-      eq(whatsappProcessedMessagesTable.messageId, messageId),
-    ))
-    .limit(1);
-  if (already) return { result: "duplicate" };
+  if (await isMessageProcessed(sessionId, chatId, messageId)) {
+    return { result: "duplicate" };
+  }
 
   const body = String(text ?? "").trim();
   if (!body) {
     await markProcessed({
-      sessionId, chatId, messageId, timestampSec, result: "skipped", contentHash: null, jobPostingId: null,
+      sessionId, chatId, messageId, timestampSec, result: "skipped",
+      contentHash: null, jobPostingId: null,
     });
     return { result: "skipped" };
   }
@@ -134,7 +95,7 @@ export async function processWhatsAppMessage(params: {
   }
 
   const publishedAt = unixSecondsToDate(timestampSec);
-  const expiresAt = addDays(publishedAt, LISTING_TTL_DAYS);
+  const expiresAt = addDays(publishedAt, EXPIRE_DAYS);
   const now = new Date();
   const title = extractTitle(body);
   const location = extractLocation(body);
@@ -206,14 +167,12 @@ export async function processWhatsAppMessage(params: {
         contentHash: hash,
       }).onConflictDoNothing();
 
-      await tx.update(whatsappSourcesTable)
-        .set({
-          latestScannedMessageId: messageId,
-          latestScannedTimestamp: timestampSec,
-          latestScannedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(whatsappSourcesTable.id, sourceId));
+      await tx.update(whatsappSourcesTable).set({
+        latestScannedMessageId: messageId,
+        latestScannedTimestamp: timestampSec,
+        latestScannedAt: now,
+        updatedAt: now,
+      }).where(eq(whatsappSourcesTable.id, sourceId));
 
       return listing.id;
     });
@@ -229,54 +188,11 @@ export async function processWhatsAppMessage(params: {
       chatId: maskChatId(chatId),
       operation: "publish_listing",
       postingCount: 1,
-      checkpointTimestamp: timestampSec,
     }, "wa: listing published");
 
     return { result: "published", listingId };
   } catch (err) {
-    logger.error({
-      err,
-      sessionId,
-      sourceId,
-      chatId: maskChatId(chatId),
-      operation: "publish_listing",
-    }, "wa: publish failed");
+    logger.error({ err, sessionId, sourceId, chatId: maskChatId(chatId) }, "wa: publish failed");
     return { result: "error" };
   }
-}
-
-async function markProcessed(params: {
-  sessionId: string;
-  chatId: string;
-  messageId: string;
-  timestampSec: number;
-  result: ProcessMessageResult;
-  contentHash: string | null;
-  jobPostingId: number | null;
-}): Promise<void> {
-  await db.insert(whatsappProcessedMessagesTable).values({
-    sessionId: params.sessionId,
-    chatId: params.chatId,
-    messageId: params.messageId,
-    messageTimestamp: params.timestampSec,
-    result: params.result,
-    jobPostingId: params.jobPostingId,
-    contentHash: params.contentHash,
-  }).onConflictDoNothing();
-}
-
-/** Checkpoint yalnızca başarılı işlendikten sonra ilerletilir (publish/skip/dup). */
-export async function advanceCheckpoint(params: {
-  sourceId: number;
-  messageId: string;
-  timestampSec: number;
-}): Promise<void> {
-  await db.update(whatsappSourcesTable)
-    .set({
-      latestScannedMessageId: params.messageId,
-      latestScannedTimestamp: params.timestampSec,
-      latestScannedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(whatsappSourcesTable.id, params.sourceId));
 }

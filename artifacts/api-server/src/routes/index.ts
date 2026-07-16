@@ -21,6 +21,7 @@ import companyProfilesRouter from "./company-profiles";
 import locationAdminRouter from "./location-admin";
 import moderatorRouter from "./moderator";
 import publisherVerifyRouter from "./publisher-verify";
+import { whatsappRouter } from "../modules/whatsapp";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,7 @@ router.use("/moderator", moderatorRouter);
 router.use(supportRouter);
 router.use(parttimeRouter);
 router.use(sourcesRouter);
+router.use(whatsappRouter);
 router.use(pendingJobsRouter);
 router.use(telegramAuthRouter);
 router.use(pushRouter);

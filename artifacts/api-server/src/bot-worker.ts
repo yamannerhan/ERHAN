@@ -34,7 +34,7 @@ try {
 }
 
 const telegram = await import("./services/telegram-client");
-const whatsapp = await import("./services/whatsapp");
+const whatsapp = await import("./modules/whatsapp");
 const scraper = await import("./workers/scraper");
 
 if (platforms.includes("telegram")) await telegram.initTelegramClient();
