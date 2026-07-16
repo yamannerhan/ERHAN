@@ -1,17 +1,23 @@
 export type ConnectionMode = "qr" | "pairing_code";
 
-/** Ham session state (iç kullanım). */
+/** Ham session state (iç kullanım + panel). */
 export type WhatsAppSessionStatus =
   | "IDLE"
+  | "INITIALIZING"
+  | "WAITING_FOR_PAIRING"
+  | "PAIRING_CODE_READY"
+  | "AUTHENTICATED"
+  | "CONNECTED"
+  | "DISCONNECTED"
+  | "ERROR"
+  | "RATE_LIMITED"
+  /** Geriye uyum */
   | "STARTING"
   | "QR_READY"
   | "PAIRING_READY"
-  | "AUTHENTICATED"
-  | "CONNECTED"
   | "SYNCING"
   | "READY"
-  | "FAILED"
-  | "DISCONNECTED";
+  | "FAILED";
 
 /** Panel: bağlantı durumu — tarama/keşiften bağımsız. */
 export type ConnectionStatus =
@@ -20,7 +26,8 @@ export type ConnectionStatus =
   | "AUTHENTICATED"
   | "CONNECTED"
   | "DISCONNECTED"
-  | "FAILED";
+  | "FAILED"
+  | "RATE_LIMITED";
 
 /** Panel: grup keşfi — bağlantı CONNECTED iken LOADING olabilir. */
 export type GroupDiscoveryStatus =
@@ -76,7 +83,6 @@ export interface ClassifierResult {
 export interface WhatsAppStatusDto {
   status: WhatsAppSessionStatus;
   connectionStatus: ConnectionStatus;
-  /** Geriye uyum: groupDiscoveryStatus ile aynı anlam */
   syncStatus: GroupDiscoveryStatus;
   groupDiscoveryStatus: GroupDiscoveryStatus;
   scanStatus: ScanStatus;
@@ -92,6 +98,8 @@ export interface WhatsAppStatusDto {
   lastSyncError: string | null;
   groupDiscoveryMessage: string | null;
   error: string | null;
+  errorCode: string | null;
+  uiStatus: string;
   updatedAt: string;
   starting: boolean;
   pairing: boolean;
@@ -111,6 +119,7 @@ export interface WhatsAppStatusDto {
   chromiumVersion: string | null;
   browserOpen: boolean;
   pairingMethodAvailable: boolean;
+  pairingCooldownSeconds: number;
   wwebjsVersion: string;
   puppeteerVersion: string;
   sessionId: string;
@@ -122,7 +131,7 @@ export interface WhatsAppStatusDto {
 }
 
 /** Varsayılanlar — Railway Variables zorunlu değil. */
-export const SESSION_ID = process.env.WHATSAPP_SESSION_ID?.trim() || "main";
+export const SESSION_ID = process.env.WHATSAPP_SESSION_ID?.trim() || "main-whatsapp";
 export const HISTORY_DAYS = Math.max(1, Number(process.env.WHATSAPP_HISTORY_DAYS ?? 15));
 export const SCAN_INTERVAL_MS = Math.max(60_000, Number(process.env.WHATSAPP_SCAN_INTERVAL_MS ?? 10 * 60 * 1000));
 export const EXPIRE_DAYS = Math.max(1, Number(process.env.WHATSAPP_EXPIRE_DAYS ?? 15));
@@ -132,3 +141,5 @@ export const MAX_INCREMENTAL_PAGES = 40;
 export const PROTOCOL_TIMEOUT_MS = Math.max(60_000, Number(process.env.WHATSAPP_PROTOCOL_TIMEOUT_MS ?? 300_000));
 /** Tek getChats çağrısı timeout — bağlantıyı FAILED yapmaz. */
 export const GET_CHATS_TIMEOUT_MS = 60_000;
+export const PAIRING_COOLDOWN_MS = 60_000;
+export const PAIRING_WAIT_MS = 90_000;

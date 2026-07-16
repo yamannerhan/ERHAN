@@ -23,11 +23,16 @@ function mapError(error: unknown): { status: number; code: string; message: stri
   if (error instanceof WhatsAppModuleError || error instanceof WhatsAppStartError) {
     return { status: error.statusCode, code: error.code, message: error.message };
   }
+  const msg = error instanceof Error ? error.message.split("\n")[0]?.slice(0, 180) : String(error);
   return {
     status: 500,
-    code: "UNEXPECTED_ERROR",
-    message: error instanceof Error ? error.message : String(error),
+    code: "UNKNOWN_ERROR",
+    message: msg || "Bilinmeyen hata",
   };
+}
+
+function fail(res: import("express").Response, status: number, code: string, message: string) {
+  res.status(status).json({ success: false, code, message, error: message });
 }
 
 router.get("/admin/whatsapp/status", authMiddleware, requireAdmin, async (_req, res) => {
@@ -46,11 +51,11 @@ router.post("/admin/whatsapp/reload-chats", authMiddleware, requireAdmin, async 
   res.setHeader("Cache-Control", "no-store");
   try {
     if (!WhatsAppManager.getActiveClient()) {
-      res.status(503).json({ success: false, error: "WhatsApp client yok", code: "CLIENT_NOT_AVAILABLE" });
+      fail(res, 503, "CLIENT_NOT_READY", "WhatsApp client yok");
       return;
     }
     if (!WhatsAppManager.isConnected()) {
-      res.status(503).json({ success: false, error: "WhatsApp bağlı değil", code: "NOT_CONNECTED" });
+      fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil");
       return;
     }
     await WhatsAppManager.refreshGroups();
@@ -62,7 +67,7 @@ router.post("/admin/whatsapp/reload-chats", authMiddleware, requireAdmin, async 
     });
   } catch (error) {
     const m = mapError(error);
-    res.status(m.status).json({ success: false, error: m.message, code: m.code });
+    fail(res, m.status, m.code, m.message);
   }
 });
 
@@ -72,13 +77,18 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
   try {
     const parsed = parseStartWhatsApp(req.body ?? {});
     if (!parsed.ok) {
-      res.status(400).json({ success: false, error: parsed.message, code: "VALIDATION" });
+      fail(res, 400, "INVALID_PHONE", parsed.message);
       return;
     }
     const phoneNumber = parsed.data.phoneNumber?.trim();
     const mode = parsed.data.mode ?? (phoneNumber ? "pairing_code" : "qr");
 
-    logger.info({ requestId, mode, endpoint: "/admin/whatsapp/start" }, "wa: start request");
+    logger.info({
+      requestId,
+      mode,
+      phoneMasked: phoneNumber ? "***" : null,
+      endpoint: "/admin/whatsapp/start",
+    }, "wa: start request");
 
     const st = mode === "pairing_code"
       ? await WhatsAppManager.connectPairing(phoneNumber || "")
@@ -91,15 +101,16 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
       success: true,
       mode,
       status: st.status,
+      code: null,
       message: mode === "pairing_code"
         ? (pairingCode
-          ? "Onay kodu hazır. WhatsApp uygulamanızdan girin."
-          : "WhatsApp bağlantısı hazırlanıyor.")
+          ? "Eşleştirme kodu hazır. WhatsApp uygulamanızdan girin."
+          : "Bağlantı hazırlanıyor.")
         : (qr
           ? "QR kodu hazır. WhatsApp → Bağlı Cihazlar → Cihaz bağla."
           : st.ready || st.connected
             ? "WhatsApp zaten bağlı."
-            : "WhatsApp bağlantısı hazırlanıyor."),
+            : "Bağlantı hazırlanıyor."),
       phase: st.status.toLowerCase(),
       pairingCode,
       expiresInSeconds: pairingCode ? 180 : null,
@@ -109,11 +120,37 @@ router.post("/admin/whatsapp/start", authMiddleware, requireAdmin, async (req, r
       ready: st.ready,
       chatCount: st.chatCount,
       groupCount: st.groupCount,
+      uiStatus: st.uiStatus,
+      phoneMasked: st.phoneMasked,
     });
   } catch (error) {
     const m = mapError(error);
     logger.error({ err: error, requestId, code: m.code }, "wa: start failed");
-    res.status(m.status).json({ success: false, error: m.message, code: m.code });
+    fail(res, m.status, m.code, m.message);
+  }
+});
+
+/** Ayrı pairing-code endpoint — aynı akış */
+router.post("/admin/whatsapp/pairing-code", authMiddleware, requireAdmin, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const phone = String((req.body as { phoneNumber?: string })?.phoneNumber ?? "").trim();
+    const st = await WhatsAppManager.connectPairing(phone);
+    res.json({
+      success: true,
+      pairingCode: st.pairingCode,
+      status: st.status,
+      uiStatus: st.uiStatus,
+      phoneMasked: st.phoneMasked,
+      expiresInSeconds: st.pairingCode ? 180 : null,
+      message: st.pairingCode
+        ? "Eşleştirme kodu hazır."
+        : "Kod bekleniyor.",
+    });
+  } catch (error) {
+    const m = mapError(error);
+    logger.error({ err: error, code: m.code }, "wa: pairing-code failed");
+    fail(res, m.status, m.code, m.message);
   }
 });
 
@@ -124,34 +161,25 @@ router.post("/admin/whatsapp/stop", authMiddleware, requireAdmin, async (_req, r
 
 router.post("/admin/whatsapp/reset-session", authMiddleware, requireAdmin, async (_req, res) => {
   await WhatsAppManager.resetSession();
-  res.json({ success: true, message: "WhatsApp oturumu sıfırlandı. Yeniden bağlanın." });
+  res.json({
+    success: true,
+    message: "WhatsApp oturumu ve önbellek sıfırlandı. Yeniden bağlanabilirsiniz.",
+    ...WhatsAppManager.getStatus(),
+  });
 });
 
 router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, res) => {
   const activeClient = WhatsAppManager.getActiveClient();
   const st = WhatsAppManager.getStatus();
   if (!activeClient) {
-    res.status(503).json({
-      error: "WhatsApp client yok",
-      code: "CLIENT_NOT_AVAILABLE",
-      connectionStatus: st.connectionStatus,
-      groupDiscoveryStatus: st.groupDiscoveryStatus,
-      clientInstanceId: st.clientInstanceId,
-    });
+    fail(res, 503, "CLIENT_NOT_READY", "WhatsApp client yok");
     return;
   }
   if (!WhatsAppManager.isConnected()) {
-    res.status(503).json({
-      error: "WhatsApp bağlı değil",
-      code: "NOT_CONNECTED",
-      connectionStatus: st.connectionStatus,
-      groupDiscoveryStatus: st.groupDiscoveryStatus,
-      clientInstanceId: st.clientInstanceId,
-    });
+    fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil");
     return;
   }
 
-  // READY şartı yok — CONNECTED iken keşif başlar / cache döner
   const groups = await listWhatsAppGroups();
   const diagnostics = await getDiscoveryDiagnostics();
   const status = WhatsAppManager.getStatus();
@@ -185,7 +213,7 @@ router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, 
 router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (req, res) => {
   const parsed = parseAddSource(req.body ?? {});
   if (!parsed.ok) {
-    res.status(400).json({ error: parsed.message });
+    fail(res, 400, "VALIDATION", parsed.message);
     return;
   }
   try {
@@ -200,14 +228,14 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
         : "Bu grup zaten kayıtlı. Tarama devam ediyor.",
     });
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
   }
 });
 
 router.post("/admin/whatsapp/sources/save", authMiddleware, requireAdmin, async (req, res) => {
   const parsed = parseSaveSources(req.body ?? {});
   if (!parsed.ok) {
-    res.status(400).json({ error: parsed.message });
+    fail(res, 400, "VALIDATION", parsed.message);
     return;
   }
   try {
@@ -219,21 +247,21 @@ router.post("/admin/whatsapp/sources/save", authMiddleware, requireAdmin, async 
       message: `${results.length} grup kaydedildi. İlk tarama kuyruğa alındı.`,
     });
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
   }
 });
 
 router.delete("/admin/whatsapp/sources/:id", authMiddleware, requireAdmin, async (req, res) => {
   const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Geçersiz ID" });
+    fail(res, 400, "VALIDATION", "Geçersiz ID");
     return;
   }
   try {
     const { name } = await disableWhatsAppSource(id);
     res.json({ success: true, message: `«${name}» listeden çıkarıldı.` });
   } catch (e) {
-    res.status(404).json({ error: e instanceof Error ? e.message : "Kaynak bulunamadı" });
+    fail(res, 404, "UNKNOWN_ERROR", e instanceof Error ? e.message : "Kaynak bulunamadı");
   }
 });
 
@@ -245,7 +273,7 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
   try {
     const result = await triggerScanNow();
     if (!result.ready) {
-      res.status(503).json({ error: "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın." });
+      fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil. Önce QR veya onay kodu ile bağlanın.");
       return;
     }
     const msg = result.mode === "initial"
@@ -264,14 +292,14 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
       message: msg,
     });
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
   }
 });
 
 router.post("/admin/whatsapp/reset", authMiddleware, requireAdmin, async (_req, res) => {
   try {
     if (!WhatsAppManager.isReady()) {
-      res.status(503).json({ error: "WhatsApp bağlı değil. Önce bağlanın." });
+      fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil. Önce bağlanın.");
       return;
     }
     const result = await resetAllWhatsAppSources();
@@ -282,14 +310,14 @@ router.post("/admin/whatsapp/reset", authMiddleware, requireAdmin, async (_req, 
       message: `${result.deletedListings} WhatsApp ilanı silindi. ${result.pendingGroups} grup 15 günden temiz taranacak.`,
     });
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
   }
 });
 
 router.post("/admin/whatsapp/sources/:id/reset", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
-    if (!Number.isFinite(id)) { res.status(400).json({ error: "Geçersiz id" }); return; }
+    if (!Number.isFinite(id)) { fail(res, 400, "VALIDATION", "Geçersiz id"); return; }
     const result = await resetWhatsAppSource(id);
     res.json({
       success: true,
@@ -297,7 +325,7 @@ router.post("/admin/whatsapp/sources/:id/reset", authMiddleware, requireAdmin, a
       message: `${result.deletedListings} ilan silindi. Bu grup 15 günden yeniden taranıyor.`,
     });
   } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
   }
 });
 

@@ -3353,6 +3353,17 @@ function PushNotificationsSection({ apiCall, toast }: { apiCall: (path: string, 
   );
 }
 
+function sanitizeWaUserMessage(raw: string | null | undefined, code?: string | null): string {
+  const text = String(raw ?? "").trim();
+  if (!text) return "";
+  if (/invariant violation|getUserPrefsTable|allUserPrefsIdb|getStorage|static\.whatsapp\.net|\n\s*at\s+/i.test(text)) {
+    if (code === "CACHE_PROFILE_CORRUPTED") return "WhatsApp oturum önbelleği bozuldu ve yeniden hazırlanıyor.";
+    if (code === "PAIRING_RATE_LIMITED") return "Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.";
+    return "Bağlantı hatası. Oturumu sıfırlayıp tekrar deneyin.";
+  }
+  return text.split("\n")[0]?.slice(0, 180) || "";
+}
+
 function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -3363,6 +3374,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
   const [sessionState, setSessionState] = useState<string>("IDLE");
   const [connectionStatus, setConnectionStatus] = useState<string>("IDLE");
   const [syncStatus, setSyncStatus] = useState<string>("NOT_STARTED");
+  const [uiStatus, setUiStatus] = useState<string>("");
+  const [phoneMasked, setPhoneMasked] = useState<string | null>(null);
+  const [pairingCooldown, setPairingCooldown] = useState(0);
   const [chatCount, setChatCount] = useState(0);
   const [groupCountUi, setGroupCountUi] = useState(0);
   const [whatsappState, setWhatsappState] = useState<string | null>(null);
@@ -3417,6 +3431,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         sessionId?: string;
         clientInstanceId?: string | null;
         updatedAt?: string;
+        uiStatus?: string;
+        phoneMasked?: string | null;
+        pairingCooldownSeconds?: number;
+        errorCode?: string | null;
       };
       if (trackedSessionId && nextStatus.sessionId && nextStatus.sessionId !== trackedSessionId) {
         setPairingCode(null);
@@ -3448,7 +3466,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : authPending ? "AUTHENTICATED" : "IDLE"));
       setSyncStatus(discovery || (discoveryReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
       setWhatsappState(nextStatus.whatsappState ?? null);
-      setLastSyncError(nextStatus.lastSyncError ?? nextStatus.groupDiscoveryMessage ?? null);
+      setLastSyncError(sanitizeWaUserMessage(nextStatus.lastSyncError ?? nextStatus.groupDiscoveryMessage, nextStatus.errorCode));
+      setUiStatus(nextStatus.uiStatus || "");
+      setPhoneMasked(nextStatus.phoneMasked ?? null);
+      setPairingCooldown(nextStatus.pairingCooldownSeconds ?? 0);
       setChatCount(nextStatus.chatCount ?? 0);
       setGroupCountUi(nextStatus.groupCount ?? 0);
       const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
@@ -3464,30 +3485,23 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         return prev;
       });
       const userFacingError = (() => {
-        if (waConnected && discoveryReady) return "";
-        if (waConnected && (discovery === "LOADING" || discovery === "RETRYING" || discovery === "NOT_STARTED")) {
-          return nextStatus.groupDiscoveryMessage
-            || "WhatsApp bağlı. Gruplar yükleniyor.";
-        }
-        if (waConnected && discovery === "FAILED") {
-          return nextStatus.groupDiscoveryMessage
-            || "WhatsApp bağlı. Grup listesi alınamadı — «Sohbetleri Yeniden Yükle» deneyin.";
-        }
-        if (waConnected) return "WhatsApp bağlı.";
-        if (authPending) return "Onay kodu kabul edildi. WhatsApp bağlanıyor — telefonu yeniden bağlamayın.";
+        if (nextStatus.uiStatus) return nextStatus.uiStatus;
+        if (waConnected && discoveryReady) return "Bağlandı";
+        if (waConnected) return "Bağlandı";
+        if (authPending) return "Telefonda kodu girin";
         if (nextStatus.pairingCode || state === "PAIRING_READY" || state === "PAIRING_CODE_READY") {
-          return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
+          return "Eşleştirme kodu hazır";
         }
-        if (state === "STARTING" || state === "PAIRING_CODE_REQUESTING" || nextStatus.starting) {
-          return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
+        if (state === "WAITING_FOR_PAIRING") return "Kod bekleniyor";
+        if (state === "RATE_LIMITED" || nextStatus.errorCode === "PAIRING_RATE_LIMITED") {
+          return "Çok fazla deneme yapıldı";
         }
-        if (state === "QR_READY") return "QR kodu hazır.";
-        if (realFailure) return nextStatus.error || "Bağlantı hatası.";
-        const raw = nextStatus.error ?? "";
-        if (/session|INITIALIZING|requestId|uuid|ozelguvenlik/i.test(raw)) {
-          return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
+        if (state === "STARTING" || state === "INITIALIZING" || nextStatus.starting) {
+          return "Bağlantı hazırlanıyor";
         }
-        return raw;
+        if (state === "QR_READY") return "Bağlantı hazırlanıyor";
+        if (realFailure || state === "DISCONNECTED") return "Bağlantı kesildi";
+        return sanitizeWaUserMessage(nextStatus.error, nextStatus.errorCode);
       })();
       setErrorLog(userFacingError);
       if (waConnected) setQrStatus("ready");
@@ -3525,7 +3539,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         if (src.totals) setTotals(src.totals);
       } catch { /* ignore */ }
     } catch (error) {
-      setErrorLog(error instanceof Error ? error.message : "Bilinmeyen hata");
+      const typed = error as Error & { code?: string };
+      setErrorLog(sanitizeWaUserMessage(typed.message, typed.code) || "Bağlantı hatası");
       setQrStatus("failed");
     }
   };
@@ -3574,17 +3589,25 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
 
   const connect = async (usePairing: boolean) => {
     if (loading) return;
+    if (usePairing && pairingCooldown > 0) {
+      toast({
+        title: "Çok fazla deneme",
+        description: `${pairingCooldown} sn bekleyip tekrar deneyin.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setLoading(true);
     try {
       if (usePairing && !form.phoneNumber.trim()) {
-        toast({ title: "Telefon numarası gerekli", description: "Örn: 905xxxxxxxxx", variant: "destructive" });
+        toast({ title: "Telefon numarası gerekli", description: "Örn: 05xx… veya 905xx…", variant: "destructive" });
         return;
       }
       setQrStatus("connecting");
       setPairingMode(usePairing);
       setPairingCode(null);
       setQr(null);
-      setErrorLog("WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.");
+      setErrorLog("Bağlantı hazırlanıyor");
       const body = usePairing
         ? { mode: "pairing_code", phoneNumber: form.phoneNumber.trim() }
         : { mode: "qr" };
@@ -3595,11 +3618,14 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         mode?: string;
         message?: string;
         qr?: string | null;
+        uiStatus?: string;
+        phoneMasked?: string | null;
       };
       if (startResult.mode === "pairing_code" || usePairing) {
         setPairingMode(true);
         setQr(null);
         if (startResult.pairingCode) setPairingCode(startResult.pairingCode);
+        if (startResult.phoneMasked) setPhoneMasked(startResult.phoneMasked);
       } else {
         setPairingMode(false);
         setPairingCode(null);
@@ -3607,32 +3633,60 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       }
       await refresh();
       toast({
-        title: usePairing ? "Onay kodu" : "QR bağlantısı",
-        description: startResult.message
+        title: usePairing ? "Eşleştirme kodu" : "QR bağlantısı",
+        description: sanitizeWaUserMessage(startResult.message) || startResult.uiStatus
           || (usePairing
-            ? "Onay kodu hazır. WhatsApp uygulamanızdan girin."
+            ? "Eşleştirme kodu hazır. WhatsApp uygulamanızdan girin."
             : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut"),
       });
     } catch (error) {
       const typed = error as Error & { status?: number; code?: string };
-      // 409 / SESSION_STARTING: genel hata gösterme — mevcut durumu sorgula
-      if (typed.status === 409 || typed.code === "SESSION_STARTING") {
+      if (typed.status === 409 || typed.code === "CLIENT_INITIALIZING" || typed.code === "PAIRING_IN_PROGRESS") {
         await refresh().catch(() => undefined);
         toast({
           title: "Bağlantı devam ediyor",
-          description: "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.",
+          description: "Bağlantı hazırlanıyor. Lütfen bekleyin.",
+        });
+        return;
+      }
+      if (typed.status === 429 || typed.code === "PAIRING_RATE_LIMITED") {
+        await refresh().catch(() => undefined);
+        toast({
+          title: "Çok fazla deneme",
+          description: "Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.",
+          variant: "destructive",
         });
         return;
       }
       await refresh().catch(() => undefined);
-      const safeMsg = (typed.message || "")
-        .replace(/\(kod=[^)]+\)/gi, "")
-        .replace(/\(istek=[^)]+\)/gi, "")
-        .replace(/session\s+\S+/gi, "")
-        .trim();
       toast({
         title: "WhatsApp bağlantı hatası",
-        description: safeMsg || "Bağlantı başlatılamadı. Tekrar deneyin.",
+        description: sanitizeWaUserMessage(typed.message, typed.code) || "Bağlantı başlatılamadı.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetSession = async () => {
+    if (loading) return;
+    if (!window.confirm("WhatsApp oturumu ve önbellek silinecek. Yeniden eşleştirme gerekir. Devam?")) return;
+    setLoading(true);
+    try {
+      await apiCall("/admin/whatsapp/reset-session", "POST");
+      setConnected(false);
+      setQr(null);
+      setPairingCode(null);
+      setPairingMode(false);
+      setErrorLog("Bağlantı hazırlanıyor");
+      toast({ title: "Oturum sıfırlandı", description: "Temiz oturum hazır. Tekrar bağlanın." });
+      await refresh();
+    } catch (error) {
+      const typed = error as Error & { code?: string };
+      toast({
+        title: "Sıfırlama başarısız",
+        description: sanitizeWaUserMessage(typed.message, typed.code),
         variant: "destructive",
       });
     } finally {
@@ -3766,18 +3820,26 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• <strong className="text-slate-200">Sıfırla / Tekrar Tara:</strong> WA ilanlarını siler, gidebildiği kadar çeker (sitede 15 gün kalır)</div>
+              <div>• <strong className="text-slate-200">Sıfırla / Tekrar Tara:</strong> client’ı kapatır, oturum + cache siler, temiz eşleştirme hazırlar</div>
+              <div>• <strong className="text-slate-200">İlanları Sıfırla:</strong> WA ilanlarını siler, grupları yeniden tarar</div>
               <div>• <strong className="text-slate-200">Şimdi Tara:</strong> silmez — bitmemiş geçmişi devam / bittiyse sadece yeni mesaj</div>
-              <div>• İlk tarama bitince her <strong className="text-slate-200">30 dk</strong> tüm grupları son mesaj saatinden itibaren sırayla tarar</div>
-              <div>• Çift ilan: yalnızca <strong className="text-slate-200">aynı metnin tamamı</strong> eşleşirse</div>
+              <div>• Durumu Yenile yalnızca durumu okur — yeni client açmaz</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void connect(false)} disabled={loading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50">
               {loading && !pairingMode ? "Bağlanıyor…" : "QR ile Bağlan"}
             </button>
-            <button onClick={() => void connect(true)} disabled={loading} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50">
-              {loading && pairingMode ? "Kod isteniyor…" : "Onay Kodu ile Bağlan"}
+            <button
+              onClick={() => void connect(true)}
+              disabled={loading || pairingCooldown > 0}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
+            >
+              {loading && pairingMode
+                ? "Kod isteniyor…"
+                : pairingCooldown > 0
+                  ? `Bekleyin (${pairingCooldown}s)`
+                  : "Onay Kodu ile Bağlan"}
             </button>
             <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
@@ -3785,8 +3847,11 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <button onClick={() => void scanNow()} disabled={loading || resetting || !connected} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
               Şimdi Tara
             </button>
-            <button onClick={() => void resetAllWa()} disabled={loading || resetting || !connected} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
-              {resetting ? "Sıfırlanıyor…" : "Sıfırla / Tekrar Tara"}
+            <button onClick={() => void resetSession()} disabled={loading} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
+              Sıfırla / Tekrar Tara
+            </button>
+            <button onClick={() => void resetAllWa()} disabled={loading || resetting || !connected} className="rounded-xl bg-rose-500/30 px-4 py-2 text-sm font-bold text-rose-100 hover:bg-rose-500/40 disabled:opacity-50">
+              {resetting ? "Sıfırlanıyor…" : "İlanları Sıfırla"}
             </button>
             {connected && (
               <button onClick={() => void disconnect()} disabled={loading} className="rounded-xl bg-rose-500/20 px-4 py-2 text-sm font-bold text-rose-300 hover:bg-rose-500/30 disabled:opacity-50">
@@ -3812,23 +3877,13 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
               <span className={`text-xs font-bold ${
-                connected && syncStatus === "READY"
+                connected
                   ? "text-emerald-400"
-                  : connected
-                    ? "text-sky-300"
-                    : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
-                      ? "text-rose-400"
-                      : "text-amber-400"
+                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "RATE_LIMITED"
+                    ? "text-rose-400"
+                    : "text-amber-400"
               }`}>
-                {connected && syncStatus === "READY"
-                  ? "Bağlı · Gruplar hazır"
-                  : connected
-                    ? "Bağlı · Gruplar yükleniyor"
-                    : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED"
-                      ? "Başarısız"
-                      : qrStatus === "connecting"
-                        ? "Bekleniyor…"
-                        : "Bağlı değil"}
+                {uiStatus || errorLog || (connected ? "Bağlandı" : "Bağlantı hazırlanıyor")}
               </span>
             </div>
             {connected && syncStatus === "READY" ? (
@@ -3866,22 +3921,37 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                 <p className="text-xs text-sky-200/90">WhatsApp bağlanıyor. Lütfen 10–30 saniye bekleyin.</p>
                 <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın / kodu tekrar istemeyin.</p>
               </div>
-            ) : (connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "FAILED" || sessionState === "DISCONNECTED") && !!errorLog ? (
+            ) : sessionState === "RATE_LIMITED" || connectionStatus === "RATE_LIMITED" ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 space-y-2">
+                <p className="font-bold">Çok fazla deneme yapıldı</p>
+                <p className="text-xs">Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.</p>
+              </div>
+            ) : (connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "ERROR" || sessionState === "FAILED" || sessionState === "DISCONNECTED") ? (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100 space-y-3">
-                <p className="font-bold">Bağlantı hatası</p>
-                <p className="text-xs text-rose-200/90">{errorLog}</p>
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => void connect(Boolean(form.phoneNumber.trim()))}
-                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
-                >
-                  Yeniden Bağlan
-                </button>
+                <p className="font-bold">Bağlantı kesildi</p>
+                <p className="text-xs text-rose-200/90">{sanitizeWaUserMessage(errorLog) || "Bağlantı hatası."}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={loading || pairingCooldown > 0}
+                    onClick={() => void connect(Boolean(form.phoneNumber.trim()))}
+                    className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
+                  >
+                    Yeniden Bağlan
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void resetSession()}
+                    className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50"
+                  >
+                    Sıfırla / Tekrar Tara
+                  </button>
+                </div>
               </div>
             ) : pairingCode ? (
               <div className="space-y-2">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-300/90 text-center">WhatsApp Onay Kodunuz</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-300/90 text-center">WhatsApp Eşleştirme Kodu</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -3895,37 +3965,40 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                   className="w-full text-3xl font-black tracking-[0.35em] text-emerald-300 text-center py-4 bg-black/40 rounded-xl border border-emerald-500/30 select-all font-mono hover:bg-black/55 hover:border-emerald-400/50 transition-colors cursor-pointer"
                   title="Kopyalamak için tıkla"
                 >
-                  {pairingCode.length === 8
-                    ? `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`
-                    : pairingCode.includes("-")
-                      ? pairingCode
-                      : pairingCode}
+                  {(() => {
+                    const plain = pairingCode.replace(/\W/g, "").toUpperCase();
+                    return plain.length === 8 ? `${plain.slice(0, 4)}-${plain.slice(4)}` : pairingCode.toUpperCase();
+                  })()}
                 </button>
                 <p className="text-[10px] text-sky-300/90 text-center font-medium">Koda tıklayınca otomatik kopyalanır</p>
-                <p className="text-xs text-slate-300 text-center">
-                  Telefonunuzda: WhatsApp → Bağlı Cihazlar → Cihaz Bağla → Telefon numarasıyla bağla
-                </p>
-                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra 1–2 dk bekleyin. Tekrar basmayın.</p>
+                <div className="text-xs text-slate-300 text-center space-y-1 leading-relaxed">
+                  <p className="font-semibold text-slate-200">WhatsApp uygulamasında:</p>
+                  <p>Ayarlar → Bağlı cihazlar → Cihaz bağla → Telefon numarasıyla bağla</p>
+                </div>
+                {phoneMasked && <p className="text-[10px] text-slate-500 text-center">Numara: {phoneMasked}</p>}
+                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra bekleyin. Tekrar basmayın.</p>
               </div>
             ) : pairingMode ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
-                WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.
-                <p className="mt-2 text-xs text-slate-400">Onay kodu modu aktif — QR gösterilmez. Numara: {form.phoneNumber || "—"}</p>
+                {sessionState === "WAITING_FOR_PAIRING" ? "Kod bekleniyor" : "Bağlantı hazırlanıyor"}
+                {phoneMasked && <p className="mt-2 text-xs text-slate-400">Numara: {phoneMasked}</p>}
               </div>
             ) : qr && !pairingMode ? (
               <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" />
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">
                 {qrStatus === "connecting"
-                  ? "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin."
+                  ? "Bağlantı hazırlanıyor"
                   : "Bağlanmak için «QR ile Bağlan» veya «Onay Kodu ile Bağlan» kullanın."}
               </div>
             )}
             <div className="mt-3 text-xs text-slate-400">Son tarama: {lastScanAt}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <h4 className="text-sm font-bold text-white mb-3">Hata Logları</h4>
-            <textarea value={errorLog || "Hata yok"} readOnly className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-300 outline-none" />
+            <h4 className="text-sm font-bold text-white mb-3">Durum</h4>
+            <div className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-slate-200">
+              {uiStatus || errorLog || "Hazır"}
+            </div>
           </div>
         </div>
       </div>
@@ -5378,16 +5451,22 @@ export default function AdminDashboard() {
     });
     if (!r.ok) {
       const rawBody = await r.text();
-      let parsed: { error?: string; code?: string; requestId?: string } = {};
+      let parsed: { error?: string; message?: string; code?: string; requestId?: string } = {};
       try {
         parsed = rawBody ? JSON.parse(rawBody) : {};
       } catch { /* düz metin hata cevabı */ }
-      const detail = parsed.error || rawBody || r.statusText || "Sunucu hata ayrıntısı döndürmedi";
-      const suffix = [
-        parsed.code ? `kod=${parsed.code}` : "",
-        parsed.requestId ? `istek=${parsed.requestId}` : "",
-      ].filter(Boolean).join(", ");
-      const error = new Error(`${detail}${suffix ? ` (${suffix})` : ""}`) as Error & {
+      // Stack trace / invariant HTML'i panele taşıma
+      const rawDetail = parsed.message || parsed.error || "";
+      const isStack = /invariant violation|getUserPrefsTable|allUserPrefsIdb|getStorage|static\.whatsapp\.net|at\s+\S+\s+\(/i.test(rawDetail)
+        || rawDetail.includes("\n    at ");
+      const detail = isStack
+        ? (parsed.code === "CACHE_PROFILE_CORRUPTED"
+          ? "WhatsApp oturum önbelleği bozuldu. Oturumu sıfırlayıp tekrar deneyin."
+          : parsed.code === "PAIRING_RATE_LIMITED"
+            ? "Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin."
+            : "Bağlantı hatası. Lütfen tekrar deneyin.")
+        : (rawDetail.split("\n")[0]?.slice(0, 200) || r.statusText || "İstek başarısız");
+      const error = new Error(detail) as Error & {
         status?: number;
         code?: string;
         requestId?: string;

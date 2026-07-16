@@ -12,19 +12,27 @@ export class WhatsAppModuleError extends Error {
   constructor(
     message: string,
     public statusCode = 500,
-    public code = "WA_ERROR",
+    public code = "UNKNOWN_ERROR",
   ) {
     super(message);
     this.name = "WhatsAppModuleError";
   }
 }
 
-/** Auth path: WHATSAPP_AUTH_PATH → /data/whatsapp-auth → ./data/whatsapp-auth */
+/** Auth path: WHATSAPP_AUTH_PATH → /data/whatsapp-auth → ./.wwebjs_auth */
 export function resolveAuthPath(): string {
   const fromEnv = process.env.WHATSAPP_AUTH_PATH?.trim() || process.env.WWEBJS_AUTH_PATH?.trim();
   if (fromEnv) return fromEnv;
   if (fs.existsSync("/data")) return "/data/whatsapp-auth";
-  return path.join(process.cwd(), "data", "whatsapp-auth");
+  return path.join(process.cwd(), ".wwebjs_auth");
+}
+
+/** HTML / WWeb cache — LocalWebCache varsayılanı cwd/.wwebjs_cache */
+export function resolveCachePath(): string {
+  const fromEnv = process.env.WHATSAPP_CACHE_PATH?.trim() || process.env.WWEBJS_CACHE_PATH?.trim();
+  if (fromEnv) return fromEnv;
+  if (fs.existsSync("/data")) return "/data/whatsapp-cache";
+  return path.join(process.cwd(), ".wwebjs_cache");
 }
 
 export function ensureAuthDir(authPath: string): void {
@@ -42,6 +50,32 @@ export function hasLocalAuth(authPath: string, sessionId: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function rmDirSafe(dir: string): boolean {
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/** Auth oturumu + wwebjs HTML cache temizle (client destroy sonrası). */
+export function clearSessionAndCache(authPath: string, sessionId: string, cachePath: string): {
+  authCleared: boolean;
+  cacheCleared: boolean;
+} {
+  const authCleared = rmDirSafe(sessionAuthDir(authPath, sessionId));
+  // Eski clientId "main" kalıntısı
+  if (sessionId !== "main") rmDirSafe(sessionAuthDir(authPath, "main"));
+  const cacheCleared = rmDirSafe(cachePath);
+  // cwd altında da oluşmuş olabilir
+  rmDirSafe(path.join(process.cwd(), ".wwebjs_cache"));
+  return { authCleared, cacheCleared };
 }
 
 /** Volume yoksa panel uyarısı — uygulama kapanmaz. */
@@ -79,9 +113,9 @@ export function resolveChromiumPath(): { executablePath: string; source: string 
   }
 
   throw new WhatsAppModuleError(
-    "Chromium bulunamadı (BROWSER_NOT_FOUND). WHATSAPP_CHROME_PATH veya Puppeteer Chromium gerekli.",
+    "Chromium başlatılamadı. WHATSAPP_CHROME_PATH veya Puppeteer Chromium gerekli.",
     500,
-    "BROWSER_NOT_FOUND",
+    "BROWSER_START_FAILED",
   );
 }
 
@@ -101,29 +135,96 @@ export function getPuppeteerVersion(): string {
   }
 }
 
+/**
+ * Türkiye telefonu → 905XXXXXXXXX (sadece rakam, + yok).
+ * Kabul: 05xx…, 5xx…, 905xx…, +90 5xx…
+ */
 export function normalizeTurkishPhone(input: string): string | null {
   const digits = String(input ?? "").replace(/\D/g, "");
-  if (!digits) return null;
+  if (!digits || digits.length < 10 || digits.length > 15) return null;
   let n = digits;
   if (n.startsWith("00")) n = n.slice(2);
-  if (n.startsWith("90") && n.length >= 12) n = n.slice(0, 12);
-  else if (n.startsWith("0") && n.length === 11) n = `90${n.slice(1)}`;
-  else if (n.length === 10 && n.startsWith("5")) n = `90${n}`;
-  else return null;
+  if (n.startsWith("90") && n.length >= 12) {
+    n = n.slice(0, 12);
+  } else if (n.startsWith("0") && n.length === 11) {
+    n = `90${n.slice(1)}`;
+  } else if (n.length === 10 && n.startsWith("5")) {
+    n = `90${n}`;
+  } else {
+    return null;
+  }
   if (!/^905\d{9}$/.test(n)) return null;
   return n;
 }
 
+/** 905******996 */
 export function maskPhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
-  if (phone.length < 6) return "***";
-  return `${phone.slice(0, 4)}****${phone.slice(-2)}`;
+  const d = String(phone).replace(/\D/g, "");
+  if (d.length < 6) return "***";
+  return `${d.slice(0, 3)}${"*".repeat(Math.max(3, d.length - 6))}${d.slice(-3)}`;
 }
 
 export function maskChatId(chatId: string | null | undefined): string | null {
   if (!chatId) return null;
   if (chatId.length <= 12) return "***";
   return `${chatId.slice(0, 6)}…${chatId.slice(-6)}`;
+}
+
+/** Stack / React invariant → kod sınıflandırması */
+export function classifyWhatsAppError(err: unknown): { code: string; message: string; corrupted: boolean } {
+  const raw = err instanceof Error
+    ? `${err.message}\n${err.stack ?? ""}`
+    : String(err ?? "");
+  const text = raw.toLowerCase();
+
+  if (
+    text.includes("invariant violation")
+    || text.includes("getuserprefstable")
+    || text.includes("alluserprefsidb")
+    || text.includes("getstorage")
+    || (text.includes("static.whatsapp.net") && text.includes("invariant"))
+    || text.includes("#56367")
+  ) {
+    return {
+      code: "CACHE_PROFILE_CORRUPTED",
+      message: "WhatsApp oturum önbelleği bozuldu ve yeniden hazırlanıyor.",
+      corrupted: true,
+    };
+  }
+  if (text.includes("rate") && (text.includes("limit") || text.includes("overlimit") || text.includes("429"))) {
+    return {
+      code: "PAIRING_RATE_LIMITED",
+      message: "Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.",
+      corrupted: false,
+    };
+  }
+  if (text.includes("auth timeout") || text.includes("browser") && text.includes("fail")) {
+    return {
+      code: "BROWSER_START_FAILED",
+      message: "WhatsApp tarayıcısı başlatılamadı. Biraz bekleyip tekrar deneyin.",
+      corrupted: false,
+    };
+  }
+  if (text.includes("ebusy") || text.includes("lock") || text.includes("profile is already in use")) {
+    return {
+      code: "SESSION_LOCKED",
+      message: "WhatsApp oturumu kilitli. Önce sıfırlayıp tekrar deneyin.",
+      corrupted: false,
+    };
+  }
+
+  const short = (err instanceof Error ? err.message : String(err ?? "Bilinmeyen hata"))
+    .split("\n")[0]
+    ?.slice(0, 180) || "Bilinmeyen hata";
+  return { code: "UNKNOWN_ERROR", message: short, corrupted: false };
+}
+
+export function formatPairingCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const plain = String(code).replace(/\W/g, "").toUpperCase();
+  if (plain.length === 8) return `${plain.slice(0, 4)}-${plain.slice(4)}`;
+  return plain || null;
 }
 
 export function contentHash(text: string): string {

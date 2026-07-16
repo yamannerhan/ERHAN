@@ -1,6 +1,6 @@
 import QRCode from "qrcode";
 import { logger } from "../../lib/logger";
-import { maskPhone } from "./whatsapp.client";
+import { classifyWhatsAppError, formatPairingCode, maskPhone } from "./whatsapp.client";
 import type {
   ConnectionMode,
   GroupDiscoveryStatus,
@@ -11,7 +11,10 @@ import type {
 
 export type WaClientLike = {
   info?: { wid?: { user?: string } };
-  pupPage?: { isClosed?: () => boolean } | null;
+  pupPage?: {
+    isClosed?: () => boolean;
+    on?: (event: string, cb: (...args: unknown[]) => void) => void;
+  } | null;
   on: (event: string, cb: (...args: unknown[]) => void) => void;
   removeAllListeners?: (event?: string) => void;
   getChats: () => Promise<unknown[]>;
@@ -26,6 +29,7 @@ export interface SessionRuntime {
   pairingCode: string | null;
   phoneMasked: string | null;
   lastError: string | null;
+  lastErrorCode: string | null;
   readyAt: Date | null;
   starting: boolean;
   updatedAt: Date;
@@ -41,15 +45,22 @@ export interface SessionRuntime {
   groupCount: number;
   channelCount: number;
   scanStatus: ScanStatus;
+  /** Pairing ekranı hazır (qr veya AuthStore UNPAIRED) */
+  pairingScreenReady: boolean;
+  waitingForPairingResolve: (() => void) | null;
+  codeReadyResolve: ((code: string) => void) | null;
+  corruptionRecoveryUsed: boolean;
 }
 
 export type StatusWriter = (
   s: SessionRuntime,
   status: WhatsAppSessionStatus,
   error?: string | null,
+  errorCode?: string | null,
 ) => void;
 
 export type ConnectedHook = (sessionId: string) => void;
+export type CorruptionHook = (err: unknown) => void;
 
 /** Client event listener'larını bağla — Client oluşturma burada yok. */
 export function attachWhatsAppEvents(
@@ -58,51 +69,68 @@ export function attachWhatsAppEvents(
   getState: () => SessionRuntime,
   setStatus: StatusWriter,
   onConnected: ConnectedHook,
+  onCorruption?: CorruptionHook,
 ): void {
+  const markPairingScreenReady = () => {
+    const s = getState();
+    if (s.mode !== "pairing_code") return;
+    if (s.pairingScreenReady) return;
+    s.pairingScreenReady = true;
+    if (!s.pairingCode) {
+      setStatus(s, "WAITING_FOR_PAIRING", null, null);
+    }
+    s.waitingForPairingResolve?.();
+    s.waitingForPairingResolve = null;
+    logger.info({ sessionId, operation: "waiting_for_pairing" }, "wa: pairing screen ready");
+  };
+
   client.on("qr", (qr) => {
     void (async () => {
       const s = getState();
       if (s.mode === "pairing_code") {
-        logger.info({ sessionId, operation: "qr_ignored" }, "wa: QR ignored in pairing mode");
+        // Pairing modunda QR = AuthStore hazır; kod istemek için sinyal
+        markPairingScreenReady();
         return;
       }
       try {
         s.qrDataUrl = await QRCode.toDataURL(String(qr), { margin: 1, width: 280 });
         s.pairingCode = null;
-        setStatus(s, "QR_READY", null);
+        setStatus(s, "QR_READY", null, null);
         logger.info({ sessionId, operation: "qr_ready" }, "wa: QR ready");
       } catch (err) {
-        setStatus(s, "FAILED", err instanceof Error ? err.message : "QR üretilemedi");
+        setStatus(s, "ERROR", err instanceof Error ? err.message : "QR üretilemedi", "UNKNOWN_ERROR");
       }
     })();
+  });
+
+  client.on("code", (code) => {
+    const s = getState();
+    const formatted = formatPairingCode(String(code));
+    if (!formatted) return;
+    s.pairingCode = formatted;
+    s.qrDataUrl = null;
+    s.starting = true;
+    setStatus(s, "PAIRING_CODE_READY", null, null);
+    s.codeReadyResolve?.(formatted);
+    s.codeReadyResolve = null;
+    logger.info({
+      sessionId,
+      pairingCode: formatted,
+      phoneMasked: s.phoneMasked,
+      operation: "pairing_code_ready",
+    }, "wa: pairing code ready");
   });
 
   client.on("authenticated", () => {
     const s = getState();
     s.qrDataUrl = null;
     s.pairingCode = null;
-    setStatus(s, "AUTHENTICATED", null);
+    setStatus(s, "AUTHENTICATED", null, null);
     logger.info({
       sessionId,
       clientInstanceId: s.clientInstanceId,
       operation: "authenticated",
     }, "wa: authenticated — waiting for ready");
-    // ready gecikirse getState CONNECTED ile bağlanmış say
-    setTimeout(() => {
-      void (async () => {
-        const st = getState();
-        if (st.status !== "AUTHENTICATED") return;
-        try {
-          const state = typeof client.getState === "function" ? await client.getState() : null;
-          if (state === "CONNECTED") {
-            st.starting = false;
-            setStatus(st, "CONNECTED", null);
-            queueMicrotask(() => onConnected(sessionId));
-            logger.info({ sessionId, operation: "authenticated_promoted" }, "wa: AUTHENTICATED → CONNECTED via getState");
-          }
-        } catch { /* ignore */ }
-      })();
-    }, 8_000);
   });
 
   client.on("ready", () => {
@@ -112,8 +140,7 @@ export function attachWhatsAppEvents(
     s.starting = false;
     const wid = client.info?.wid?.user;
     if (wid) s.phoneMasked = maskPhone(wid.startsWith("90") ? wid : `90${wid}`);
-    // CONNECTED = bağlantı tamam. SYNCING'e düşürme — grup keşfi ayrı.
-    setStatus(s, "CONNECTED", null);
+    setStatus(s, "CONNECTED", null, null);
     logger.info({
       sessionId,
       clientInstanceId: s.clientInstanceId,
@@ -125,8 +152,10 @@ export function attachWhatsAppEvents(
   client.on("auth_failure", (msg) => {
     const s = getState();
     s.starting = false;
-    setStatus(s, "FAILED", String(msg || "auth_failure"));
-    logger.error({ sessionId, error: String(msg) }, "wa: auth_failure");
+    const classified = classifyWhatsAppError(msg);
+    setStatus(s, classified.corrupted ? "ERROR" : "ERROR", classified.message, classified.code);
+    logger.error({ sessionId, error: String(msg), code: classified.code }, "wa: auth_failure");
+    if (classified.corrupted) onCorruption?.(msg);
   });
 
   client.on("disconnected", (reason) => {
@@ -137,7 +166,26 @@ export function attachWhatsAppEvents(
     s.groupDiscoveryStatus = "NOT_STARTED";
     s.groupDiscoveryPromise = null;
     s.cachedGroups = [];
-    setStatus(s, "DISCONNECTED", String(reason || "disconnected"));
+    const classified = classifyWhatsAppError(reason);
+    setStatus(s, "DISCONNECTED", classified.message, classified.code === "UNKNOWN_ERROR" ? null : classified.code);
     logger.warn({ sessionId, reason: String(reason) }, "wa: disconnected");
+    if (classified.corrupted) onCorruption?.(reason);
   });
+
+  // Chromium page error → cache corruption yakala
+  try {
+    client.pupPage?.on?.("pageerror", (err) => {
+      const classified = classifyWhatsAppError(err);
+      if (!classified.corrupted) return;
+      logger.error({ err, sessionId, code: classified.code }, "wa: pageerror corrupted cache");
+      const s = getState();
+      setStatus(s, "ERROR", classified.message, classified.code);
+      onCorruption?.(err);
+    });
+    client.pupPage?.on?.("error", (err) => {
+      const classified = classifyWhatsAppError(err);
+      if (!classified.corrupted) return;
+      onCorruption?.(err);
+    });
+  } catch { /* pupPage henüz yok olabilir — initialize sonrası da bağlanır */ }
 }

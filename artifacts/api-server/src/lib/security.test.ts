@@ -89,3 +89,20 @@ test("production 500 cevabı iç hata ayrıntısını sızdırmaz", () => {
   res.json({ error: "relation users does not exist", code: "internal" });
   assert.deepEqual(output, { error: "Internal server error", code: "internal" });
 });
+
+test("production WhatsApp yapılandırılmış hata mesajı korunur", () => {
+  let output: unknown;
+  const res = {
+    statusCode: 503,
+    json(body: unknown) { output = body; return this; },
+  };
+  redactProductionErrors({} as never, res as never, () => {});
+  res.json({
+    success: false,
+    code: "CACHE_PROFILE_CORRUPTED",
+    message: "WhatsApp oturum önbelleği bozuldu ve yeniden hazırlanıyor.",
+    error: "WhatsApp oturum önbelleği bozuldu ve yeniden hazırlanıyor.",
+  });
+  assert.equal((output as { code: string }).code, "CACHE_PROFILE_CORRUPTED");
+  assert.match((output as { message: string }).message, /önbelleği bozuldu/);
+});

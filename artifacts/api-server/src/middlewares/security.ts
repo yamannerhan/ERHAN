@@ -126,6 +126,19 @@ export function redactProductionErrors(_req: Request, res: Response, next: NextF
   const originalJson = res.json.bind(res);
   res.json = ((body: unknown) => {
     if (res.statusCode >= 500 && body && typeof body === "object" && "error" in body) {
+      const b = body as Record<string, unknown>;
+      // Yapılandırılmış WhatsApp / iş hataları — kullanıcı mesajını koru, stack sızdırma
+      const code = typeof b.code === "string" ? b.code : "";
+      const message = typeof b.message === "string" ? b.message : "";
+      const knownWa = /^(CACHE_PROFILE_CORRUPTED|CLIENT_INITIALIZING|CLIENT_NOT_READY|PAIRING_|AUTH_FAILED|BROWSER_|SESSION_LOCKED|INVALID_PHONE|UNKNOWN_ERROR)/.test(code);
+      if (knownWa && message && !message.includes("\n") && !message.includes(" at ")) {
+        return originalJson({
+          success: false,
+          code,
+          message,
+          error: message,
+        });
+      }
       return originalJson({ ...(body as Record<string, unknown>), error: "Internal server error" });
     }
     return originalJson(body);

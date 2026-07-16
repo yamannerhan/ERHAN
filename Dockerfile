@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
@@ -16,7 +16,7 @@ RUN echo '{"extends": "./tsconfig.base.json"}' > tsconfig.json
 RUN pnpm --filter @workspace/ozel-guvenlik build
 RUN pnpm --filter @workspace/api-server build
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:20-bookworm-slim AS runtime
 ARG CHROMIUM_REFRESH=2026-07-16
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate \
     && apt-get update && apt-get install -y --no-install-recommends \
@@ -53,8 +53,10 @@ RUN mkdir -p \
       /app/data/company-logos \
       /app/data/known-company-logos \
       /app/.wwebjs_auth \
+      /app/.wwebjs_cache \
       /data/whatsapp-auth \
-    && chown -R node:node /app/uploads /app/data /app/.wwebjs_auth /data/whatsapp-auth
+      /data/whatsapp-cache \
+    && chown -R node:node /app/uploads /app/data /app/.wwebjs_auth /app/.wwebjs_cache /data/whatsapp-auth /data/whatsapp-cache
 
 ENV NODE_ENV=production
 ENV BASE_PATH=/
@@ -64,6 +66,8 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # Railway volume mount: WHATSAPP_AUTH_PATH=/data/whatsapp-auth
 ENV WHATSAPP_AUTH_PATH=/data/whatsapp-auth
 ENV WWEBJS_AUTH_PATH=/data/whatsapp-auth
+ENV WHATSAPP_CACHE_PATH=/data/whatsapp-cache
+ENV WWEBJS_CACHE_PATH=/data/whatsapp-cache
 
 EXPOSE 8080
 USER node
