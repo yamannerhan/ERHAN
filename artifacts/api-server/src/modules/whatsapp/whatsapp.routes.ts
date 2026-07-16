@@ -9,6 +9,7 @@ import {
   disableWhatsAppSource,
   getDiscoveryDiagnostics,
   listWhatsAppGroups,
+  listWhatsAppGroupsSafe,
   listWhatsAppSourcesForAdmin,
   resetAllWhatsAppSources,
   resetWhatsAppSource,
@@ -169,21 +170,47 @@ router.post("/admin/whatsapp/reset-session", authMiddleware, requireAdmin, async
 });
 
 router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, res) => {
-  const activeClient = WhatsAppManager.getActiveClient();
   const st = WhatsAppManager.getStatus();
-  if (!activeClient) {
-    fail(res, 503, "CLIENT_NOT_READY", "WhatsApp client yok");
-    return;
-  }
-  if (!WhatsAppManager.isConnected()) {
-    fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil");
-    return;
+
+  // Client henüz oluşmamışsa ama başlatılıyorsa beklemede dön
+  if (!WhatsAppManager.getActiveClient()) {
+    if (st.starting || st.connectionStatus === "CONNECTING") {
+      return res.json({
+        success: true,
+        groups: [],
+        diagnostics: {
+          ready: false,
+          chatCount: 0,
+          groupCount: 0,
+          channelCount: 0,
+          state: st.connectionStatus,
+          wwebVersion: null,
+          clientInstanceId: st.clientInstanceId,
+          groupDiscoveryStatus: "NOT_STARTED",
+          errors: [],
+          steps: ["WhatsApp client henüz hazır değil, bağlantı sürüyor."],
+        },
+        connectionStatus: st.connectionStatus,
+        groupDiscoveryStatus: "NOT_STARTED",
+        clientInstanceId: st.clientInstanceId,
+        message: "WhatsApp bağlantısı hazırlanıyor.",
+      });
+    }
+    return fail(res, 503, "CLIENT_NOT_READY", "WhatsApp client yok. Önce bağlanın.");
   }
 
-  const groups = await listWhatsAppGroups();
+  if (!WhatsAppManager.isConnected()) {
+    return fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil.");
+  }
+
+  // Discovery'yi başlat (zaten çalışıyorsa mevcut promise döner)
+  void WhatsAppManager.refreshGroups().catch(() => undefined);
+
+  const groups = await listWhatsAppGroupsSafe();
   const diagnostics = await getDiscoveryDiagnostics();
   const status = WhatsAppManager.getStatus();
   res.json({
+    success: true,
     groups: groups.map((g) => ({
       id: g.id,
       name: g.name,

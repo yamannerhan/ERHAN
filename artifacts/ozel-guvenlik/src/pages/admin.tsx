@@ -3406,9 +3406,18 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     phoneNumber: "",
   });
 
+  // Race condition önleme: aynı anda tek refresh, eski cevap state'i ezmesin
+  const refreshLockRef = useRef(false);
+  const lastRefreshTsRef = useRef(0);
+
   const refresh = async () => {
+    if (refreshLockRef.current) return;
+    refreshLockRef.current = true;
+    const thisRefreshTs = Date.now();
+    lastRefreshTsRef.current = thisRefreshTs;
     try {
       const status = await apiCall("/admin/whatsapp/status", "GET");
+      if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
       const nextStatus = status as {
         connected?: boolean; ready?: boolean; qr?: string | null;
         pairingCode?: string | null; pairing?: boolean;
@@ -3484,6 +3493,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
         return prev;
       });
+
       const userFacingError = (() => {
         if (nextStatus.uiStatus) return nextStatus.uiStatus;
         if (waConnected && discoveryReady) return "Bağlandı";
@@ -3514,7 +3524,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       if (waConnected) {
         try {
           const groupList = await apiCall("/admin/whatsapp/groups", "GET");
+          if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
           const parsed = groupList as {
+            success?: boolean;
             groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
             diagnostics?: typeof discoveryDiagnostics;
           };
@@ -3533,6 +3545,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
           sources?: typeof savedSources;
           totals?: typeof totals;
         };
+        if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
         setSavedSources(src.sources ?? []);
         const persisted = new Set((src.sources ?? []).filter((source) => source.active).map((source) => source.url));
         setGroups(prev => prev.map(group => ({ ...group, selected: persisted.has(group.id) || !!group.selected })));
@@ -3542,6 +3555,8 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       const typed = error as Error & { code?: string };
       setErrorLog(sanitizeWaUserMessage(typed.message, typed.code) || "Bağlantı hatası");
       setQrStatus("failed");
+    } finally {
+      refreshLockRef.current = false;
     }
   };
 
@@ -3552,10 +3567,12 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         sessionState === "AUTHENTICATED"
         || connectionStatus === "AUTHENTICATED"
         || sessionState === "STARTING"
+        || sessionState === "INITIALIZING"
         || sessionState === "PAIRING_READY"
         || sessionState === "PAIRING_CODE_READY"
         || sessionState === "PAIRING_CODE_REQUESTING"
         || sessionState === "QR_READY"
+        || sessionState === "WAITING_FOR_PAIRING"
         || pairingMode
         || !!pairingCode
         || qrStatus === "connecting"
@@ -3563,7 +3580,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       || (connected && (syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "NOT_STARTED"))
     );
     const timer = window.setInterval(() => { void refresh(); }, needsFastPoll ? 2000 : 4000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      // NOT: Burada WhatsApp bağlantısı kesilmemeli; sadece timer temizlenir.
+    };
   }, [qrStatus, pairingMode, pairingCode, connected, sessionState, connectionStatus, syncStatus]);
 
   const reloadChats = async () => {

@@ -38,6 +38,11 @@ import {
 
 const require = createRequire(import.meta.url);
 
+/** Global singleton key — farklı import/cache kopyalarına karşı korur. */
+const MANAGER_KEY = Symbol.for("ozelguvenlik.whatsapp.manager");
+
+const STATUS_LOG_INTERVAL_MS = 30_000;
+
 type WaClient = WaClientLike & {
   initialize: () => Promise<void>;
   destroy: () => Promise<void>;
@@ -84,15 +89,18 @@ function uiStatusFor(s: SessionRuntime, connectionStatus: ConnectionStatus): str
 }
 
 /** Tek Client — yalnızca bu sınıfta new Client(). */
-export class WhatsAppManager {
-  private static client: WaClient | null = null;
-  private static initializePromise: Promise<void> | null = null;
-  private static pairingInFlight = false;
-  private static lastPairingAt = 0;
-  private static lastPairingPhone: string | null = null;
-  private static recoveryInFlight = false;
+class WhatsAppManagerClass {
+  private client: WaClient | null = null;
+  private initializePromise: Promise<void> | null = null;
+  private pairingInFlight = false;
+  private lastPairingAt = 0;
+  private lastPairingPhone: string | null = null;
+  private recoveryInFlight = false;
+  /** Panel / diagnostics için görünür */
+  readonly managerInstanceId = randomUUID();
+  private lastStatusLogAt = 0;
 
-  private static state: SessionRuntime = {
+  private state: SessionRuntime = {
     sessionId: SESSION_ID,
     status: "IDLE",
     mode: null,
@@ -122,14 +130,14 @@ export class WhatsAppManager {
     corruptionRecoveryUsed: false,
   };
 
-  private static authPath = resolveAuthPath();
-  private static cachePath = resolveCachePath();
+  private authPath = resolveAuthPath();
+  private cachePath = resolveCachePath();
 
-  static getAuthPath(): string {
+  getAuthPath(): string {
     return this.authPath;
   }
 
-  private static setStatus(
+  private setStatus(
     s: SessionRuntime,
     status: WhatsAppSessionStatus,
     error?: string | null,
@@ -151,7 +159,31 @@ export class WhatsAppManager {
     }).catch((err) => logger.warn({ err }, "wa: session persist failed"));
   }
 
-  static getStatus(sessionId = SESSION_ID): WhatsAppStatusDto {
+  private logLifecycle(event: string, extra: Record<string, unknown> = {}): void {
+    const now = Date.now();
+    if (now - this.lastStatusLogAt < STATUS_LOG_INTERVAL_MS && event !== "ready") return;
+    this.lastStatusLogAt = now;
+    logger.info({
+      event,
+      managerInstanceId: this.managerInstanceId,
+      clientInstanceId: this.state.clientInstanceId,
+      pid: process.pid,
+      hostname: process.env.HOSTNAME ?? process.env.RAILWAY_SERVICE_NAME ?? "local",
+      connectionState: this.getConnectionStatus(),
+      discoveryState: this.state.groupDiscoveryStatus,
+      isReady: this.isReady(),
+      starting: this.isStarting(),
+      hasInitializePromise: Boolean(this.initializePromise),
+      hasDiscoveryPromise: Boolean(this.state.groupDiscoveryPromise),
+      chatCount: this.state.chatCount,
+      groupCount: this.state.groupCount,
+      channelCount: this.state.channelCount,
+      discoveryAttempt: this.state.groupDiscoveryAttempt,
+      ...extra,
+    }, `[WA_LIFECYCLE] ${event}`);
+  }
+
+  getStatus(sessionId = SESSION_ID): WhatsAppStatusDto {
     const s = this.state;
     const mode: ConnectionMode = s.mode ?? "qr";
     const inPairing = mode === "pairing_code";
@@ -241,43 +273,48 @@ export class WhatsAppManager {
     };
   }
 
-  static isConnected(): boolean {
+  private getConnectionStatus(): ConnectionStatus {
+    return this.getStatus().connectionStatus;
+  }
+
+  isConnected(): boolean {
     return ["CONNECTED", "READY", "SYNCING", "AUTHENTICATED"].includes(this.state.status)
       && Boolean(this.client);
   }
 
-  static isReady(): boolean {
+  isReady(): boolean {
     return this.isConnected();
   }
 
-  static hasSession(): boolean {
+  hasSession(): boolean {
     return hasLocalAuth(this.authPath, SESSION_ID) || hasLocalAuth(this.authPath, "main");
   }
 
-  static isStarting(): boolean {
+  isStarting(): boolean {
     return this.state.starting || Boolean(this.initializePromise) || this.pairingInFlight;
   }
 
-  static getClient(): WaClient | null {
+  getClient(): WaClient | null {
     return this.client;
   }
 
-  static getActiveClient(): WaClient | null {
+  getActiveClient(): WaClient | null {
     return this.client;
   }
 
-  static getCachedGroups(): WhatsAppGroup[] {
+  getCachedGroups(): WhatsAppGroup[] {
     return this.state.cachedGroups;
   }
 
-  private static sleep(ms: number): Promise<void> {
+  private sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  private static async destroyClient(): Promise<void> {
+  private async destroyClient(): Promise<void> {
     const existing = this.client;
     this.initializePromise = null;
     if (!existing) return;
+    this.logLifecycle("destroy_start", { reason: "explicit" });
     try { existing.removeAllListeners?.(); } catch { /* ignore */ }
     try {
       await Promise.race([
@@ -301,14 +338,15 @@ export class WhatsAppManager {
     this.state.pairingScreenReady = false;
     this.state.waitingForPairingResolve = null;
     this.state.codeReadyResolve = null;
+    this.logLifecycle("destroy_done");
   }
 
-  private static handleCorruption = (err: unknown): void => {
+  private handleCorruption = (err: unknown): void => {
     void this.recoverFromCorruptedCache(err);
   };
 
   /** Invariant / prefs IDB — en fazla bir kez otomatik kurtarma. */
-  private static async recoverFromCorruptedCache(err: unknown): Promise<void> {
+  private async recoverFromCorruptedCache(err: unknown): Promise<void> {
     const s = this.state;
     if (s.corruptionRecoveryUsed || this.recoveryInFlight) {
       logger.warn({ operation: "corruption_skip" }, "wa: corruption recovery already used");
@@ -340,7 +378,7 @@ export class WhatsAppManager {
   }
 
   /** Tek yerde new Client() — webVersion / RemoteWebCache YOK */
-  private static async createClient(opts?: {
+  private async createClient(opts?: {
     pairWithPhoneNumber?: { phoneNumber: string; showNotification?: boolean; intervalMs?: number };
   }): Promise<WaClient> {
     loadWwebjs();
@@ -391,26 +429,24 @@ export class WhatsAppManager {
       () => this.state,
       (s, status, error, errorCode) => this.setStatus(s, status, error, errorCode),
       (sid) => {
+        this.logLifecycle("ready_hook", { sessionId: sid });
         queueMicrotask(() => { void this.refreshGroups(sid); });
       },
       this.handleCorruption,
     );
 
-    logger.info({
-      sessionId: SESSION_ID,
-      clientInstanceId: instanceId,
+    this.logLifecycle("client_created", {
       authPath: this.authPath,
       cachePath: this.cachePath,
       executablePath,
       chromiumSource: source,
       wwebjsVersion: getWwebjsVersion(),
       pairing: Boolean(opts?.pairWithPhoneNumber),
-      operation: "client_created",
-    }, "wa: client created");
+    });
     return client;
   }
 
-  private static attachPageGuards(client: WaClient): void {
+  private attachPageGuards(client: WaClient): void {
     const page = client.pupPage;
     if (!page?.on) return;
     const onErr = (err: unknown) => {
@@ -425,7 +461,7 @@ export class WhatsAppManager {
     } catch { /* ignore */ }
   }
 
-  private static async runInitialize(client: WaClient): Promise<void> {
+  private async runInitialize(client: WaClient): Promise<void> {
     if (this.initializePromise) return this.initializePromise;
     this.initializePromise = (async () => {
       // pupPage oluşunca corruption listener bağla
@@ -454,7 +490,7 @@ export class WhatsAppManager {
     return this.initializePromise;
   }
 
-  private static clientUsableForGroups(client: WaClient): { ok: boolean; reason?: string } {
+  private clientUsableForGroups(client: WaClient): { ok: boolean; reason?: string } {
     if (!client) return { ok: false, reason: "CLIENT_NOT_AVAILABLE" };
     if (typeof client.getChats !== "function") return { ok: false, reason: "GET_CHATS_MISSING" };
     if (client.pupPage && typeof client.pupPage.isClosed === "function" && client.pupPage.isClosed()) {
@@ -463,28 +499,32 @@ export class WhatsAppManager {
     return { ok: true };
   }
 
-  private static mapChatsToGroups(chats: Record<string, unknown>[]): WhatsAppGroup[] {
+  private mapChatsToGroups(chats: Record<string, unknown>[]): WhatsAppGroup[] {
     const result: WhatsAppGroup[] = [];
     for (const chat of chats) {
-      const id = chat.id && typeof chat.id === "object"
-        ? String((chat.id as { _serialized?: string })._serialized ?? "")
-        : String(chat.id ?? "");
-      if (!id) continue;
-      const isChannel = id.includes("@newsletter") || Boolean(chat.isChannel) || Boolean(chat.isNewsletter);
-      const isGroup = (Boolean(chat.isGroup) || id.endsWith("@g.us")) && !isChannel;
-      if (!isGroup && !isChannel) continue;
-      const ts = (chat.timestamp as number | undefined)
-        ?? (chat.lastMessage && typeof chat.lastMessage === "object"
-          ? (chat.lastMessage as { timestamp?: number }).timestamp
-          : undefined);
-      result.push({
-        id,
-        name: String(chat.name || chat.formattedTitle || chat.pushname || "İsimsiz grup"),
-        isGroup,
-        isChannel,
-        kind: isChannel ? "channel" : "group",
-        lastMessageAt: ts && Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : null,
-      });
+      try {
+        const id = chat.id && typeof chat.id === "object"
+          ? String((chat.id as { _serialized?: string })._serialized ?? "")
+          : String(chat.id ?? "");
+        if (!id) continue;
+        const isChannel = id.includes("@newsletter") || Boolean(chat.isChannel) || Boolean(chat.isNewsletter);
+        const isGroup = (Boolean(chat.isGroup) || id.endsWith("@g.us")) && !isChannel;
+        if (!isGroup && !isChannel) continue;
+        const ts = (chat.timestamp as number | undefined)
+          ?? (chat.lastMessage && typeof chat.lastMessage === "object"
+            ? (chat.lastMessage as { timestamp?: number }).timestamp
+            : undefined);
+        result.push({
+          id,
+          name: String(chat.name || chat.formattedTitle || chat.pushname || "İsimsiz grup"),
+          isGroup,
+          isChannel,
+          kind: isChannel ? "channel" : "group",
+          lastMessageAt: ts && Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : null,
+        });
+      } catch (err) {
+        logger.warn({ err, chatId: chat.id }, "wa: single chat normalize skipped");
+      }
     }
     return result;
   }
@@ -492,7 +532,7 @@ export class WhatsAppManager {
   /**
    * CONNECTED (ready) sonrası grup keşfi — ilan taraması beklemez.
    */
-  static async refreshGroups(sessionId = SESSION_ID): Promise<WhatsAppGroup[]> {
+  async refreshGroups(sessionId = SESSION_ID): Promise<WhatsAppGroup[]> {
     const s = this.state;
     if (s.groupDiscoveryPromise) return s.groupDiscoveryPromise;
 
@@ -502,16 +542,19 @@ export class WhatsAppManager {
       s.groupDiscoveryAttempt = 0;
       s.groupDiscoveryStatus = "LOADING";
       s.groupDiscoveryMessage = "WhatsApp bağlı. Gruplar yükleniyor.";
+      this.logLifecycle("discovery_start");
 
       const deadlines = [
         { untilMs: 60_000, intervalMs: 5_000 },
         { untilMs: 180_000, intervalMs: 15_000 },
+        { untilMs: 600_000, intervalMs: 30_000 },
       ];
 
-      while (Date.now() - startedAt < 180_000) {
+      while (Date.now() - startedAt < 600_000) {
         if (!this.isConnected()) {
           s.groupDiscoveryStatus = "FAILED";
           s.groupDiscoveryMessage = "Bağlantı koptu — grup listesi alınamadı.";
+          this.logLifecycle("discovery_failed", { reason: "not_connected" });
           break;
         }
 
@@ -522,6 +565,7 @@ export class WhatsAppManager {
         if (!usable.ok || !client) {
           s.groupDiscoveryStatus = "RETRYING";
           s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+          this.logLifecycle("discovery_retry", { reason: usable.reason, attempt: s.groupDiscoveryAttempt });
         } else {
           try {
             let state: string | null = null;
@@ -529,6 +573,7 @@ export class WhatsAppManager {
             if (state && state !== "CONNECTED") {
               s.groupDiscoveryStatus = "RETRYING";
               s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+              this.logLifecycle("discovery_retry", { reason: `state=${state}`, attempt: s.groupDiscoveryAttempt });
             } else {
               const chats = await Promise.race([
                 client.getChats(),
@@ -537,36 +582,45 @@ export class WhatsAppManager {
               ]) as Record<string, unknown>[];
 
               const groups = this.mapChatsToGroups(chats);
-              s.cachedGroups = groups;
-              s.chatCount = chats.length;
-              s.groupCount = groups.filter((g) => g.isGroup).length;
-              s.channelCount = groups.filter((g) => g.isChannel).length;
-              s.groupDiscoveryStatus = "READY";
-              s.groupDiscoveryMessage = `${s.groupCount} grup, ${s.channelCount} kanal bulundu.`;
-              if (s.status === "CONNECTED" || s.status === "SYNCING") {
-                this.setStatus(s, "CONNECTED", null, null);
+              // Tek sohbet bile gelse cache güncelle; boşsa retry planına devam et
+              if (groups.length > 0 || chats.length > 0) {
+                s.cachedGroups = groups;
+                s.chatCount = chats.length;
+                s.groupCount = groups.filter((g) => g.isGroup).length;
+                s.channelCount = groups.filter((g) => g.isChannel).length;
               }
-              logger.info({
-                sessionId,
-                clientInstanceId: s.clientInstanceId,
-                chatCount: s.chatCount,
-                groupCount: s.groupCount,
-                channelCount: s.channelCount,
+
+              if (groups.length > 0) {
+                s.groupDiscoveryStatus = "READY";
+                s.groupDiscoveryMessage = `${s.groupCount} grup, ${s.channelCount} kanal bulundu.`;
+                if (s.status === "CONNECTED" || s.status === "SYNCING") {
+                  this.setStatus(s, "CONNECTED", null, null);
+                }
+                this.logLifecycle("discovery_ready", {
+                  chatCount: s.chatCount,
+                  groupCount: s.groupCount,
+                  channelCount: s.channelCount,
+                  attempt: s.groupDiscoveryAttempt,
+                  durationMs: Date.now() - startedAt,
+                });
+                return groups;
+              }
+
+              // WhatsApp Web henüz sohbet listesini doldurmamış; client'i kapatma
+              s.groupDiscoveryStatus = "RETRYING";
+              s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+              this.logLifecycle("discovery_empty", {
+                chatCount: chats.length,
                 attempt: s.groupDiscoveryAttempt,
-                durationMs: Date.now() - startedAt,
-                operation: "group_discovery_ready",
-              }, "wa: groups ready");
-              return groups;
+              });
             }
           } catch (err) {
             s.groupDiscoveryStatus = "RETRYING";
             s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
-            logger.warn({
-              err,
-              sessionId,
+            this.logLifecycle("discovery_error", {
+              err: err instanceof Error ? err.message : String(err),
               attempt: s.groupDiscoveryAttempt,
-              operation: "group_discovery_retry",
-            }, "wa: getChats retry");
+            });
           }
         }
 
@@ -577,7 +631,8 @@ export class WhatsAppManager {
 
       s.groupDiscoveryStatus = "FAILED";
       s.groupDiscoveryMessage = s.groupDiscoveryMessage
-        || "Grup listesi 3 dakikada alınamadı. «Sohbetleri Yeniden Yükle» deneyin.";
+        || "Grup listesi 10 dakikada alınamadı. «Sohbetleri Yeniden Yükle» deneyin.";
+      this.logLifecycle("discovery_failed", { reason: "timeout", cachedGroups: s.cachedGroups.length });
       return s.cachedGroups;
     })();
 
@@ -589,7 +644,8 @@ export class WhatsAppManager {
     }
   }
 
-  static async init(): Promise<void> {
+  async init(): Promise<void> {
+    this.logLifecycle("manager_init");
     // İlk deploy: bozuk HTML cache'i bir kez temizle (oturumu silmez)
     try {
       const marker = `${this.cachePath}/.cache-cleared-v1347`;
@@ -616,7 +672,7 @@ export class WhatsAppManager {
     }
   }
 
-  static async connectQr(opts?: { restore?: boolean }) {
+  async connectQr(opts?: { restore?: boolean }) {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
       const s = this.state;
       if (this.pairingInFlight || (s.mode === "pairing_code" && s.starting)) {
@@ -650,7 +706,7 @@ export class WhatsAppManager {
         logger.error({ err, operation: "initialize" }, "wa: initialize failed");
       });
 
-      logger.info({ operation: "connect_qr", restore: Boolean(opts?.restore) }, "wa: QR connect started");
+      this.logLifecycle("connect_qr", { restore: Boolean(opts?.restore) });
       return this.getStatus();
     });
   }
@@ -662,7 +718,7 @@ export class WhatsAppManager {
    * 3) WAITING_FOR_PAIRING bekle (max 90s)
    * 4) kodu bir kez al → PAIRING_CODE_READY
    */
-  static async connectPairing(phoneNumber: string) {
+  async connectPairing(phoneNumber: string) {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
       const normalized = normalizeTurkishPhone(phoneNumber);
       if (!normalized) {
@@ -813,12 +869,7 @@ export class WhatsAppManager {
 
         s.pairingCode = formatPairingCode(code) ?? code;
         this.setStatus(s, "PAIRING_CODE_READY", null, null);
-        logger.info({
-          pairingCode: s.pairingCode,
-          phoneMasked: s.phoneMasked,
-          wwebjsVersion: getWwebjsVersion(),
-          operation: "pairing_ready",
-        }, "wa: pairing code ready for panel");
+        this.logLifecycle("pairing_ready", { phoneMasked: s.phoneMasked });
 
         return this.getStatus();
       } catch (err) {
@@ -839,7 +890,7 @@ export class WhatsAppManager {
     });
   }
 
-  static async disconnect(): Promise<void> {
+  async disconnect(): Promise<void> {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
       await this.destroyClient();
       const s = this.state;
@@ -855,7 +906,7 @@ export class WhatsAppManager {
    * Admin «Sıfırla»: destroy → chromium bekle → auth+cache sil → singleton sıfırla.
    * Her restart'ta çağrılmaz — sadece panel.
    */
-  static async resetSession(): Promise<void> {
+  async resetSession(): Promise<void> {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
       await this.destroyClient();
       const cleared = clearSessionAndCache(this.authPath, SESSION_ID, this.cachePath);
@@ -889,7 +940,7 @@ export class WhatsAppManager {
     });
   }
 
-  static async getChats(): Promise<WhatsAppGroup[]> {
+  async getChats(): Promise<WhatsAppGroup[]> {
     const client = this.getActiveClient();
     if (!client) {
       throw new WhatsAppModuleError("WhatsApp client yok", 503, "CLIENT_NOT_READY");
@@ -909,23 +960,34 @@ export class WhatsAppManager {
     return s.cachedGroups;
   }
 
-  static async getGroups(): Promise<WhatsAppGroup[]> {
+  async getGroups(): Promise<WhatsAppGroup[]> {
     const groups = await this.getChats();
     return groups.filter((c) => c.isGroup || c.isChannel);
   }
 
-  static async getChatById(chatId: string) {
+  async getChatById(chatId: string) {
     const client = this.client;
     if (!client) throw new WhatsAppModuleError("WhatsApp bağlı değil", 409, "CLIENT_NOT_READY");
     return client.getChatById(chatId);
   }
 
-  static ensureAutoConnect(): void {
+  ensureAutoConnect(): void {
     if (this.isReady() || this.isStarting()) return;
     if (!this.hasSession()) return;
     void this.connectQr({ restore: true }).catch(() => undefined);
   }
 }
+
+/** Global singleton — farklı import/cache kopyalarına karşı korur. */
+function getGlobalManager(): WhatsAppManagerClass {
+  const g = globalThis as unknown as Record<symbol, WhatsAppManagerClass | undefined>;
+  if (!g[MANAGER_KEY]) {
+    g[MANAGER_KEY] = new WhatsAppManagerClass();
+  }
+  return g[MANAGER_KEY];
+}
+
+export const WhatsAppManager = getGlobalManager();
 
 /** Eski API adı uyumu */
 export class WhatsAppStartError extends WhatsAppModuleError {

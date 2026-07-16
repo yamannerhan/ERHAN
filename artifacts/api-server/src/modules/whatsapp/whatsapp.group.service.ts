@@ -12,6 +12,14 @@ export async function listWhatsAppGroups(): Promise<WhatsAppGroup[]> {
   return WhatsAppManager.getGroups();
 }
 
+export async function listWhatsAppGroupsSafe(): Promise<WhatsAppGroup[]> {
+  try {
+    return await WhatsAppManager.getGroups();
+  } catch {
+    return [];
+  }
+}
+
 export async function addWhatsAppGroupSource(params: {
   groupId: string;
   groupName: string;
@@ -54,23 +62,33 @@ export async function resetAllWhatsAppSources() {
 export async function getDiscoveryDiagnostics() {
   const status = WhatsAppManager.getStatus();
   const client = WhatsAppManager.getActiveClient();
+
   if (!client) {
     return {
-      steps: ["client yok"],
+      steps: status.starting
+        ? ["WhatsApp client başlatılıyor; henüz hazır değil.", `connectionStatus=${status.connectionStatus}`]
+        : ["WhatsApp client henüz oluşturulmadı. Önce bağlanın."],
       sources: [] as Array<{ id: string; name: string; kind: string }>,
-      error: "CLIENT_NOT_AVAILABLE",
+      error: status.starting ? null : "CLIENT_NOT_READY",
     };
   }
+
   const cached = WhatsAppManager.getCachedGroups();
+  const baseSteps = [
+    `managerInstanceId=${WhatsAppManager.managerInstanceId}`,
+    `clientInstanceId=${status.clientInstanceId}`,
+    `connectionStatus=${status.connectionStatus}`,
+    `groupDiscoveryStatus=${status.groupDiscoveryStatus}`,
+    `chats=${status.chatCount}`,
+    `groups=${status.groupCount}`,
+    `channels=${status.channelCount}`,
+  ];
+
   if (status.groupDiscoveryStatus === "READY" && cached.length > 0) {
     return {
       steps: [
-        `clientInstanceId=${status.clientInstanceId}`,
-        `connectionStatus=${status.connectionStatus}`,
-        `groupDiscoveryStatus=${status.groupDiscoveryStatus}`,
-        `chats=${status.chatCount}`,
-        `groups=${status.groupCount}`,
-        `channels=${status.channelCount}`,
+        ...baseSteps,
+        `cachedGroups=${cached.length}`,
       ],
       sources: cached.map((g) => ({
         id: g.id,
@@ -80,12 +98,11 @@ export async function getDiscoveryDiagnostics() {
       error: null as string | null,
     };
   }
+
   return {
     steps: [
-      `clientInstanceId=${status.clientInstanceId}`,
-      `connectionStatus=${status.connectionStatus}`,
-      `groupDiscoveryStatus=${status.groupDiscoveryStatus}`,
-      status.groupDiscoveryMessage ?? "keşif sürüyor",
+      ...baseSteps,
+      status.groupDiscoveryMessage ?? "Keşif sürüyor",
     ],
     sources: cached.map((g) => ({
       id: g.id,

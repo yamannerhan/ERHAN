@@ -11,6 +11,7 @@ import {
 } from "./whatsapp.client";
 import { classifySecurityJob } from "./whatsapp.classifier.service";
 import { HISTORY_DAYS, SCAN_INTERVAL_MS, SESSION_ID, EXPIRE_DAYS } from "./whatsapp.types";
+import { WhatsAppManager } from "./whatsapp.manager";
 
 test("defaults: session main-whatsapp, 15 gün, 10 dk", () => {
   assert.equal(SESSION_ID, "main-whatsapp");
@@ -79,4 +80,40 @@ test("auth path varsayılanı env olmadan çalışır", () => {
   // volumeWarning yerel ortamda null veya string olabilir — kapanma yok
   const warn = volumeWarning(path);
   assert.ok(warn === null || typeof warn === "string");
+});
+
+// Manager singleton ve client yaşam döngüsü testleri
+test("manager global singleton aynı instance", () => {
+  const key = Symbol.for("ozelguvenlik.whatsapp.manager");
+  const globalManager = (globalThis as unknown as Record<symbol, unknown>)[key];
+  assert.equal(WhatsAppManager, globalManager);
+});
+
+test("getStatus client oluşturmuyor veya sıfırlamıyor", () => {
+  const clientBefore = WhatsAppManager.getActiveClient();
+  const firstStatus = WhatsAppManager.getStatus();
+  const clientAfter = WhatsAppManager.getActiveClient();
+  assert.equal(clientBefore, clientAfter);
+  assert.ok(firstStatus.clientInstanceId === null || typeof firstStatus.clientInstanceId === "string");
+});
+
+test("ensureAutoConnect session yokken yeni client oluşturmuyor", () => {
+  const clientBefore = WhatsAppManager.getActiveClient();
+  WhatsAppManager.ensureAutoConnect();
+  const clientAfter = WhatsAppManager.getActiveClient();
+  assert.equal(clientBefore, clientAfter);
+});
+
+test("getCachedGroups çağrısı client'ı kapatmıyor", () => {
+  const clientBefore = WhatsAppManager.getActiveClient();
+  const cached = WhatsAppManager.getCachedGroups();
+  assert.ok(Array.isArray(cached));
+  const clientAfter = WhatsAppManager.getActiveClient();
+  assert.equal(clientBefore, clientAfter);
+});
+
+test("status connectionState ve discoveryState birbirine karışmıyor", () => {
+  const status = WhatsAppManager.getStatus();
+  assert.ok(["IDLE", "CONNECTING", "CONNECTED", "AUTHENTICATED", "FAILED", "DISCONNECTED", "RATE_LIMITED"].includes(status.connectionStatus));
+  assert.ok(["NOT_STARTED", "LOADING", "RETRYING", "READY", "FAILED"].includes(status.groupDiscoveryStatus));
 });
