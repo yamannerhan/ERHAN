@@ -3664,7 +3664,7 @@ function ElemanSourcesSection({ apiCall, toast }: { apiCall: (path: string, meth
               {source.isScanning && <span className="font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
               <span className={`font-bold px-2 py-0.5 rounded-full ${source.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
                 {source.initialScanDone
-                  ? "Günlük dinleme (30 dk)"
+                  ? `Dinleme (~${source.checkInterval || 10} dk)`
                   : `İlk tarama %${source.initialScanProgress || 1}${source.currentCity ? ` — ${source.currentCity}` : ""}`}
               </span>
               <span className="text-slate-500">İl {Math.min((source.currentCityIndex ?? 0) + 1, cityCount || 1)}/{cityCount || "…"}</span>
@@ -3677,8 +3677,9 @@ function ElemanSourcesSection({ apiCall, toast }: { apiCall: (path: string, meth
             </div>
             <div className="flex flex-wrap gap-3 text-[10px] text-slate-500">
               <span>Okunan: {source.lastScanMessagesRead}</span>
-              <span>Bulunan: {source.lastScanFound}</span>
-              <span>Çift: {source.lastScanDuplicates}</span>
+              <span className="text-emerald-400 font-bold">Eklenen: {source.lastScanAdded}</span>
+              <span>Çift (birebir aynı): {source.lastScanDuplicates}</span>
+              <span>Atlanan: {Math.max(0, (source.lastScanFound ?? 0) - (source.lastScanAdded ?? 0) - (source.lastScanDuplicates ?? 0))}</span>
               <span>Hata: {source.lastScanErrors}</span>
               <span>Son: {source.lastCheckedAt ? new Date(source.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
             </div>

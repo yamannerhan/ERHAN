@@ -27,7 +27,7 @@ import {
   poolMessageExternalId,
   poolMessageSourceUrl,
 } from "../services/url-pool-client";
-import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, formatPoolListingDescription } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, isUrlPoolJobPosting, formatPoolListingDescription } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -407,18 +407,6 @@ function isWhatsAppSecurityJobPosting(text: string): boolean {
   return false;
 }
 
-/** Mesaj havuzu zaten ayıklı — sadece spam / iş arayan / temizlik elensin. */
-function isUrlPoolJobPosting(text: string): boolean {
-  if (text.trim().length < 25) return false;
-  if (isSponsoredPost(text) || isJobSeekerPost(text) || isNonSecurityStaffPosting(text)) return false;
-  if (isSecurityJobPosting(text) || isWhatsAppSecurityJobPosting(text)) return true;
-  const normalized = asciiTr(text);
-  // Havuzdaki çoğu mesaj güvenlik ilanı; gevşek güvenlik + iş sinyali yeter
-  const softSecurity = /\b(?:guvenlik|ogg|5188|koruma)\b/.test(normalized);
-  const softJob = /(?:araniyor|alinacak|basvuru|maas|ucret|proje|vardiya|personel|ilan|acil|ihtiyac|kimlik)/.test(normalized);
-  return softSecurity && softJob;
-}
-
 function extractTelegramUsername(url: string): string | null {
   const m = url.match(/t\.me\/(?:s\/)?([^/?+\s]+)/);
   if (!m) return null;
@@ -753,16 +741,18 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // İlk tarama + 10 dk grace: yalnız admin (kaynak etiketli).
-  // Sonra: herkese bildirim + sohbet; admin'e ayrıca kaynak (Link/Telegram/…).
+  // URL havuzu: ilk tarama dışında yeni ilan hemen herkese duyurulur (grace yok).
+  // Telegram/WA: ilk tarama + 10 dk grace sonrası herkese.
   try {
     const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    const ready = isBotPublicAnnounceReady({
-      isInitialScan,
-      initialScanDone: source.initialScanDone,
-      initialScanCompletedAt: source.initialScanCompletedAt,
-    });
+    const ready = source.platform === "url_pool"
+      ? !isInitialScan
+      : isBotPublicAnnounceReady({
+        isInitialScan,
+        initialScanDone: source.initialScanDone,
+        initialScanCompletedAt: source.initialScanCompletedAt,
+      });
     const sourceLabel = announceSourceLabel(source.platform);
     void announceNewListing({
       id: newListing.id,
@@ -1941,11 +1931,31 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
   await patchSourceProgress(source.id, { isScanning: true, lastError: null });
 
   const cursorId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
-  const messages = await fetchAllPoolMessages(base, {
+  const fresh = await fetchAllPoolMessages(base, {
     pageSize: 100,
-    maxPages: source.initialScanDone ? 5 : 40,
+    // Dinlemede daha fazla yeni mesaj yakala; ilk taramada geniş tara
+    maxPages: source.initialScanDone ? 25 : 80,
     minIdExclusive: source.initialScanDone ? cursorId : 0,
   });
+
+  // Dinlemede son sayfaları da tekrar dene — eskiden sıkı filtreyle atlananlar yayınlansın
+  let messages = fresh;
+  if (source.initialScanDone) {
+    const catchUp = await fetchAllPoolMessages(base, {
+      pageSize: 100,
+      maxPages: 3,
+      minIdExclusive: 0,
+    });
+    const seen = new Set(fresh.map((m) => Number(m.id) || 0));
+    for (const m of catchUp) {
+      const id = Number(m.id) || 0;
+      if (!seen.has(id)) {
+        seen.add(id);
+        messages.push(m);
+      }
+    }
+    messages.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  }
 
   let newestId = cursorId;
   for (const msg of messages) {
@@ -1983,7 +1993,8 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     lastError: null,
     lastTelegramMessageId: newestId > 0 ? String(newestId) : source.lastTelegramMessageId,
     lastScanMessagesRead: stats.messagesRead,
-    lastScanFound: stats.published + stats.duplicates,
+    // Bulunan = yayınlanan + çift + filtreden geçenler (atlananlar dahil görünsün)
+    lastScanFound: stats.published + stats.duplicates + stats.skipped,
     lastScanAdded: stats.published,
     lastScanDuplicates: stats.duplicates,
     lastScanErrors: stats.errors,

@@ -519,6 +519,31 @@ export function isJobSeekerPost(text: string): boolean {
   return !HIRING_SIGNAL.test(t);
 }
 
+/**
+ * Mesaj havuzu (url_pool) için gevşek filtre.
+ * Havuz önceden ayıklı; sadece bariz spam / iş arayan / temizlik elenir.
+ * Çift ilan: yalnızca birebir aynı metin (hash) — burada benzerlik yok.
+ */
+export function isUrlPoolJobPosting(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 12) return false;
+  if (isSponsoredPost(t)) return false;
+  if (isJobSeekerPost(t)) return false;
+  if (isNonSecurityStaffPosting(t)) return false;
+  if (isSecurityJobPosting(t)) return true;
+
+  const n = normalizeTr(t);
+  const softSecurity = /(?:g[üu]venlik|ögg|ogg|5188|koruma)/.test(n);
+  const softJob = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacak|al[ıi]nacakt[ıi]r|ba[şs]vuru|maa[şs]|[üu]cret|proje|vardiya|personel|ilan|acil|ihtiya[çc]|kimlik|eleman|i[şs]e\s*al[ıi]m|kontenjan|g[öo]rev|laz[ıi]m|çalı[şs]ma|sgk|servis|yemek|hakedi[şs]|yevmiye)/.test(n);
+  const hasPhone = /(?:\+?90|0)?\s*5\d{2}[\s().-]*\d{3}/.test(t);
+
+  if (softSecurity) return true;
+  if (softJob && t.length >= 18) return true;
+  if (hasPhone && t.length >= 25) return true;
+  if (t.length >= 30) return true;
+  return false;
+}
+
 export function isSecurityJobPosting(text: string): boolean {
   if (text.length < 35) return false;
   if (isSponsoredPost(text) || isNonSecurityStaffPosting(text) || isJobSeekerPost(text)) return false;
