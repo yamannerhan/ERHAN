@@ -4,10 +4,10 @@ import { createServer } from "node:http";
 
 const platformArg = process.argv.find((value) => value.startsWith("--platform="))?.split("=")[1];
 if (platformArg) process.env["BOT_PLATFORMS"] = platformArg;
-const platforms = (process.env["BOT_PLATFORMS"] ?? "telegram,whatsapp,eleman")
+const platforms = (process.env["BOT_PLATFORMS"] ?? "telegram,url_pool,eleman")
   .split(",")
   .map((value) => value.trim().toLowerCase())
-  .filter((value) => ["telegram", "whatsapp", "eleman"].includes(value));
+  .filter((value) => ["telegram", "whatsapp", "url_pool", "eleman"].includes(value));
 if (platforms.length === 0) throw new Error("BOT_PLATFORMS en az bir geçerli platform içermeli");
 
 const lockClient = await pool.connect();

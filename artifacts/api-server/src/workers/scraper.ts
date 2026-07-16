@@ -20,6 +20,13 @@ import {
   finalizeElemanListingText,
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
+import {
+  fetchAllPoolMessages,
+  fetchPoolStats,
+  normalizePoolBaseUrl,
+  poolMessageExternalId,
+  poolMessageSourceUrl,
+} from "../services/url-pool-client";
 import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
@@ -161,7 +168,7 @@ async function findListingBySourceMessage(sourceId: number, messageId: string): 
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
-  if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman") return true;
+  if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "url_pool" || source.platform === "eleman") return true;
   return source.autoPublish || !source.requireApproval;
 }
 
@@ -197,12 +204,12 @@ let scraperIntervalHandle: ReturnType<typeof setInterval> | null = null;
 const workerTimerHandles = new Set<ReturnType<typeof setTimeout>>();
 let workerStopping = false;
 const enabledBotPlatforms = new Set(
-  (process.env["BOT_PLATFORMS"] ?? "telegram,whatsapp,eleman")
+  (process.env["BOT_PLATFORMS"] ?? "telegram,url_pool,eleman")
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
 );
-const botPlatformEnabled = (platform: "telegram" | "whatsapp" | "eleman") =>
+const botPlatformEnabled = (platform: "telegram" | "whatsapp" | "eleman" | "url_pool") =>
   enabledBotPlatforms.has(platform);
 /** Admin «Tüm Botları Durdur» — sadece Telegram tarama durur (WA/Eleman etkilenmez) */
 let telegramScraperPaused = false;
@@ -525,18 +532,19 @@ async function processMessage(
 ): Promise<ProcessResult> {
   if (!text?.trim()) return "skipped";
   const matchesSecurityJob = isSecurityJobPosting(text)
-    || (source.platform === "whatsapp" && isWhatsAppSecurityJobPosting(text));
+    || ((source.platform === "whatsapp" || source.platform === "url_pool") && isWhatsAppSecurityJobPosting(text));
   if (!matchesSecurityJob) return "skipped";
 
   if (isInitialScan && postedAt) {
-    const maxAgeMs = source.platform === "whatsapp" ? WA_INITIAL_SCAN_MS : INITIAL_SCAN_MS;
+    const maxAgeMs = (source.platform === "whatsapp" || source.platform === "url_pool")
+      ? WA_INITIAL_SCAN_MS
+      : INITIAL_SCAN_MS;
     if (Date.now() - postedAt.getTime() > maxAgeMs) return "skipped";
   }
 
   const explicitLocation = extractExplicitWorkLocation(text);
-  // WhatsApp'ta yedekteki çalışan konum davranışını koru. Daha katı açık-konum
-  // tercihi sadece diğer botlarda devam etsin; Telegram/Eleman davranışı değişmez.
-  const location = source.platform === "whatsapp"
+  // WhatsApp / havuz: esnek konum. Telegram/Eleman davranışı değişmez.
+  const location = (source.platform === "whatsapp" || source.platform === "url_pool")
     ? extractLocation(text)
     : (explicitLocation ?? extractLocation(text));
   if (!matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)) {
@@ -664,6 +672,7 @@ async function processMessage(
       sourceType: "bot_imported",
       sourceName: source.platform === "telegram" ? "Telegram"
         : source.platform === "whatsapp" ? "WhatsApp"
+        : source.platform === "url_pool" ? "İlan Havuzu"
         : source.platform === "eleman" ? "Eleman.net"
         : (source.platform || "Kaynak"),
       sourcePublishedAt: postedAt ?? now,
@@ -1730,8 +1739,16 @@ async function runScraperCycleInner(force = false): Promise<void> {
     }
   }
 
+  // Harici mesaj havuzu (wpbot URL) — WhatsApp client gerekmez
+  if (botPlatformEnabled("url_pool")) {
+    const poolSources = sources.filter((s) => s.platform === "url_pool");
+    if (poolSources.length > 0) {
+      await scanUrlPoolSources(poolSources, force);
+    }
+  }
+
   for (const source of sources) {
-    if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman") continue;
+    if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman" || source.platform === "url_pool") continue;
 
     const intervalMin = source.checkInterval ?? 15;
     const intervalMs = intervalMin * 60 * 1000;
@@ -1861,6 +1878,255 @@ async function scanWhatsAppSources(
       });
     }
   }
+}
+
+/** Harici mesaj havuzu (wpbot) — URL üzerinden ilan çek. */
+async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Promise<{
+  messagesRead: number;
+  published: number;
+  duplicates: number;
+  skipped: number;
+  errors: number;
+}> {
+  const stats = { messagesRead: 0, published: 0, duplicates: 0, skipped: 0, errors: 0 };
+  const base = normalizePoolBaseUrl(source.url);
+  if (!base) throw new Error("Geçersiz havuz URL");
+
+  await patchSourceProgress(source.id, { isScanning: true, lastError: null });
+
+  const cursorId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
+  const messages = await fetchAllPoolMessages(base, {
+    pageSize: 100,
+    maxPages: source.initialScanDone ? 5 : 40,
+    minIdExclusive: source.initialScanDone ? cursorId : 0,
+  });
+
+  let newestId = cursorId;
+  for (const msg of messages) {
+    stats.messagesRead += 1;
+    const mid = Number(msg.id) || 0;
+    if (mid > newestId) newestId = mid;
+    const text = String(msg.content ?? "").trim();
+    if (!text) { stats.skipped += 1; continue; }
+    const postedAt = msg.timestamp ? new Date(msg.timestamp) : undefined;
+    try {
+      const result = await processMessage(
+        source,
+        poolMessageExternalId(msg),
+        text,
+        poolMessageSourceUrl(base, msg),
+        postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : undefined,
+        !source.initialScanDone,
+      );
+      if (result === "added" || result === "updated") stats.published += 1;
+      else if (result === "duplicate") stats.duplicates += 1;
+      else stats.skipped += 1;
+    } catch (err) {
+      stats.errors += 1;
+      logger.warn({ err, sourceId: source.id, poolId: msg.id }, "scraper: url_pool message failed");
+    }
+  }
+
+  const done = true;
+  await patchSourceProgress(source.id, {
+    isScanning: false,
+    lastCheckedAt: new Date(),
+    lastError: null,
+    lastTelegramMessageId: newestId > 0 ? String(newestId) : source.lastTelegramMessageId,
+    lastScanMessagesRead: stats.messagesRead,
+    lastScanFound: stats.published + stats.duplicates,
+    lastScanAdded: stats.published,
+    lastScanDuplicates: stats.duplicates,
+    lastScanErrors: stats.errors,
+    lastScanPublished: stats.published,
+    totalImported: (source.totalImported ?? 0) + stats.published,
+    initialScanDone: done,
+    initialScanProgress: 100,
+    initialScanCompletedAt: source.initialScanCompletedAt ?? (done ? new Date() : null),
+  });
+
+  logger.info({
+    sourceId: source.id,
+    base,
+    ...stats,
+    newestId,
+    operation: "url_pool_scan",
+  }, "scraper: url_pool scan done");
+
+  return stats;
+}
+
+async function scanUrlPoolSources(
+  poolSources: Array<typeof sourcesTable.$inferSelect>,
+  force: boolean,
+): Promise<void> {
+  const now = Date.now();
+  for (const source of poolSources) {
+    const intervalMs = Math.max(5, source.checkInterval ?? 10) * 60_000;
+    const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
+    if (!force && source.initialScanDone && now - lastChecked < intervalMs) continue;
+    if (source.isScanning || !(await acquireSourceScanLock(source.id))) continue;
+    try {
+      await checkUrlPoolSource(source);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ err, sourceId: source.id }, "scraper: url_pool kaynak taraması başarısız");
+      await patchSourceProgress(source.id, {
+        lastCheckedAt: new Date(),
+        lastError: message.slice(0, 500),
+        lastScanErrors: (source.lastScanErrors ?? 0) + 1,
+        isScanning: false,
+      });
+    } finally {
+      await releaseSourceScanLock(source.id);
+    }
+  }
+}
+
+/** Admin: havuz URL kaydet / güncelle ve taramayı başlat. */
+export async function saveUrlPoolSource(poolUrl: string): Promise<{
+  sourceId: number;
+  created: boolean;
+  baseUrl: string;
+  poolTotal: number;
+}> {
+  const base = normalizePoolBaseUrl(poolUrl);
+  if (!base) throw new Error("Geçersiz URL. Örn: https://wpbot-production-cf99.up.railway.app");
+
+  let poolTotal = 0;
+  try {
+    const st = await fetchPoolStats(base);
+    poolTotal = st.total;
+  } catch (err) {
+    throw new Error(
+      `Havuza ulaşılamadı: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  let [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "url_pool"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+  let created = false;
+
+  if (!source) {
+    [source] = await db.insert(sourcesTable).values({
+      name: "İlan Havuzu",
+      platform: "url_pool",
+      url: base,
+      active: true,
+      status: "active",
+      autoPublish: true,
+      requireApproval: false,
+      checkInterval: 10,
+      initialScanDone: false,
+      initialScanProgress: 1,
+    }).returning();
+    created = true;
+  } else {
+    await db.update(sourcesTable).set({
+      url: base,
+      name: "İlan Havuzu",
+      active: true,
+      status: "active",
+      lastError: null,
+    }).where(eq(sourcesTable.id, source.id));
+    source = { ...source, url: base };
+  }
+
+  if (!source) throw new Error("Havuz kaynağı oluşturulamadı");
+  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: url_pool manuel tarama hatası"));
+  return { sourceId: source.id, created, baseUrl: base, poolTotal };
+}
+
+export async function triggerUrlPoolScan(): Promise<{ sourceId: number; ready: boolean }> {
+  const [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "url_pool"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+  if (!source) throw new Error("Önce havuz URL kaydedin");
+  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: url_pool scan-now hatası"));
+  return { sourceId: source.id, ready: true };
+}
+
+export async function getUrlPoolStatus() {
+  const [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "url_pool"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+  if (!source) {
+    return {
+      configured: false,
+      baseUrl: null as string | null,
+      poolTotal: null as number | null,
+      listening: false,
+      source: null as null,
+    };
+  }
+  let poolTotal: number | null = null;
+  let listening = false;
+  try {
+    const st = await fetchPoolStats(source.url);
+    poolTotal = st.total;
+    listening = st.listening;
+  } catch { /* ignore remote errors in status */ }
+
+  const [countRow] = await db.select({ c: sql<number>`count(*)::int` })
+    .from(listingsTable)
+    .where(and(eq(listingsTable.sourceId, source.id), eq(listingsTable.status, "active")));
+
+  return {
+    configured: true,
+    baseUrl: source.url,
+    poolTotal,
+    listening,
+    source: {
+      id: source.id,
+      name: source.name,
+      active: source.active,
+      checkInterval: source.checkInterval,
+      initialScanDone: source.initialScanDone,
+      isScanning: source.isScanning,
+      totalImported: source.totalImported,
+      listingCount: Number(countRow?.c ?? 0),
+      lastScanMessagesRead: source.lastScanMessagesRead,
+      lastScanFound: source.lastScanFound,
+      lastScanAdded: source.lastScanAdded,
+      lastScanDuplicates: source.lastScanDuplicates,
+      lastScanErrors: source.lastScanErrors,
+      lastCheckedAt: source.lastCheckedAt?.toISOString() ?? null,
+      lastError: source.lastError,
+      cursorId: source.lastTelegramMessageId,
+    },
+  };
+}
+
+export async function resetUrlPoolSource(): Promise<{ deletedListings: number }> {
+  const [source] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "url_pool"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+  if (!source) return { deletedListings: 0 };
+  const deletedListings = await deleteListingsForSource(source);
+  await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, source.id));
+  await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, source.id));
+  await db.update(sourcesTable).set({
+    lastCheckedAt: null,
+    lastTelegramMessageId: null,
+    initialScanDone: false,
+    initialScanProgress: 1,
+    initialScanCompletedAt: null,
+    isScanning: false,
+    lastError: null,
+    lastScanMessagesRead: 0,
+    lastScanFound: 0,
+    lastScanAdded: 0,
+    lastScanDuplicates: 0,
+    lastScanErrors: 0,
+    lastScanPublished: 0,
+  }).where(eq(sourcesTable.id, source.id));
+  void runScraperCycle(true).catch(() => undefined);
+  return { deletedListings };
 }
 
 export async function triggerElemanScan(): Promise<{ sourceId: number; created: boolean }> {

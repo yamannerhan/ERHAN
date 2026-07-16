@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { db, sourcesTable, pendingJobsTable, importedPostsTable, listingsTable } from "@workspace/db";
 import { eq, desc, and, inArray, sql, count } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
-import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused } from "../workers/scraper";
+import { isTelegramTokenSet, triggerRescan, reparseImportedListings, refreshScraperInterval, triggerDeepRescan30Days, resetSingleTelegramSource, resetAllTelegramBots, resetAllBotsAndRescan, dedupeExistingListings, triggerElemanScan, resetAllElemanSources, getEffectiveScanIntervalMinutes, getScanPhase, pauseTelegramScraper, resumeTelegramScraper, isTelegramScraperPaused, saveUrlPoolSource, triggerUrlPoolScan, getUrlPoolStatus, resetUrlPoolSource } from "../workers/scraper";
 import { ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
 import { isWhatsAppReady, hasWhatsAppLocalSession } from "../modules/whatsapp";
 import { ELEMAN_CITY_LIST, elemanCityCount, parseElemanCursor, getElemanCityByIndex } from "../services/eleman-client";
@@ -343,6 +343,63 @@ router.post("/admin/eleman/reset", authMiddleware, requireAdmin, async (_req, re
       deletedListings: result.deletedListings,
       sources: result.sources,
       message: `${result.deletedListings} Eleman.net ilanı silindi. İller baştan taranacak (telefon zorunlu).`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** Harici İlan Havuzu (wpbot Mesaj Havuzu URL) */
+router.get("/admin/url-pool/status", authMiddleware, requireAdmin, async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    res.json(await getUrlPoolStatus());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/admin/url-pool/save", authMiddleware, requireAdmin, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const url = String((req.body as { url?: string })?.url ?? "").trim();
+    if (!url) {
+      res.status(400).json({ success: false, error: "URL gerekli" });
+      return;
+    }
+    const result = await saveUrlPoolSource(url);
+    res.json({
+      success: true,
+      ...result,
+      message: result.created
+        ? `Havuz kaydedildi (${result.poolTotal} mesaj). Otomatik tarama başladı.`
+        : `Havuz URL güncellendi (${result.poolTotal} mesaj). Tarama tetiklendi.`,
+    });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/admin/url-pool/scan-now", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const result = await triggerUrlPoolScan();
+    res.json({
+      success: true,
+      ...result,
+      message: "Havuz taraması tetiklendi. Yeni mesajlar ilan olarak işlenecek.",
+    });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/admin/url-pool/reset", authMiddleware, requireAdmin, async (_req, res) => {
+  try {
+    const result = await resetUrlPoolSource();
+    res.json({
+      success: true,
+      deletedListings: result.deletedListings,
+      message: `${result.deletedListings} havuz ilanı silindi. Havuz baştan taranacak.`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

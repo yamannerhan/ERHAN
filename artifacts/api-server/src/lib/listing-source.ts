@@ -2,7 +2,7 @@ import type { User } from "@workspace/db";
 
 export type ListingSourceType = "direct_user" | "direct_company" | "bot_imported" | "admin_created";
 
-export const BOT_PLATFORMS = ["telegram", "whatsapp", "eleman", "demo"] as const;
+export const BOT_PLATFORMS = ["telegram", "whatsapp", "url_pool", "eleman", "demo"] as const;
 
 function dateFromSourceMessageTimestamp(ts?: number | null): Date | null {
   if (ts == null || !Number.isFinite(ts) || ts <= 0) return null;
@@ -34,6 +34,7 @@ export function platformSourceName(platform: string | null | undefined): string 
   switch ((platform || "").toLowerCase()) {
     case "telegram": return "Telegram";
     case "whatsapp": return "WhatsApp";
+    case "url_pool": return "İlan Havuzu";
     case "eleman": return "Eleman.net";
     case "demo": return "Demo";
     default: return platform?.trim() || "Kaynak";

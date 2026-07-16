@@ -3364,435 +3364,86 @@ function sanitizeWaUserMessage(raw: string | null | undefined, code?: string | n
   return text.split("\n")[0]?.slice(0, 180) || "";
 }
 
-function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
-  const [loading, setLoading] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [qr, setQr] = useState<string | null>(null);
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [pairingMode, setPairingMode] = useState(false);
-  const [qrStatus, setQrStatus] = useState<"idle" | "connecting" | "ready" | "failed">("idle");
-  const [sessionState, setSessionState] = useState<string>("IDLE");
-  const [connectionStatus, setConnectionStatus] = useState<string>("IDLE");
-  const [syncStatus, setSyncStatus] = useState<string>("NOT_STARTED");
-  const [uiStatus, setUiStatus] = useState<string>("");
-  const [phoneMasked, setPhoneMasked] = useState<string | null>(null);
-  const [pairingCooldown, setPairingCooldown] = useState(0);
-  const [chatCount, setChatCount] = useState(0);
-  const [groupCountUi, setGroupCountUi] = useState(0);
-  const [whatsappState, setWhatsappState] = useState<string | null>(null);
-  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
-  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(null);
-  const [groups, setGroups] = useState<Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel"; selected?: boolean }>>([]);
-  const [discoveryDiagnostics, setDiscoveryDiagnostics] = useState<{
-    ready: boolean; chatCount: number; groupCount: number; channelCount: number;
-    state: string | null; wwebVersion: string | null;
-    errors: string[]; steps: string[];
-  } | null>(null);
-  const [errorLog, setErrorLog] = useState<string>("");
-  const [lastScanAt, setLastScanAt] = useState<string>("Henüz taranmadı");
-  const [savedSources, setSavedSources] = useState<Array<{
-    id: number; name: string; url: string; kind?: "group" | "channel"; active: boolean; checkInterval: number;
-    initialScanDone: boolean; initialScanProgress: number; isScanning: boolean;
+function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
+  const [url, setUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [configured, setConfigured] = useState(false);
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [poolTotal, setPoolTotal] = useState<number | null>(null);
+  const [listening, setListening] = useState(false);
+  const [source, setSource] = useState<{
+    id: number; name: string; active: boolean; checkInterval: number;
+    initialScanDone: boolean; isScanning: boolean;
     totalImported: number; listingCount: number;
     lastScanMessagesRead: number; lastScanFound: number; lastScanAdded: number;
     lastScanDuplicates: number; lastScanErrors: number;
-    lastCheckedAt: string | null; lastMessageAt: string | null; lastError: string | null;
-  }>>([]);
-  const [totals, setTotals] = useState({ groups: 0, totalImported: 0, listingCount: 0, lastAdded: 0 });
-  const [resetting, setResetting] = useState(false);
-  const [resettingSourceId, setResettingSourceId] = useState<number | null>(null);
-  const [form, setForm] = useState({
-    sourceName: "",
-    phoneNumber: "",
-  });
-
-  // Race condition önleme: aynı anda tek refresh, eski cevap state'i ezmesin
-  const refreshLockRef = useRef(false);
-  const lastRefreshTsRef = useRef(0);
+    lastCheckedAt: string | null; lastError: string | null;
+  } | null>(null);
 
   const refresh = async () => {
-    if (refreshLockRef.current) return;
-    refreshLockRef.current = true;
-    const thisRefreshTs = Date.now();
-    lastRefreshTsRef.current = thisRefreshTs;
     try {
-      const status = await apiCall("/admin/whatsapp/status", "GET");
-      if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
-      const nextStatus = status as {
-        connected?: boolean; ready?: boolean; qr?: string | null;
-        pairingCode?: string | null; pairing?: boolean;
-        error?: string | null; starting?: boolean;
-        authAccepted?: boolean; phase?: string;
-        connectionMode?: "qr" | "pairing_code";
-        mode?: "qr" | "pairing_code";
-        sessionState?: string;
-        status?: string;
-        connectionStatus?: string;
-        syncStatus?: string;
-        groupDiscoveryStatus?: string;
-        groupDiscoveryMessage?: string | null;
-        expiresInSeconds?: number | null;
-        chatCount?: number;
-        groupCount?: number;
-        channelCount?: number;
-        whatsappState?: string | null;
-        lastSyncError?: string | null;
-        sessionId?: string;
-        clientInstanceId?: string | null;
-        updatedAt?: string;
-        uiStatus?: string;
-        phoneMasked?: string | null;
-        pairingCooldownSeconds?: number;
-        errorCode?: string | null;
+      const r = await apiCall("/admin/url-pool/status", "GET") as {
+        configured?: boolean;
+        baseUrl?: string | null;
+        poolTotal?: number | null;
+        listening?: boolean;
+        source?: typeof source;
       };
-      if (trackedSessionId && nextStatus.sessionId && nextStatus.sessionId !== trackedSessionId) {
-        setPairingCode(null);
-        setQr(null);
-        setTrackedSessionId(nextStatus.sessionId);
-      } else if (nextStatus.sessionId) {
-        setTrackedSessionId(nextStatus.sessionId);
-      }
-      const connStatus = nextStatus.connectionStatus ?? "";
-      const discovery = nextStatus.groupDiscoveryStatus ?? nextStatus.syncStatus ?? "";
-      const state = nextStatus.sessionState ?? nextStatus.status ?? "";
-      const discoveryReady = discovery === "READY";
-      const authPending = connStatus === "AUTHENTICATED"
-        || state === "AUTHENTICATED"
-        || !!nextStatus.authAccepted && connStatus !== "CONNECTED" && state !== "CONNECTED" && state !== "READY";
-      // Bağlantı = CONNECTED; grup keşfi ayrı (LOADING/RETRYING iken de bağlı sayılır)
-      const waConnected = connStatus === "CONNECTED"
-        || nextStatus.whatsappState === "CONNECTED"
-        || !!nextStatus.connected
-        || !!nextStatus.ready
-        || state === "CONNECTED"
-        || state === "READY"
-        || state === "SYNCING";
-      const realFailure = connStatus === "FAILED"
-        || connStatus === "DISCONNECTED"
-        || state === "FAILED"
-        || state === "DISCONNECTED";
-      setSessionState(state);
-      setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : authPending ? "AUTHENTICATED" : "IDLE"));
-      setSyncStatus(discovery || (discoveryReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
-      setWhatsappState(nextStatus.whatsappState ?? null);
-      setLastSyncError(sanitizeWaUserMessage(nextStatus.lastSyncError ?? nextStatus.groupDiscoveryMessage, nextStatus.errorCode));
-      setUiStatus(nextStatus.uiStatus || "");
-      setPhoneMasked(nextStatus.phoneMasked ?? null);
-      setPairingCooldown(nextStatus.pairingCooldownSeconds ?? 0);
-      setChatCount(nextStatus.chatCount ?? 0);
-      setGroupCountUi(nextStatus.groupCount ?? 0);
-      const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
-      const isPairing = mode === "pairing_code" && !waConnected && !authPending
-        && state !== "CONNECTED";
-      setConnected(waConnected);
-      setPairingMode(isPairing && !realFailure);
-      setQr((isPairing || waConnected || authPending) ? null : (nextStatus.qr ?? null));
-      setPairingCode((prev) => {
-        if (waConnected || authPending || realFailure) return null;
-        if (!isPairing && !nextStatus.pairingCode) return null;
-        if (nextStatus.pairingCode) return nextStatus.pairingCode;
-        return prev;
-      });
-
-      const userFacingError = (() => {
-        if (nextStatus.uiStatus) return nextStatus.uiStatus;
-        if (waConnected && discoveryReady) return "Bağlandı";
-        if (waConnected) return "Bağlandı";
-        if (authPending) return "Telefonda kodu girin";
-        if (nextStatus.pairingCode || state === "PAIRING_READY" || state === "PAIRING_CODE_READY") {
-          return "Eşleştirme kodu hazır";
-        }
-        if (state === "WAITING_FOR_PAIRING") return "Kod bekleniyor";
-        if (state === "RATE_LIMITED" || nextStatus.errorCode === "PAIRING_RATE_LIMITED") {
-          return "Çok fazla deneme yapıldı";
-        }
-        if (state === "STARTING" || state === "INITIALIZING" || nextStatus.starting) {
-          return "Bağlantı hazırlanıyor";
-        }
-        if (state === "QR_READY") return "Bağlantı hazırlanıyor";
-        if (realFailure || state === "DISCONNECTED") return "Bağlantı kesildi";
-        return sanitizeWaUserMessage(nextStatus.error, nextStatus.errorCode);
-      })();
-      setErrorLog(userFacingError);
-      if (waConnected) setQrStatus("ready");
-      else if (realFailure) setQrStatus("failed");
-      else if (isPairing || authPending || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) {
-        setQrStatus("connecting");
-      }
-
-      // Grupları CONNECTED iken çek — READY bekleme
-      if (waConnected) {
-        try {
-          const groupList = await apiCall("/admin/whatsapp/groups", "GET");
-          if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
-          const parsed = groupList as {
-            success?: boolean;
-            groups?: Array<{ id: string; name: string; participants?: number; kind?: "group" | "channel" }>;
-            diagnostics?: typeof discoveryDiagnostics;
-          };
-          setDiscoveryDiagnostics(parsed.diagnostics ?? null);
-          setGroups(prev => {
-            const selected = new Set(prev.filter(g => g.selected).map(g => g.id));
-            return (parsed.groups ?? []).map(g => ({ ...g, selected: selected.has(g.id) }));
-          });
-        } catch {
-          // Keşif RETRYING iken 503 olabilir — bağlantı kopmuş sayma
-        }
-      }
-
-      try {
-        const src = await apiCall("/admin/whatsapp/sources", "GET") as {
-          sources?: typeof savedSources;
-          totals?: typeof totals;
-        };
-        if (thisRefreshTs !== lastRefreshTsRef.current) return; // eski cevap
-        setSavedSources(src.sources ?? []);
-        const persisted = new Set((src.sources ?? []).filter((source) => source.active).map((source) => source.url));
-        setGroups(prev => prev.map(group => ({ ...group, selected: persisted.has(group.id) || !!group.selected })));
-        if (src.totals) setTotals(src.totals);
-      } catch { /* ignore */ }
-    } catch (error) {
-      const typed = error as Error & { code?: string };
-      setErrorLog(sanitizeWaUserMessage(typed.message, typed.code) || "Bağlantı hatası");
-      setQrStatus("failed");
-    } finally {
-      refreshLockRef.current = false;
-    }
+      setConfigured(!!r.configured);
+      setBaseUrl(r.baseUrl ?? null);
+      setPoolTotal(r.poolTotal ?? null);
+      setListening(!!r.listening);
+      setSource(r.source ?? null);
+      if (r.baseUrl && !url) setUrl(r.baseUrl);
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
     void refresh();
-    const needsFastPoll = (
-      (!connected && (
-        sessionState === "AUTHENTICATED"
-        || connectionStatus === "AUTHENTICATED"
-        || sessionState === "STARTING"
-        || sessionState === "INITIALIZING"
-        || sessionState === "PAIRING_READY"
-        || sessionState === "PAIRING_CODE_READY"
-        || sessionState === "PAIRING_CODE_REQUESTING"
-        || sessionState === "QR_READY"
-        || sessionState === "WAITING_FOR_PAIRING"
-        || pairingMode
-        || !!pairingCode
-        || qrStatus === "connecting"
-      ))
-      || (connected && (syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "NOT_STARTED"))
-    );
-    const timer = window.setInterval(() => { void refresh(); }, needsFastPoll ? 2000 : 4000);
-    return () => {
-      window.clearInterval(timer);
-      // NOT: Burada WhatsApp bağlantısı kesilmemeli; sadece timer temizlenir.
-    };
-  }, [qrStatus, pairingMode, pairingCode, connected, sessionState, connectionStatus, syncStatus]);
+    const t = window.setInterval(() => { void refresh(); }, 5000);
+    return () => window.clearInterval(t);
+  }, []);
 
-  const reloadChats = async () => {
-    if (loading) return;
-    setLoading(true);
-    try {
-      await apiCall("/admin/whatsapp/reload-chats", "POST");
-      toast({
-        title: "Sohbet senkronu",
-        description: "Mevcut bağlantı üzerinde sohbetler yeniden yükleniyor. Telefonu yeniden bağlamayın.",
-      });
-      await refresh();
-    } catch (error) {
-      toast({
-        title: "Yeniden yükleme başarısız",
-        description: error instanceof Error ? error.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const connect = async (usePairing: boolean) => {
-    if (loading) return;
-    if (usePairing && pairingCooldown > 0) {
-      toast({
-        title: "Çok fazla deneme",
-        description: `${pairingCooldown} sn bekleyip tekrar deneyin.`,
-        variant: "destructive",
-      });
+  const saveUrl = async () => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      toast({ title: "URL gerekli", description: "İlan toplayıcı adresi girin.", variant: "destructive" });
       return;
     }
-    setLoading(true);
+    setSaving(true);
     try {
-      if (usePairing && !form.phoneNumber.trim()) {
-        toast({ title: "Telefon numarası gerekli", description: "Örn: 05xx… veya 905xx…", variant: "destructive" });
-        return;
-      }
-      setQrStatus("connecting");
-      setPairingMode(usePairing);
-      setPairingCode(null);
-      setQr(null);
-      setErrorLog("Bağlantı hazırlanıyor");
-      const body = usePairing
-        ? { mode: "pairing_code", phoneNumber: form.phoneNumber.trim() }
-        : { mode: "qr" };
-      const startResult = await apiCall("/admin/whatsapp/start", "POST", body) as {
-        pairingCode?: string | null;
-        phase?: string;
-        status?: string;
-        mode?: string;
-        message?: string;
-        qr?: string | null;
-        uiStatus?: string;
-        phoneMasked?: string | null;
-      };
-      if (startResult.mode === "pairing_code" || usePairing) {
-        setPairingMode(true);
-        setQr(null);
-        if (startResult.pairingCode) setPairingCode(startResult.pairingCode);
-        if (startResult.phoneMasked) setPhoneMasked(startResult.phoneMasked);
-      } else {
-        setPairingMode(false);
-        setPairingCode(null);
-        if (startResult.qr) setQr(startResult.qr);
-      }
-      await refresh();
-      toast({
-        title: usePairing ? "Eşleştirme kodu" : "QR bağlantısı",
-        description: sanitizeWaUserMessage(startResult.message) || startResult.uiStatus
-          || (usePairing
-            ? "Eşleştirme kodu hazır. WhatsApp uygulamanızdan girin."
-            : "WhatsApp → Bağlı Cihazlar → Cihaz bağla → QR okut"),
-      });
-    } catch (error) {
-      const typed = error as Error & { status?: number; code?: string };
-      if (typed.status === 409 || typed.code === "CLIENT_INITIALIZING" || typed.code === "PAIRING_IN_PROGRESS") {
-        await refresh().catch(() => undefined);
-        toast({
-          title: "Bağlantı devam ediyor",
-          description: "Bağlantı hazırlanıyor. Lütfen bekleyin.",
-        });
-        return;
-      }
-      if (typed.status === 429 || typed.code === "PAIRING_RATE_LIMITED") {
-        await refresh().catch(() => undefined);
-        toast({
-          title: "Çok fazla deneme",
-          description: "Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.",
-          variant: "destructive",
-        });
-        return;
-      }
-      await refresh().catch(() => undefined);
-      toast({
-        title: "WhatsApp bağlantı hatası",
-        description: sanitizeWaUserMessage(typed.message, typed.code) || "Bağlantı başlatılamadı.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resetSession = async () => {
-    if (loading) return;
-    if (!window.confirm("WhatsApp oturumu ve önbellek silinecek. Yeniden eşleştirme gerekir. Devam?")) return;
-    setLoading(true);
-    try {
-      await apiCall("/admin/whatsapp/reset-session", "POST");
-      setConnected(false);
-      setQr(null);
-      setPairingCode(null);
-      setPairingMode(false);
-      setErrorLog("Bağlantı hazırlanıyor");
-      toast({ title: "Oturum sıfırlandı", description: "Temiz oturum hazır. Tekrar bağlanın." });
+      const r = await apiCall("/admin/url-pool/save", "POST", { url: trimmed }) as { message?: string; baseUrl?: string };
+      toast({ title: "Havuz kaydedildi", description: r.message || "Otomatik tarama başladı." });
+      if (r.baseUrl) setUrl(r.baseUrl);
       await refresh();
     } catch (error) {
-      const typed = error as Error & { code?: string };
-      toast({
-        title: "Sıfırlama başarısız",
-        description: sanitizeWaUserMessage(typed.message, typed.code),
-        variant: "destructive",
-      });
+      toast({ title: "Kaydedilemedi", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const disconnect = async () => {
-    setLoading(true);
-    try {
-      await apiCall("/admin/whatsapp/stop", "POST");
-      setConnected(false);
-      setQr(null);
-      setPairingCode(null);
-      setPairingMode(false);
-      toast({ title: "WhatsApp bağlantısı kesildi" });
-    } catch (error) {
-      toast({ title: "Durdurulamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveSelectedGroups = async () => {
-    const selected = groups.filter(g => g.selected);
-    if (selected.length === 0) {
-      toast({ title: "Grup/kanal seçin", description: "Kaydetmek için en az bir grup veya kanal seçin.", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    let ok = 0;
-    try {
-      for (const group of selected) {
-        await apiCall("/admin/whatsapp/add-source", "POST", {
-          groupId: group.id,
-          groupName: group.name,
-          sourceName: form.sourceName || group.name,
-        });
-        ok++;
-      }
-      toast({ title: `${ok} kaynak kaydedildi`, description: "Grup + kanal. İlk tarama: gidebildiği kadar. Sitede ilan 15 gün." });
-      setLastScanAt(new Date().toLocaleString("tr-TR"));
-      await refresh();
-    } catch (error) {
-      toast({ title: "Kaynak kaydedilemedi", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
-    } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
   const scanNow = async () => {
-    setLoading(true);
+    setScanning(true);
     try {
-      const r = await apiCall("/admin/whatsapp/scan-now", "POST") as {
-        message?: string;
-        mode?: string;
-        pendingGroups?: number;
-        currentGroup?: string | null;
-      };
-      setLastScanAt(new Date().toLocaleString("tr-TR"));
-      toast({
-        title: r.mode === "incremental" ? "Yeni mesaj taraması" : "Geçmiş tarama devam",
-        description: r.message || `${r.pendingGroups ?? 0} grup.`,
-      });
+      const r = await apiCall("/admin/url-pool/scan-now", "POST") as { message?: string };
+      toast({ title: "Havuz taraması", description: r.message || "Tarama başladı." });
       await refresh();
     } catch (error) {
       toast({ title: "Tarama başlatılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     } finally {
-      setLoading(false);
+      setScanning(false);
     }
   };
 
-  const resetAllWa = async () => {
-    if (!window.confirm("Tüm WhatsApp ilanları silinecek ve gruplar gidebildiği kadar taranacak. Sitede yeni bot ilanları 15 gün kalır. Emin misiniz?")) return;
+  const resetAll = async () => {
+    if (!window.confirm("Havuzdan gelen tüm ilanlar silinecek ve baştan çekilecek. Emin misiniz?")) return;
     setResetting(true);
     try {
-      const r = await apiCall("/admin/whatsapp/reset", "POST") as {
-        message?: string;
-        deletedListings?: number;
-        pendingGroups?: number;
-      };
-      setLastScanAt(new Date().toLocaleString("tr-TR"));
-      toast({
-        title: "WhatsApp sıfırlandı",
-        description: r.message || `${r.deletedListings ?? 0} ilan silindi, tarama başladı (gidebildiği kadar).`,
-      });
+      const r = await apiCall("/admin/url-pool/reset", "POST") as { message?: string; deletedListings?: number };
+      toast({ title: "Havuz sıfırlandı", description: r.message || `${r.deletedListings ?? 0} ilan silindi.` });
       await refresh();
     } catch (error) {
       toast({ title: "Sıfırlama başarısız", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
@@ -3801,410 +3452,96 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     }
   };
 
-  const resetOneWa = async (id: number, name: string) => {
-    if (!window.confirm(`«${name}» grubunun WhatsApp ilanları silinip gidebildiği kadar yeniden taranacak. Devam?`)) return;
-    setResettingSourceId(id);
-    try {
-      const r = await apiCall(`/admin/whatsapp/sources/${id}/reset`, "POST") as { message?: string };
-      toast({ title: "Kaynak sıfırlandı", description: r.message });
-      await refresh();
-    } catch (error) {
-      toast({ title: "Sıfırlama başarısız", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
-    } finally {
-      setResettingSourceId(null);
-    }
-  };
-
-  const removeOneWa = async (id: number, name: string) => {
-    if (!window.confirm(`«${name}» kaydını listeden çıkarmak istiyor musunuz? (Yayındaki ilanlar silinmez)`)) return;
-    setResettingSourceId(id);
-    try {
-      const r = await apiCall(`/admin/whatsapp/sources/${id}`, "DELETE") as { message?: string };
-      toast({ title: "Kaynak çıkarıldı", description: r.message || name });
-      await refresh();
-    } catch (error) {
-      toast({ title: "Çıkarılamadı", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
-    } finally {
-      setResettingSourceId(null);
-    }
-  };
-
-  const toggleGroup = (groupId: string) => {
-    setGroups(prev => prev.map(group => group.id === groupId ? { ...group, selected: !group.selected } : group));
-  };
+  const busy = saving || scanning || resetting;
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
-            <h3 className="text-lg font-extrabold text-white">WhatsApp Kaynakları</h3>
+            <h3 className="text-lg font-extrabold text-white">İlan Havuzu (URL)</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• <strong className="text-slate-200">Sıfırla / Tekrar Tara:</strong> client’ı kapatır, oturum + cache siler, temiz eşleştirme hazırlar</div>
-              <div>• <strong className="text-slate-200">İlanları Sıfırla:</strong> WA ilanlarını siler, grupları yeniden tarar</div>
-              <div>• <strong className="text-slate-200">Şimdi Tara:</strong> silmez — bitmemiş geçmişi devam / bittiyse sadece yeni mesaj</div>
-              <div>• Durumu Yenile yalnızca durumu okur — yeni client açmaz</div>
+              <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj Havuzu</strong> linkinden çeker</div>
+              <div>• Örnek: <span className="text-sky-300 break-all">https://wpbot-production-cf99.up.railway.app</span></div>
+              <div>• URL kaydedince otomatik tarar; sonra her <strong className="text-slate-200">10 dk</strong> yeni mesajları alır</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => void connect(false)}
-              disabled={loading || connected}
-              className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50"
-              title={connected ? "Zaten bağlı — önce bağlantıyı kesmeyin" : undefined}
-            >
-              {connected ? "Bağlı" : loading && !pairingMode ? "Bağlanıyor…" : "QR ile Bağlan"}
-            </button>
-            <button
-              onClick={() => void connect(true)}
-              disabled={loading || connected || pairingCooldown > 0}
-              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
-              title={connected ? "Zaten bağlı — tekrar kod istemeyin (oturum düşer)" : undefined}
-            >
-              {connected
-                ? "Bağlı"
-                : loading && pairingMode
-                  ? "Kod isteniyor…"
-                  : pairingCooldown > 0
-                    ? `Bekleyin (${pairingCooldown}s)`
-                    : "Onay Kodu ile Bağlan"}
-            </button>
-            <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
+            <button onClick={() => void refresh()} disabled={busy} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
             </button>
-            <button onClick={() => void scanNow()} disabled={loading || resetting || !connected} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
-              Şimdi Tara
+            <button onClick={() => void scanNow()} disabled={busy || !configured} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">
+              {scanning ? "Taranıyor…" : "Şimdi Tara"}
             </button>
-            <button onClick={() => void resetSession()} disabled={loading} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
-              Sıfırla / Tekrar Tara
+            <button onClick={() => void resetAll()} disabled={busy || !configured} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50">
+              {resetting ? "Sıfırlanıyor…" : "Sıfırla / Tekrar Tara"}
             </button>
-            <button onClick={() => void resetAllWa()} disabled={loading || resetting || !connected} className="rounded-xl bg-rose-500/30 px-4 py-2 text-sm font-bold text-rose-100 hover:bg-rose-500/40 disabled:opacity-50">
-              {resetting ? "Sıfırlanıyor…" : "İlanları Sıfırla"}
-            </button>
-            {connected && (
-              <button onClick={() => void disconnect()} disabled={loading} className="rounded-xl bg-rose-500/20 px-4 py-2 text-sm font-bold text-rose-300 hover:bg-rose-500/30 disabled:opacity-50">
-                Bağlantıyı Kes
-              </button>
-            )}
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-slate-300">Kaynak Adı (opsiyonel)</span>
-            <input value={form.sourceName} onChange={e => setForm(prev => ({ ...prev, sourceName: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none" placeholder="Ör. Güvenlik Grupları" />
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-slate-300">Telefon (onay kodu için)</span>
-            <input value={form.phoneNumber} onChange={e => setForm(prev => ({ ...prev, phoneNumber: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none" placeholder="905xxxxxxxxx" />
-          </label>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-bold text-white">Bağlantı Durumu</h4>
-              <span className={`text-xs font-bold ${
-                connected
-                  ? "text-emerald-400"
-                  : connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "RATE_LIMITED"
-                    ? "text-rose-400"
-                    : "text-amber-400"
-              }`}>
-                {uiStatus || errorLog || (connected ? "Bağlandı" : "Bağlantı hazırlanıyor")}
-              </span>
-            </div>
-            {connected && syncStatus === "READY" ? (
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300 space-y-2">
-                <p className="font-bold">WhatsApp bağlı. Gruplar hazır.</p>
-                <p className="text-xs text-emerald-200/90">
-                  {chatCount} sohbet · {groupCountUi > 0 ? groupCountUi : (groups.length || 0)} grup
-                  {whatsappState ? ` · ${whatsappState}` : ""}
-                </p>
-                <p className="text-xs text-emerald-200/80">
-                  Aşağıdan grup seçip kaydedin. İlan taraması kayıt sonrası başlar.
-                </p>
-              </div>
-            ) : connected ? (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100 space-y-3">
-                <p className="font-bold">WhatsApp bağlı. Gruplar yükleniyor.</p>
-                <p className="text-xs text-sky-200/90">
-                  İlan taraması henüz başlamadı. Grup listesi gelince seçim yapabilirsiniz.
-                </p>
-                <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın.</p>
-                {whatsappState && <p className="text-[10px] text-slate-400">WhatsApp: {whatsappState} · keşif: {syncStatus}</p>}
-                {lastSyncError && <p className="text-[10px] text-slate-400">{lastSyncError}</p>}
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => void reloadChats()}
-                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
-                >
-                  Sohbetleri Yeniden Yükle
-                </button>
-              </div>
-            ) : (connectionStatus === "AUTHENTICATED" || sessionState === "AUTHENTICATED") ? (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100 space-y-2">
-                <p className="font-bold">Onay kodu kabul edildi.</p>
-                <p className="text-xs text-sky-200/90">WhatsApp bağlanıyor. Lütfen 10–30 saniye bekleyin.</p>
-                <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın / kodu tekrar istemeyin.</p>
-              </div>
-            ) : sessionState === "RATE_LIMITED" || connectionStatus === "RATE_LIMITED" ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100 space-y-2">
-                <p className="font-bold">Çok fazla deneme yapıldı</p>
-                <p className="text-xs">Çok fazla kod istendi. Bir süre bekleyip tekrar deneyin.</p>
-              </div>
-            ) : (connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "ERROR" || sessionState === "FAILED" || sessionState === "DISCONNECTED") ? (
-              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100 space-y-3">
-                <p className="font-bold">Bağlantı kesildi</p>
-                <p className="text-xs text-rose-200/90">{sanitizeWaUserMessage(errorLog) || "Bağlantı hatası."}</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={loading || connected || pairingCooldown > 0}
-                    onClick={() => void connect(Boolean(form.phoneNumber.trim()))}
-                    className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
-                  >
-                    Yeniden Bağlan
-                  </button>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => void resetSession()}
-                    className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-bold text-white hover:bg-rose-400 disabled:opacity-50"
-                  >
-                    Sıfırla / Tekrar Tara
-                  </button>
-                </div>
-              </div>
-            ) : pairingCode ? (
-              <div className="space-y-2">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-300/90 text-center">WhatsApp Eşleştirme Kodu</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const plain = pairingCode.replace(/-/g, "");
-                    void navigator.clipboard.writeText(plain).then(() => {
-                      toast({ title: "Kod kopyalandı", description: plain.length === 8 ? `${plain.slice(0, 4)}-${plain.slice(4)}` : plain });
-                    }).catch(() => {
-                      toast({ title: "Kopyalanamadı", description: "Kodu elle seçip kopyalayın", variant: "destructive" });
-                    });
-                  }}
-                  className="w-full text-3xl font-black tracking-[0.35em] text-emerald-300 text-center py-4 bg-black/40 rounded-xl border border-emerald-500/30 select-all font-mono hover:bg-black/55 hover:border-emerald-400/50 transition-colors cursor-pointer"
-                  title="Kopyalamak için tıkla"
-                >
-                  {(() => {
-                    const plain = pairingCode.replace(/\W/g, "").toUpperCase();
-                    return plain.length === 8 ? `${plain.slice(0, 4)}-${plain.slice(4)}` : pairingCode.toUpperCase();
-                  })()}
-                </button>
-                <p className="text-[10px] text-sky-300/90 text-center font-medium">Koda tıklayınca otomatik kopyalanır</p>
-                <div className="text-xs text-slate-300 text-center space-y-1 leading-relaxed">
-                  <p className="font-semibold text-slate-200">WhatsApp uygulamasında:</p>
-                  <p>Ayarlar → Bağlı cihazlar → Cihaz bağla → Telefon numarasıyla bağla</p>
-                </div>
-                {phoneMasked && <p className="text-[10px] text-slate-500 text-center">Numara: {phoneMasked}</p>}
-                <p className="text-[10px] text-emerald-200/80 text-center font-medium">Kodu girdikten sonra bekleyin. Tekrar basmayın.</p>
-              </div>
-            ) : pairingMode ? (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
-                {sessionState === "WAITING_FOR_PAIRING" ? "Kod bekleniyor" : "Bağlantı hazırlanıyor"}
-                {phoneMasked && <p className="mt-2 text-xs text-slate-400">Numara: {phoneMasked}</p>}
-              </div>
-            ) : qr && !pairingMode ? (
-              <img src={qr} alt="WhatsApp QR" className="max-w-[260px] rounded-xl border border-white/10 bg-white p-2" />
-            ) : (
-              <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-xs text-slate-400">
-                {qrStatus === "connecting"
-                  ? "Bağlantı hazırlanıyor"
-                  : "Bağlanmak için «QR ile Bağlan» veya «Onay Kodu ile Bağlan» kullanın."}
-              </div>
-            )}
-            <div className="mt-3 text-xs text-slate-400">Son tarama: {lastScanAt}</div>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <h4 className="text-sm font-bold text-white mb-3">Durum</h4>
-            <div className="h-[180px] w-full rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-slate-200">
-              {uiStatus || errorLog || "Hazır"}
-            </div>
-          </div>
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://wpbot-production-cf99.up.railway.app"
+            className="h-10 flex-1 text-sm bg-white/5 border-white/10"
+            disabled={busy}
+          />
+          <button
+            onClick={() => void saveUrl()}
+            disabled={busy || !url.trim()}
+            className="rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-black hover:bg-emerald-400 disabled:opacity-50 whitespace-nowrap"
+          >
+            {saving ? "Kaydediliyor…" : configured ? "URL Güncelle" : "URL Kaydet ve Başlat"}
+          </button>
         </div>
       </div>
 
-      {savedSources.some((source) => source.lastError || source.lastScanErrors > 0) && (
-        <section className="rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 md:p-5" aria-labelledby="wa-scan-diagnostics-title">
-          <h4 id="wa-scan-diagnostics-title" className="text-sm font-extrabold text-rose-100">WhatsApp Tarama Tanı Ekranı</h4>
-          <p className="mt-1 text-xs text-rose-200/80">
-            Her grup için son tarama sonucu ve ilanların neden eklenmediği burada görünür.
-          </p>
-          <div className="mt-3 space-y-2">
-            {savedSources.filter((source) => source.lastError || source.lastScanErrors > 0).map((source) => (
-              <details key={source.id} className="rounded-xl border border-rose-300/20 bg-black/20 px-3 py-2 text-xs text-slate-200">
-                <summary className="cursor-pointer font-bold text-rose-200">
-                  {source.name} · {source.lastScanErrors > 0 ? `${source.lastScanErrors} hata` : "Tarama tanısı"}
-                </summary>
-                <div className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-300">
-                  {source.lastError || "Mesaj işleme hatası kaydedildi; sonraki taramada ayrıntı güncellenecek."}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
-                  <span>Okunan: {source.lastScanMessagesRead}</span>
-                  <span>Eşleşen: {source.lastScanFound}</span>
-                  <span>Eklenen: {source.lastScanAdded}</span>
-                  <span>Çift: {source.lastScanDuplicates}</span>
-                </div>
-              </details>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* İstatistik özeti */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
-          <div className="text-[10px] text-slate-400 uppercase">Kayıtlı Kaynak</div>
-          <div className="text-2xl font-black text-white mt-1">{totals.groups}</div>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
-          <div className="text-[10px] text-slate-400 uppercase">Toplam Çekilen İlan</div>
-          <div className="text-2xl font-black text-emerald-400 mt-1">{totals.totalImported}</div>
+          <div className="text-[10px] text-slate-400 uppercase">Havuz Mesaj</div>
+          <div className="text-2xl font-black text-sky-400 mt-1">{poolTotal ?? "—"}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
           <div className="text-[10px] text-slate-400 uppercase">Yayındaki İlan</div>
-          <div className="text-2xl font-black text-sky-400 mt-1">{totals.listingCount}</div>
+          <div className="text-2xl font-black text-emerald-400 mt-1">{source?.listingCount ?? 0}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
-          <div className="text-[10px] text-slate-400 uppercase">Son Taramada Eklenen</div>
-          <div className="text-2xl font-black text-amber-400 mt-1">{totals.lastAdded}</div>
+          <div className="text-[10px] text-slate-400 uppercase">Toplam Çekilen</div>
+          <div className="text-2xl font-black text-amber-400 mt-1">{source?.totalImported ?? 0}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Durum</div>
+          <div className="text-lg font-black text-white mt-1">
+            {!configured ? "URL yok" : source?.isScanning ? "Taranıyor" : listening ? "Aktif" : "Bağlı"}
+          </div>
         </div>
       </div>
 
-      {/* Kayıtlı grup/kanal istatistikleri */}
-      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
-        <h4 className="text-base font-bold text-white mb-1">Kayıtlı Gruplar & Kanallar — Tarama İstatistikleri</h4>
-        <p className="text-xs text-slate-400 mb-4">Hangi grup/kanaldan kaç ilan çekildi (tarama sırayla, takılmaz)</p>
-        {savedSources.length === 0 ? (
-          <p className="text-xs text-slate-500 text-center py-6">Henüz kayıtlı WhatsApp grubu/kanalı yok. Aşağıdan seçip kaydedin.</p>
+      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6 space-y-3">
+        <h4 className="text-base font-bold text-white">Tarama Durumu</h4>
+        {!configured || !source ? (
+          <p className="text-xs text-slate-500">Yukarıya havuz URL'sini yapıştırıp kaydedin. Mesajlar otomatik ilana dönüşür.</p>
         ) : (
-          <div className="space-y-2 max-h-[480px] overflow-y-auto">
-            {savedSources.map((s) => (
-              <div key={s.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="text-sm font-bold text-white truncate">{s.name}</div>
-                      <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                        (s.kind === "channel" || s.url?.includes("@newsletter"))
-                          ? "bg-sky-500/20 text-sky-300"
-                          : "bg-emerald-500/15 text-emerald-300"
-                      }`}>
-                        {(s.kind === "channel" || s.url?.includes("@newsletter")) ? "KANAL" : "GRUP"}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-slate-500 truncate">{s.url}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {s.isScanning && <span className="text-[10px] font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-                      {s.initialScanDone ? "Kaldığı yerden (30 dk)" : `İlk tarama %${s.initialScanProgress || 1}`}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Yayında </span><span className="font-bold text-white">{s.listingCount}</span></div>
-                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Toplam çekilen </span><span className="font-bold text-emerald-300">{s.totalImported}</span></div>
-                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Son + </span><span className="font-bold text-amber-300">{s.lastScanAdded}</span></div>
-                  <div className="rounded-lg bg-white/5 px-2 py-1.5"><span className="text-slate-500">Mesaj </span><span className="font-bold text-slate-200">{s.lastScanMessagesRead}</span></div>
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
-                  <span>Bulunan: {s.lastScanFound}</span>
-                  <span>Çift: {s.lastScanDuplicates}</span>
-                  <span>Hata: {s.lastScanErrors}</span>
-                  <span>Son mesaj: {s.lastMessageAt ? new Date(s.lastMessageAt).toLocaleString("tr-TR") : "—"}</span>
-                  <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
-                  <div className="ml-auto flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void removeOneWa(s.id, s.name)}
-                      disabled={resetting || resettingSourceId === s.id}
-                      className="text-[10px] font-bold text-slate-300 hover:text-white disabled:opacity-40"
-                    >
-                      Listeden Çıkar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void resetOneWa(s.id, s.name)}
-                      disabled={resetting || resettingSourceId === s.id || !connected}
-                      className="text-[10px] font-bold text-rose-300 hover:text-rose-200 disabled:opacity-40"
-                    >
-                      {resettingSourceId === s.id ? "İşleniyor…" : "Bu Kaynağı Sıfırla"}
-                    </button>
-                  </div>
-                </div>
-                {s.lastError && <div className="mt-2 text-[10px] leading-relaxed text-rose-300 break-words">{s.lastError}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6">
-        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-          <div>
-            <h4 className="text-base font-bold text-white">Grup & Kanal Listesi</h4>
-            <p className="text-xs text-slate-400">İlan çekilecek grupları ve kanalları seç → Kaydet</p>
-          </div>
-          <button
-            onClick={() => void saveSelectedGroups()}
-            disabled={loading || !connected}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-50"
-          >
-            Seçilenleri Kaydet
-          </button>
-        </div>
-        {discoveryDiagnostics && (
-          <details className={`mb-3 rounded-xl border p-3 text-xs ${discoveryDiagnostics.errors.length > 0 || discoveryDiagnostics.groupCount === 0 ? "border-amber-400/40 bg-amber-500/10" : "border-emerald-400/25 bg-emerald-500/10"}`}>
-            <summary className="cursor-pointer font-bold text-white">
-              Grup keşif tanısı · Sohbet {discoveryDiagnostics.chatCount} · Grup {discoveryDiagnostics.groupCount} · Kanal {discoveryDiagnostics.channelCount}
-            </summary>
-            <div className="mt-2 space-y-1 text-slate-300">
-              {discoveryDiagnostics.steps.map((step, index) => <p key={`${step}-${index}`}>• {step}</p>)}
-              {discoveryDiagnostics.errors.map((error, index) => <p key={`${error}-${index}`} className="break-words text-rose-300">• {error}</p>)}
-              {discoveryDiagnostics.groupCount === 0 && discoveryDiagnostics.errors.length === 0 && (
-                <p className="text-amber-200">• WhatsApp Web grup indeksini henüz vermedi. «Durumu Yenile» ile bu ekranı tekrar kontrol edin.</p>
-              )}
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {source.isScanning && <span className="font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
+              <span className={`font-bold px-2 py-0.5 rounded-full ${source.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                {source.initialScanDone ? `Dinleme (${source.checkInterval || 10} dk)` : "İlk tarama"}
+              </span>
+              {baseUrl && <span className="text-slate-500 break-all">{baseUrl}</span>}
             </div>
-          </details>
+            <div className="flex flex-wrap gap-3 text-[10px] text-slate-500">
+              <span>Okunan: {source.lastScanMessagesRead}</span>
+              <span>Bulunan: {source.lastScanFound}</span>
+              <span>Eklenen: {source.lastScanAdded}</span>
+              <span>Çift: {source.lastScanDuplicates}</span>
+              <span>Hata: {source.lastScanErrors}</span>
+              <span>Son: {source.lastCheckedAt ? new Date(source.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
+            </div>
+            {source.lastError && <div className="text-[11px] text-rose-300">{source.lastError}</div>}
+          </>
         )}
-        <div className="space-y-2 max-h-[420px] overflow-y-auto">
-          {groups.length === 0 ? (
-            <p className="text-xs text-slate-500 text-center py-8">
-              {!connected
-                ? "Önce WhatsApp'a bağlanın."
-                : syncStatus === "LOADING" || syncStatus === "RETRYING" || syncStatus === "NOT_STARTED"
-                  ? "WhatsApp bağlı. Gruplar yükleniyor…"
-                  : syncStatus === "FAILED"
-                    ? "Grup listesi alınamadı. «Sohbetleri Yeniden Yükle» deneyin."
-                    : "Grup/kanal bulunamadı."}
-            </p>
-          ) : groups.map(group => (
-            <button key={group.id} onClick={() => toggleGroup(group.id)} className={`w-full rounded-xl border px-4 py-3 text-left transition ${group.selected ? "border-emerald-400 bg-emerald-400/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="truncate text-sm font-bold text-white">{group.name}</div>
-                    <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                      group.kind === "channel" ? "bg-sky-500/20 text-sky-300" : "bg-emerald-500/15 text-emerald-300"
-                    }`}>
-                      {group.kind === "channel" ? "KANAL" : "GRUP"}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-400 truncate">{group.id}{group.participants != null && group.participants > 0 ? ` · ${group.participants} üye` : ""}</div>
-                </div>
-                <span className="text-xs font-bold text-slate-300 shrink-0">{group.selected ? "Seçildi" : "Seçilmedi"}</span>
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -4523,7 +3860,7 @@ function PendingJobsSection({ apiCall, toast }: { apiCall: (path: string, method
 type AdminTab =
   | "dashboard" | "ilanlar" | "one-cikan" | "ilan-olustur" | "cv-olustur" | "part-time"
   | "kullanicilar" | "dogrulanmis-hesaplar" | "yetkiler" | "ilan-haklari" | "yonetim-ekibi" | "anasayfa-banner" | "hazir-sirketler" | "sohbet-banner"
-  | "telegram" | "whatsapp" | "eleman" | "mesajlar" | "destek"
+  | "telegram" | "url-pool" | "eleman" | "mesajlar" | "destek"
   | "bakiye" | "kaynaklar" | "bildirimler" | "push" | "ayarlar" | "loglar" | "konum-dogrulama";
 
 interface SidebarItem {
@@ -4568,7 +3905,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
       { id: "telegram", label: "Telegram Hesabı", icon: Radio },
       { id: "mesajlar", label: "Mesajlar", icon: MessageSquare },
       { id: "sohbet-banner", label: "Sohbet Banner", icon: Megaphone },
-      { id: "whatsapp", label: "WhatsApp Kaynakları", icon: MessageCircle },
+      { id: "url-pool", label: "İlan Havuzu (URL)", icon: Link },
       { id: "eleman", label: "Eleman.net", icon: Briefcase },
       { id: "destek", label: "Canlı Destek", icon: Headphones },
     ],
@@ -6682,6 +6019,7 @@ export default function AdminDashboard() {
                       }`}>{l.status === "active" ? "Aktif" : l.status === "inactive" ? "Pasif" : l.status === "pending" ? "Bekliyor" : "Reddedildi"}</span>
                       {l.isUserListing && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Kullanıcı</span>}
                       {isAdmin && l.sourceTag === "eleman" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Eleman.net</span>}
+                      {isAdmin && l.sourceTag === "url_pool" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">İlan Havuzu</span>}
                       {isAdmin && l.sourceTag === "whatsapp" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 font-medium">WhatsApp</span>}
                       {isAdmin && l.sourceTag === "telegram" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-medium">Telegram</span>}
                       {l.isFeatured && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">Öne Çıkan</span>}
@@ -6739,10 +6077,10 @@ export default function AdminDashboard() {
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] flex items-center gap-0.5 px-2 py-1 bg-sky-500/15 text-sky-300 rounded-lg hover:bg-sky-500/25 transition-colors"
-                      title={`${l.sourceTag === "telegram" ? "Telegram" : l.sourceTag === "whatsapp" ? "WhatsApp" : l.sourceTag === "eleman" ? "Eleman.net" : "Kaynak"} mesajına git`}
+                      title={`${l.sourceTag === "telegram" ? "Telegram" : l.sourceTag === "whatsapp" ? "WhatsApp" : l.sourceTag === "url_pool" ? "İlan Havuzu" : l.sourceTag === "eleman" ? "Eleman.net" : "Kaynak"} mesajına git`}
                     >
                       <ExternalLink className="w-3 h-3" />
-                      {l.sourceTag === "telegram" ? "Telegram mesajı" : l.sourceTag === "whatsapp" ? "WhatsApp kaynağı" : l.sourceTag === "eleman" ? "Eleman.net ilanı" : "Kaynak mesaj"}
+                      {l.sourceTag === "telegram" ? "Telegram mesajı" : l.sourceTag === "whatsapp" ? "WhatsApp kaynağı" : l.sourceTag === "url_pool" ? "Havuz mesajı" : l.sourceTag === "eleman" ? "Eleman.net ilanı" : "Kaynak mesaj"}
                     </a>
                   )}
                   <a
@@ -6822,7 +6160,7 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === "telegram" && <TelegramAuthSection apiCall={apiCall} toast={toast} />}
-        {activeTab === "whatsapp" && <WhatsAppSourcesSection apiCall={apiCall} toast={toast} />}
+        {activeTab === "url-pool" && <UrlPoolSourcesSection apiCall={apiCall} toast={toast} />}
         {activeTab === "eleman" && <ElemanSourcesSection apiCall={apiCall} toast={toast} />}
         {activeTab === "kaynaklar" && <SourcesSection apiCall={apiCall} toast={toast} />}
 

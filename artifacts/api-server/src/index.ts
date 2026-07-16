@@ -1156,16 +1156,26 @@ async function bootstrapWorkers(): Promise<void> {
       .set({ autoPublish: true, requireApproval: false })
       .where(and(
         eq(sourcesTable.active, true),
-        or(eq(sourcesTable.platform, "telegram"), eq(sourcesTable.platform, "whatsapp")),
+        or(
+          eq(sourcesTable.platform, "telegram"),
+          eq(sourcesTable.platform, "whatsapp"),
+          eq(sourcesTable.platform, "url_pool"),
+        ),
       ));
-    await db.update(sourcesTable)
-      .set({ checkInterval: 30 })
-      .where(and(eq(sourcesTable.active, true), eq(sourcesTable.platform, "whatsapp")));
 
     await initTelegramClient();
-    // Kayıtlı WA oturumu varsa otomatik bağlan (imleçler DB'de kalır; Sıfırla gerekmez).
-    // WA_AUTO_CONNECT=0 ile boot bağlantısı kapatılabilir.
-    void initWhatsAppClient();
+    // WhatsApp Puppeteer iptal — varsayılan BOT_PLATFORMS: telegram,url_pool,eleman
+    // Eski WA sadece BOT_PLATFORMS içinde whatsapp varsa veya WA_AUTO_CONNECT=1 ise açılır.
+    const botPlatforms = (process.env["BOT_PLATFORMS"] ?? "telegram,url_pool,eleman")
+      .split(",")
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+    const waEnabled = botPlatforms.includes("whatsapp") || process.env["WA_AUTO_CONNECT"] === "1";
+    if (waEnabled) {
+      void initWhatsAppClient();
+    } else {
+      logger.info("WhatsApp client disabled (use URL pool); set BOT_PLATFORMS=...whatsapp or WA_AUTO_CONNECT=1 to enable");
+    }
     startScraperWorker();
     void import("./lib/web-push").then((m) => m.startPushDigestWorker()).catch(() => {});
     void import("./lib/listing-feature").then((m) => m.startFeatureExpiryWorker()).catch(() => {});
@@ -1176,7 +1186,7 @@ async function bootstrapWorkers(): Promise<void> {
 
     // Her pazar 04:00 — Geofabrik konum sync
     scheduleWeeklyLocationSync();
-    logger.info("Workers started (telegram + scraper; whatsapp on-demand; web-push; feature-expiry; location-sync)");
+    logger.info({ botPlatforms, waEnabled }, "Workers started (telegram + scraper + url_pool; web-push; feature-expiry; location-sync)");
   } catch (e) {
     logger.error({ err: e }, "Workers bootstrap failed — API ayakta kalır");
   }
