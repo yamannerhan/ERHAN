@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db, notificationsTable } from "@workspace/db";
 import { eq, desc, sql, and } from "drizzle-orm";
-import { authMiddleware } from "../middlewares/auth";
+import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import { stripListingSourceLabels } from "../lib/strip-listing-source";
+import { wipeAllNotificationsNow } from "../lib/wipe-notifications-once";
 
 const router = Router();
 
@@ -47,6 +48,12 @@ router.post("/notifications/:id/read", authMiddleware, async (req, res): Promise
 router.delete("/notifications", authMiddleware, async (req, res): Promise<void> => {
   await db.delete(notificationsTable).where(eq(notificationsTable.userId, req.user!.id));
   res.json({ success: true });
+});
+
+/** Admin: tüm kullanıcıların bildirimlerini sıfırla */
+router.delete("/admin/notifications", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
+  const deleted = await wipeAllNotificationsNow();
+  res.json({ success: true, deleted });
 });
 
 router.get("/notifications/unread-count", authMiddleware, async (req, res): Promise<void> => {

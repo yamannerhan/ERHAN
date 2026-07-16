@@ -590,6 +590,19 @@ function SupportAdminSection({ apiCall, toast }: {
     await changeStatus(id, "resolved");
   };
 
+  const deleteTicket = async (id: number) => {
+    if (!confirm("Bu destek talebi silinecek (çözülenler dahil). Emin misiniz?")) return;
+    try {
+      await apiCall(`/support/${id}`, "DELETE");
+      toast({ title: "Talep silindi" });
+      setActiveTicket(null);
+      setConfirmResolve(false);
+      void loadTickets();
+    } catch (e: any) {
+      toast({ title: "Hata", description: e.message, variant: "destructive" });
+    }
+  };
+
   const formatTime = (iso: string) => new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 
   const StatusBadge = ({ status }: { status: string }) => {
@@ -696,6 +709,14 @@ function SupportAdminSection({ apiCall, toast }: {
             {activeTicket.status === "resolved" && (
               <p className="text-[10px] text-center text-green-400/80">Çözüldü — yanıt yazınca veya Yeniden Aç ile devam edebilirsin.</p>
             )}
+            <button
+              type="button"
+              onClick={() => void deleteTicket(activeTicket.id)}
+              className="w-full text-[10px] px-3 py-2 rounded-xl font-semibold bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 flex items-center justify-center gap-1.5"
+            >
+              <Trash2 className="w-3 h-3" />
+              Talebi sil
+            </button>
           </div>
         ) : (
           <>
@@ -718,18 +739,31 @@ function SupportAdminSection({ apiCall, toast }: {
             ) : (
               <div className="space-y-2">
                 {tickets.map(t => (
-                  <button key={t.id} type="button" onClick={() => void loadTicketDetail(t.id)}
-                    className={`w-full text-left rounded-xl p-3 transition-colors ${
-                      t.status === "waiting" ? "bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20" : "bg-white/5 hover:bg-white/10"
-                    }`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold line-clamp-1">{t.subject}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{t.username} · {t.msgCount} mesaj · {formatTime(t.updatedAt)}</p>
+                  <div
+                    key={t.id}
+                    className={`rounded-xl p-3 transition-colors ${
+                      t.status === "waiting" ? "bg-amber-500/10 border border-amber-500/20" : "bg-white/5"
+                    }`}
+                  >
+                    <button type="button" onClick={() => void loadTicketDetail(t.id)} className="w-full text-left hover:opacity-90">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold line-clamp-1">{t.subject}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{t.username} · {t.msgCount} mesaj · {formatTime(t.updatedAt)}</p>
+                        </div>
+                        <StatusBadge status={t.status} />
                       </div>
-                      <StatusBadge status={t.status} />
+                    </button>
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void deleteTicket(t.id)}
+                        className="text-[10px] px-2 py-1 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 inline-flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" /> Sil
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}

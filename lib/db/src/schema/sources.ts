@@ -21,6 +21,8 @@ export const sourcesTable = pgTable("sources", {
   /** İlk taramada geriye sayfalama imleci (GramJS offsetId) */
   initialScanOffsetId: text("initial_scan_offset_id"),
   initialScanDone: boolean("initial_scan_done").notNull().default(false),
+  /** İlk tarama bittiği an — kullanıcı duyurusu için +10 dk grace */
+  initialScanCompletedAt: timestamp("initial_scan_completed_at", { withTimezone: true }),
   lastScanPublished: integer("last_scan_published").notNull().default(0),
   /** Aynı kaynakta eşzamanlı tarama engeli */
   isScanning: boolean("is_scanning").notNull().default(false),

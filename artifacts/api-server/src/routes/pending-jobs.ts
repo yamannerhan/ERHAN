@@ -154,11 +154,8 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     return created;
   });
   if (listing) {
-    const label = job.platform === "telegram" ? "Telegram"
-      : job.platform === "whatsapp" ? "WhatsApp"
-      : job.platform === "eleman" ? "Eleman.net"
-      : (job.platform || "Kaynak");
-    await announceNewListing(listing, { adminOnly: true, skipChat: true, sourceLabel: label });
+    // Manuel onay: sitede normal ilan gibi duyur (kaynak adı yok)
+    await announceNewListing(listing, {});
   }
 
   res.json({ success: true, listingId: listing.id });

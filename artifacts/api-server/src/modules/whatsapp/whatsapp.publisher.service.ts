@@ -177,10 +177,28 @@ export async function processWhatsAppMessage(params: {
       return listing.id;
     });
 
-    void announceNewListing(
-      { id: listingId, title, city, company: company || "Belirtilmemiş" },
-      { adminOnly: true, skipChat: true, sourceLabel: "WhatsApp" },
-    ).catch((err) => logger.warn({ err, listingId }, "wa: announce failed"));
+    // İlk tarama + 10 dk grace sonrası: kullanıcı + sohbet (kaynak adı yok)
+    void (async () => {
+      try {
+        const { isBotPublicAnnounceReady } = await import("../../lib/bot-public-announce");
+        const [src] = await db.select({
+          initialScanStatus: whatsappSourcesTable.initialScanStatus,
+          initialScanCompletedAt: whatsappSourcesTable.initialScanCompletedAt,
+        }).from(whatsappSourcesTable).where(eq(whatsappSourcesTable.id, sourceId)).limit(1);
+        const ready = isBotPublicAnnounceReady({
+          isInitialScan: src?.initialScanStatus !== "completed",
+          initialScanDone: src?.initialScanStatus === "completed",
+          initialScanCompletedAt: src?.initialScanCompletedAt ?? null,
+        });
+        if (!ready) return;
+        await announceNewListing(
+          { id: listingId, title, city, company: company || "Belirtilmemiş" },
+          {},
+        );
+      } catch (err) {
+        logger.warn({ err, listingId }, "wa: announce failed");
+      }
+    })();
 
     logger.info({
       sessionId,

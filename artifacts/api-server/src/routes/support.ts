@@ -550,6 +550,30 @@ router.post("/support/:id/close", authMiddleware, async (req, res): Promise<void
   }
 });
 
+/** Admin/mod: destek talebini sil (çözülenler dahil — soft delete) */
+router.delete("/support/:id", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
+  try {
+    await ensureSupportSchema();
+    const rawId = Array.isArray(req.params["id"]) ? req.params["id"][0] : req.params["id"];
+    const id = parseInt(rawId ?? "", 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Geçersiz ID" }); return; }
+
+    const [ticket] = await db.select().from(supportTicketsTable)
+      .where(and(eq(supportTicketsTable.id, id), isNull(supportTicketsTable.deletedAt)));
+    if (!ticket) { res.status(404).json({ error: "Bulunamadı" }); return; }
+
+    const now = new Date();
+    await db.update(supportTicketsTable)
+      .set({ deletedAt: now, updatedAt: now, status: ticket.status === "resolved" ? "resolved" : "closed", closedAt: ticket.closedAt ?? now })
+      .where(eq(supportTicketsTable.id, id));
+    await logEvent(id, req.user!.id, "deleted", ticket.status, "deleted");
+    emitRealtime("support:ticket-update", { ticketId: id, deleted: true });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 router.patch("/support/:id/status", authMiddleware, requireAdminOrModerator, async (req, res): Promise<void> => {
   try {
     await ensureSupportSchema();

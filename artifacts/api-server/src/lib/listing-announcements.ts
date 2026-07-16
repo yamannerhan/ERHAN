@@ -110,6 +110,15 @@ export async function announceNewListing(
       adminOnly: false,
       createdAt: new Date().toISOString(),
     });
+    // Kaynak adı olmadan normal site bildirimi gibi push
+    void import("./web-push").then((m) =>
+      m.maybePushNewListing({
+        id: listing.id,
+        title: listing.title,
+        city: listing.city,
+        authorName: authorName || null,
+      }),
+    ).catch(() => undefined);
   }
 
   // Admin/mod — kaynak adı yalnızca burada

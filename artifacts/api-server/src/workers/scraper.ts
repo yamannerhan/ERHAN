@@ -324,8 +324,16 @@ async function patchSourceProgress(
   sourceId: number,
   patch: Partial<typeof sourcesTable.$inferInsert>,
 ): Promise<void> {
-  await db.update(sourcesTable).set(patch).where(eq(sourcesTable.id, sourceId));
-  emitRealtime("scraper:source", { sourceId, ...patch });
+  const next = { ...patch };
+  if (next.initialScanDone === true && next.initialScanCompletedAt == null) {
+    try {
+      const { ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+      await ensureBotAnnounceSchema();
+    } catch { /* ignore */ }
+    next.initialScanCompletedAt = new Date();
+  }
+  await db.update(sourcesTable).set(next).where(eq(sourcesTable.id, sourceId));
+  emitRealtime("scraper:source", { sourceId, ...next });
 }
 
 async function deleteListingsForSource(source: typeof sourcesTable.$inferSelect): Promise<number> {
@@ -694,20 +702,26 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // Bot kaynakları: yalnızca admin/mod — sohbet + kullanıcı bildiriminde kaynak yok
-  const botSourceLabel =
-    source.platform === "whatsapp" ? "WhatsApp"
-      : source.platform === "telegram" ? "Telegram"
-        : source.platform === "eleman" ? "Eleman.net"
-          : (source.name || source.platform || "Bot");
-  if (source.platform === "whatsapp" || source.platform === "telegram" || !isInitialScan) {
-    void announceNewListing({
-      id: newListing.id,
-      title: newListing.title,
-      city: newListing.city,
-      company: newListing.company,
-    }, { adminOnly: true, skipChat: true, sourceLabel: botSourceLabel })
-      .catch((err) => logger.error({ err }, "scraper: admin notify failed"));
+  // İlk tarama + 10 dk grace sonrası: kullanıcı + sohbet (kaynak adı YOK)
+  try {
+    const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    await ensureBotAnnounceSchema();
+    const ready = isBotPublicAnnounceReady({
+      isInitialScan,
+      initialScanDone: source.initialScanDone,
+      initialScanCompletedAt: source.initialScanCompletedAt,
+    });
+    if (ready) {
+      void announceNewListing({
+        id: newListing.id,
+        title: newListing.title,
+        city: newListing.city,
+        company: newListing.company,
+      }, {})
+        .catch((err) => logger.error({ err }, "scraper: public announce failed"));
+    }
+  } catch (err) {
+    logger.warn({ err }, "scraper: announce gate failed");
   }
 
   return "added";
@@ -1534,13 +1548,25 @@ async function publishElemanJob(
   if (!outcome) return "duplicate";
   const newListing = outcome;
 
-  void announceNewListing({
-    id: newListing.id,
-    title: newListing.title,
-    city: newListing.city,
-    company: newListing.company,
-  }, { adminOnly: true, skipChat: true, sourceLabel: "Eleman.net" })
-    .catch((err) => logger.error({ err }, "scraper: Eleman.net admin notify failed"));
+  try {
+    const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    await ensureBotAnnounceSchema();
+    if (isBotPublicAnnounceReady({
+      isInitialScan: !source.initialScanDone,
+      initialScanDone: source.initialScanDone,
+      initialScanCompletedAt: source.initialScanCompletedAt,
+    })) {
+      void announceNewListing({
+        id: newListing.id,
+        title: newListing.title,
+        city: newListing.city,
+        company: newListing.company,
+      }, {})
+        .catch((err) => logger.error({ err }, "scraper: Eleman.net public announce failed"));
+    }
+  } catch (err) {
+    logger.warn({ err }, "scraper: Eleman announce gate failed");
+  }
 
   return "added";
 }
@@ -1905,6 +1931,7 @@ export async function resetAllElemanSources(opts?: { deferRescan?: boolean }): P
       lastTelegramMessageId: null,
       initialScanOffsetId: formatElemanCursor(0, 1),
       initialScanDone: false,
+      initialScanCompletedAt: null,
       initialScanProgress: 1,
       initialScanPhase: "forward",
       initialScanAnchorId: null,
@@ -2239,6 +2266,7 @@ export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Pr
     lastTelegramMessageId: null,
     initialScanOffsetId: null,
     initialScanDone: false,
+    initialScanCompletedAt: null,
     initialScanProgress: 1,
     initialScanPhase: "backward",
     initialScanAnchorId: null,
@@ -2333,6 +2361,7 @@ export async function resetSingleTelegramSource(sourceId: number): Promise<{ del
     lastTelegramMessageId: null,
     initialScanOffsetId: null,
     initialScanDone: false,
+    initialScanCompletedAt: null,
     initialScanProgress: 1,
     initialScanPhase: "backward",
     initialScanAnchorId: null,
@@ -2364,6 +2393,7 @@ export async function triggerDeepRescan30Days(): Promise<void> {
   }
   await db.update(sourcesTable).set({
     initialScanDone: false,
+    initialScanCompletedAt: null,
     initialScanOffsetId: null,
     initialScanProgress: 1,
     initialScanPhase: "backward",

@@ -1112,6 +1112,12 @@ void import("./lib/listing-source-schema").then(async (m) => {
 void import("./modules/whatsapp/whatsapp.schema-ensure")
   .then((m) => m.ensureWhatsAppDbSchema())
   .catch((err) => logger.warn({ err }, "whatsapp schema bootstrap skipped"));
+void import("./lib/bot-public-announce")
+  .then((m) => m.ensureBotAnnounceSchema())
+  .catch((err) => logger.warn({ err }, "bot announce schema bootstrap skipped"));
+void import("./lib/wipe-notifications-once")
+  .then((m) => m.wipeAllNotificationsOnce())
+  .catch((err) => logger.warn({ err }, "notifications wipe once skipped"));
 
 void import("./lib/listing-aging").then((m) => m.startListingAgingWorker()).catch(() => {});
 void import("./lib/listing-merge").then((m) => {
