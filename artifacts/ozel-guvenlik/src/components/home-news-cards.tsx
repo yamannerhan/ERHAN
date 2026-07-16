@@ -78,7 +78,8 @@ export function HomeNewsCards() {
                   height={280}
                   loading="lazy"
                   decoding="async"
-                  onError={(e) => { e.currentTarget.remove(); }}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
               ) : null}
               <span>{item.category || "HABER"}</span>

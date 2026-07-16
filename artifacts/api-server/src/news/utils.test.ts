@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cleanNewsTitle, makeExcerpt, resolveNewsImageUrl, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
+import { cleanNewsTitle, decodeHtmlEntities, makeExcerpt, resolveNewsImageUrl, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
 
 describe("news utils", () => {
   it("slugifies turkish titles", () => {
@@ -23,6 +23,10 @@ describe("news utils", () => {
       resolveNewsImageUrl("/admin/uploads/posts/a.webp", "https://guvenlikakademi.com/haber"),
       "https://guvenlikakademi.com/admin/uploads/posts/a.webp",
     );
+  });
+
+  it("decodes html entities", () => {
+    assert.equal(decodeHtmlEntities("Terminali&#039;nde"), "Terminali'nde");
   });
 
   it("builds stable source hash", () => {

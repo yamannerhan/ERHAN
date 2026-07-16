@@ -100,6 +100,7 @@ export default function HaberDetayPage() {
               <img
                 src={article.coverImage}
                 alt=""
+                referrerPolicy="no-referrer"
                 style={{ width: "100%", borderRadius: 16, marginBottom: 16, maxHeight: 360, objectFit: "cover" }}
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />

@@ -61,7 +61,8 @@ export default function HaberlerPage() {
                     src={item.coverImage}
                     alt=""
                     loading="lazy"
-                    onError={(e) => { e.currentTarget.remove(); }}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
                   />
                 ) : null}
                 <span>{item.category || "HABER"}</span>

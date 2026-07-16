@@ -8,14 +8,40 @@ import { cleanNewsTitle, resolveNewsImageUrl, sanitizeNewsHtml, slugifyTr, sourc
 
 const router = Router();
 
+function toProxiedImage(abs: string | null | undefined): string | null {
+  if (!abs) return null;
+  if (abs.startsWith("/api/news/image")) return abs;
+  return `/api/news/image?url=${encodeURIComponent(abs)}`;
+}
+
+function toPublicCover(row: typeof newsArticlesTable.$inferSelect): string | null {
+  return toProxiedImage(resolveNewsImageUrl(row.coverImage, row.sourceUrl || row.canonicalUrl));
+}
+
+function proxyInlineImages(html: string | null | undefined): string | null {
+  if (!html) return html ?? null;
+  return html.replace(
+    /(<img\b[^>]*\bsrc=["'])(https?:\/\/[^"']+)(["'])/gi,
+    (_m, pre: string, url: string, post: string) => {
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        if (host.includes("guvenlikakademi") || host.endsWith(".wp.com")) {
+          return `${pre}${toProxiedImage(url)}${post}`;
+        }
+      } catch { /* keep original */ }
+      return `${pre}${url}${post}`;
+    },
+  );
+}
+
 function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
   return {
     id: row.id,
     title: cleanNewsTitle(row.title),
     slug: row.slug,
     excerpt: row.excerpt,
-    content: row.content,
-    coverImage: resolveNewsImageUrl(row.coverImage, row.sourceUrl || row.canonicalUrl),
+    content: proxyInlineImages(row.content),
+    coverImage: toPublicCover(row),
     category: row.category,
     authorName: row.authorName,
     publicationType: row.publicationType,
@@ -28,6 +54,76 @@ function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
     metaDescription: row.metaDescription,
   };
 }
+
+/** Kapak görseli proxy — harici hotlink / referer sorunlarını önler */
+router.get("/news/image", async (req, res) => {
+  try {
+    const raw = String(req.query["url"] || "").trim();
+    if (!raw) {
+      res.status(400).type("text/plain").send("missing url");
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      res.status(400).type("text/plain").send("bad url");
+      return;
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      res.status(400).type("text/plain").send("bad protocol");
+      return;
+    }
+    const host = parsed.hostname.toLowerCase();
+    const allowed =
+      host === "guvenlikakademi.com"
+      || host.endsWith(".guvenlikakademi.com")
+      || host.endsWith(".wp.com")
+      || host.endsWith(".googleusercontent.com");
+    if (!allowed) {
+      // Aktif kaynak base_url hostlarına da izin ver
+      await ensureNewsSchema();
+      const sources = await db.select({ baseUrl: newsSourcesTable.baseUrl }).from(newsSourcesTable);
+      const ok = sources.some((s) => {
+        try { return new URL(s.baseUrl).hostname.toLowerCase() === host; }
+        catch { return false; }
+      });
+      if (!ok) {
+        res.status(403).type("text/plain").send("host not allowed");
+        return;
+      }
+    }
+
+    const upstream = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent": "ozelguvenlik-newsbot/1.0 (+https://ozelguvenlik.online)",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        Referer: `${parsed.origin}/`,
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!upstream.ok) {
+      res.status(upstream.status).type("text/plain").send("upstream error");
+      return;
+    }
+    const ctype = upstream.headers.get("content-type") || "";
+    if (!/^image\//i.test(ctype)) {
+      res.status(415).type("text/plain").send("not an image");
+      return;
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length > 8 * 1024 * 1024) {
+      res.status(413).type("text/plain").send("too large");
+      return;
+    }
+    res.setHeader("Content-Type", ctype);
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    res.send(buf);
+  } catch (e) {
+    res.status(502).type("text/plain").send(e instanceof Error ? e.message : "proxy failed");
+  }
+});
 
 /** Ana sayfa: en yeni 3 yayınlanmış haber */
 router.get("/news/home", async (_req, res) => {

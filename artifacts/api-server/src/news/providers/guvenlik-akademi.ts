@@ -2,6 +2,7 @@ import {
   absolutizeContentImages,
   absolutizeUrl,
   cleanNewsTitle,
+  decodeHtmlEntities,
   fetchText,
   makeExcerpt,
   resolveNewsImageUrl,
@@ -38,16 +39,7 @@ function metaContent(html: string, prop: string): string | null {
     `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,
     "i",
   );
-  return decodeEntities((html.match(re) || html.match(re2) || [])[1]?.trim() || "") || null;
-}
-
-function decodeEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+  return decodeHtmlEntities((html.match(re) || html.match(re2) || [])[1]?.trim() || "") || null;
 }
 
 function extractJsonLd(html: string): Record<string, unknown> | null {
@@ -91,63 +83,84 @@ function parseTrDate(html: string): Date | null {
 
 function isBadCover(url: string): boolean {
   const u = url.toLowerCase();
-  return /\/logo\/|favicon|sprite|icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
+  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
 }
 
-function allImageUrls(html: string, pageUrl: string): string[] {
-  const found = [
-    ...html.matchAll(/<(?:img|meta)[^>]+(?:src|content|data-src|data-lazy-src)=["']([^"']+)["']/gi),
-  ].map((m) => resolveNewsImageUrl(decodeEntities(m[1]), pageUrl)).filter((u): u is string => !!u);
-  return [...new Set(found)];
+/** class="post-content ..." bloğunu div derinliğiyle güvenli çıkar (sidebar/ilgili haber karışmasın) */
+function extractBalancedByClass(html: string, className: string): string {
+  const re = new RegExp(`<div[^>]*class=["'][^"']*\\b${className}\\b[^"']*["'][^>]*>`, "i");
+  const open = html.match(re);
+  if (!open || open.index == null) return "";
+  const startContent = open.index + open[0].length;
+  let i = startContent;
+  let depth = 1;
+  while (i < html.length && depth > 0) {
+    const nextOpen = html.indexOf("<div", i);
+    const nextClose = html.indexOf("</div>", i);
+    if (nextClose < 0) break;
+    if (nextOpen >= 0 && nextOpen < nextClose) {
+      depth += 1;
+      i = nextOpen + 4;
+    } else {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(startContent, nextClose);
+      }
+      i = nextClose + 6;
+    }
+  }
+  return "";
 }
 
-function pickCoverImage(html: string, pageUrl: string, ld: Record<string, unknown> | null): string | null {
+function stripJunkBlocks(html: string): string {
+  let out = html;
+  // Paylaş / ilgili / benzer / yorum bloklarını at
+  out = out.replace(/<(?:div|section|aside)[^>]*(?:share|paylas|related|ilgili|benzer|comment|yorum|sidebar|widget)[^>]*>[\s\S]*?<\/(?:div|section|aside)>/gi, "");
+  out = out.replace(/<a[^>]*(?:facebook|twitter|whatsapp|telegram|sharer)[^>]*>[\s\S]*?<\/a>/gi, "");
+  return out;
+}
+
+function pickCoverImage(html: string, pageUrl: string): string | null {
   const slug = (pageUrl.split("/").filter(Boolean).pop() || "").toLowerCase();
-  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 48);
 
-  const ldImage = ld?.image;
-  let fromLd: string | null = null;
-  if (typeof ldImage === "string") fromLd = ldImage;
-  else if (Array.isArray(ldImage) && ldImage.length) {
-    const first = ldImage[0];
-    fromLd = typeof first === "string" ? first : (first as { url?: string })?.url || null;
-  } else if (ldImage && typeof ldImage === "object") {
-    fromLd = (ldImage as { url?: string }).url || null;
+  // 1) Kapak: h1 öncesi featured img (en güvenilir)
+  const h1idx = html.search(/<h1[\s>]/i);
+  if (h1idx > 0) {
+    const before = html.slice(Math.max(0, h1idx - 2500), h1idx);
+    const imgs = [...before.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)]
+      .map((m) => resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl))
+      .filter((u): u is string => !!u && !isBadCover(u) && /\/uploads\/posts\//i.test(u));
+    if (imgs.length) return imgs[imgs.length - 1]!;
   }
 
-  const metaCandidates = [
-    fromLd,
-    metaContent(html, "og:image"),
-    metaContent(html, "og:image:secure_url"),
-    metaContent(html, "twitter:image"),
-    metaContent(html, "twitter:image:src"),
-  ].map((v) => resolveNewsImageUrl(v, pageUrl)).filter((u): u is string => !!u && !isBadCover(u));
+  // 2) og:image / twitter
+  for (const prop of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
+    const v = resolveNewsImageUrl(metaContent(html, prop), pageUrl);
+    if (v && !isBadCover(v)) return v;
+  }
 
-  // Haberin kendi post görseli (slug eşleşmesi)
-  const imgs = allImageUrls(html, pageUrl).filter((u) => !isBadCover(u));
-  const postImgs = imgs.filter((u) => /\/uploads\/posts\//i.test(u));
-  const matched = postImgs.find((u) => slugKey.length > 12 && u.toLowerCase().includes(slugKey.slice(0, 24)));
+  // 3) slug ile eşleşen post görseli
+  const allPosts = [...html.matchAll(/src=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)]
+    .map((m) => resolveNewsImageUrl(decodeHtmlEntities(m[1]), pageUrl))
+    .filter((u): u is string => !!u && !isBadCover(u));
+  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 28);
+  const matched = allPosts.find((u) => slugKey.length > 10 && u.toLowerCase().includes(slugKey.slice(0, 18)));
   if (matched) return matched;
+  if (allPosts[0]) return allPosts[0];
 
-  for (const c of metaCandidates) {
-    if (/\/uploads\/posts\//i.test(c) || !/\/logo\//i.test(c)) return c;
-  }
-
-  if (postImgs[0]) return postImgs[0];
-  return metaCandidates[0] || imgs.find((u) => /\.(jpe?g|png|webp)(\?|$)/i.test(u)) || null;
+  return null;
 }
 
 function extractPostContent(html: string): string {
-  const patterns = [
-    /class=["'][^"']*post-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
-    /class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
-    /id=["']content["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
-    /<article[^>]*>([\s\S]*?)<\/article>/i,
-  ];
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m?.[1] && stripHtml(m[1]).length > 80) return m[1];
-  }
+  const primary = extractBalancedByClass(html, "post-content")
+    || extractBalancedByClass(html, "entry-content")
+    || extractBalancedByClass(html, "td-post-content");
+  if (primary && stripHtml(primary).length > 80) return stripJunkBlocks(primary);
+
+  // Son çare: yalnızca ilk birkaç <p> — ilgili haber kartlarını alma
+  const ps = [...html.matchAll(/<p\b[^>]*>[\s\S]*?<\/p>/gi)].map((m) => m[0]);
+  const joined = ps.slice(0, 12).join("\n");
+  if (stripHtml(joined).length > 80) return joined;
   return "";
 }
 
@@ -180,11 +193,12 @@ export const guvenlikAkademiProvider: NewsProvider = {
     const rawContent = extractPostContent(html);
     let contentHtml = sanitizeNewsHtml(rawContent);
     contentHtml = absolutizeContentImages(contentHtml, url);
+    contentHtml = decodeHtmlEntities(contentHtml);
     const plain = stripHtml(contentHtml);
     if (plain.length < 40) return null;
 
     const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
-    const coverImage = pickCoverImage(html, url, ld);
+    const coverImage = pickCoverImage(html, url);
 
     let sourcePublishedAt: Date | null = null;
     let sourcePublishedMissing = false;

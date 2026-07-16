@@ -87,18 +87,14 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       publishMode: "auto",
     });
   } else {
-    const needsRescan =
-      row.initialLookbackDays < 20
-      || row.importMode !== "full"
-      || row.publishMode !== "auto";
     await db.update(newsSourcesTable).set({
       initialLookbackDays: 20,
       importMode: "full",
       publishMode: "auto",
       showSource: false,
       showSourceLink: false,
-      // Ayar değiştiyse bir kez tam tarama; mevcut ince kayıtlar scan içinde yenilenir
-      ...(needsRescan ? { lastScanAt: null } : {}),
+      // Kapak/içerik onarımı için bir sonraki cycle hemen tarasın
+      lastScanAt: null,
       updatedAt: new Date(),
     }).where(eq(newsSourcesTable.id, row.id));
   }
@@ -194,33 +190,22 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
         const title = cleanNewsTitle(article.title);
         const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl);
 
-        // Mevcut kaydı tam içerik + kapak + temiz başlık ile güncelle
+        // Mevcut kayıt: her taramada aynı haberin güncel gövde + kapak görselini yaz
         if (exists) {
-          const contentLen = exists.content?.length || 0;
-          const coverIsRelative = !!exists.coverImage && !/^https?:\/\//i.test(exists.coverImage);
-          const needsRefresh =
-            exists.publicationType !== "full"
-            || contentLen < 400
-            || !exists.coverImage
-            || coverIsRelative
-            || exists.status !== "published"
-            || /güvenlik\s*akademi|guvenlikakademi/i.test(exists.title);
-          if (needsRefresh) {
-            await db.update(newsArticlesTable).set({
-              title,
-              metaTitle: title,
-              content: article.contentHtml,
-              excerpt: article.excerpt || exists.excerpt,
-              coverImage: coverImage || resolveNewsImageUrl(exists.coverImage, article.sourceUrl) || exists.coverImage,
-              publicationType: "full",
-              status: "published",
-              publishedAt: exists.publishedAt || new Date(),
-              sourcePublishedAt: article.sourcePublishedAt || exists.sourcePublishedAt,
-              metaDescription: (article.excerpt || exists.metaDescription || "").slice(0, 160),
-              lastCheckedAt: new Date(),
-              updatedAt: new Date(),
-            }).where(eq(newsArticlesTable.id, exists.id));
-          }
+          await db.update(newsArticlesTable).set({
+            title,
+            metaTitle: title,
+            content: article.contentHtml,
+            excerpt: article.excerpt || exists.excerpt,
+            coverImage: coverImage || resolveNewsImageUrl(exists.coverImage, article.sourceUrl) || exists.coverImage,
+            publicationType: "full",
+            status: "published",
+            publishedAt: exists.publishedAt || new Date(),
+            sourcePublishedAt: article.sourcePublishedAt || exists.sourcePublishedAt,
+            metaDescription: (article.excerpt || exists.metaDescription || "").slice(0, 160),
+            lastCheckedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(newsArticlesTable.id, exists.id));
           stats.duplicates += 1;
           return;
         }
