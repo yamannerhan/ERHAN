@@ -139,7 +139,7 @@ export function NewsAdminSection() {
       <div className="rounded-2xl border border-white/10 bg-[#131831]/90 p-5 flex flex-wrap gap-3 items-start justify-between">
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
-          <p className="text-xs text-slate-400 mt-1">Kaynak: sitemap + detay sayfası · varsayılan özet aktarımı · 10 gün saklama</p>
+          <p className="text-xs text-slate-400 mt-1">Kaynak: sitemap + detay · tam içerik · otomatik yayın · 20 gün saklama · kaynak kullanıcıya gösterilmez</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw className="w-3.5 h-3.5 mr-1" /> Yenile</Button>

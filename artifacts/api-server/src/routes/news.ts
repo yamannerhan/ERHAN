@@ -18,8 +18,6 @@ function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
     coverImage: row.coverImage,
     category: row.category,
     authorName: row.authorName,
-    sourceName: row.sourceName,
-    sourceUrl: row.sourceUrl,
     publicationType: row.publicationType,
     publishedAt: row.publishedAt,
     sourcePublishedAt: row.sourcePublishedAt,
@@ -101,14 +99,11 @@ router.get("/news/:slug", async (req, res) => {
     await db.update(newsArticlesTable)
       .set({ viewCount: sql`${newsArticlesTable.viewCount} + 1` })
       .where(eq(newsArticlesTable.id, row.id));
-    const [source] = row.sourceId
-      ? await db.select().from(newsSourcesTable).where(eq(newsSourcesTable.id, row.sourceId)).limit(1)
-      : [null];
     res.json({
       article: {
         ...publicArticle(row),
-        showSource: source?.showSource !== false,
-        showSourceLink: source?.showSourceLink !== false,
+        showSource: false,
+        showSourceLink: false,
       },
     });
   } catch (e) {

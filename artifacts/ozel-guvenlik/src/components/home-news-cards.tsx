@@ -25,12 +25,6 @@ function relativeDate(value?: string | null): string {
   return days === 1 ? "Dün" : `${days} gün önce`;
 }
 
-function coverSrc(url?: string | null): string {
-  if (!url) return "/news/security-exam.png";
-  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) return url;
-  return `/news/security-exam.png`;
-}
-
 export function HomeNewsCards() {
   const [items, setItems] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,15 +70,17 @@ export function HomeNewsCards() {
         {!loading && items.map((item) => (
           <Link key={item.id} href={`/haberler/${item.slug}`} className="og-home-news__card">
             <span className="og-home-news__visual" aria-hidden>
-              <img
-                src={coverSrc(item.coverImage)}
-                alt=""
-                width={640}
-                height={280}
-                loading="lazy"
-                decoding="async"
-                onError={(e) => { e.currentTarget.src = "/news/security-exam.png"; }}
-              />
+              {item.coverImage ? (
+                <img
+                  src={item.coverImage}
+                  alt=""
+                  width={640}
+                  height={280}
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => { e.currentTarget.remove(); }}
+                />
+              ) : null}
               <span>{item.category || "HABER"}</span>
             </span>
             <strong>{item.title}</strong>

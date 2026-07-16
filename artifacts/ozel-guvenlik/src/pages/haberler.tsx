@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useSearch } from "wouter";
+import { Link } from "wouter";
 import { Layout } from "@/components/layout";
-import { Newspaper, Search } from "lucide-react";
+import { Newspaper } from "lucide-react";
 import "@/components/home-news-cards.css";
 
 type NewsItem = {
@@ -14,33 +14,11 @@ type NewsItem = {
   publishedAt?: string | null;
 };
 
-const CATEGORIES = [
-  "Tümü",
-  "Sektör Haberleri",
-  "Mevzuat",
-  "Eğitim ve Sınav",
-  "Maaş ve Haklar",
-  "Teknoloji",
-  "Rehberler",
-  "Firma ve Kurumlar",
-  "Genel Haberler",
-];
-
 export default function HaberlerPage() {
-  const search = useSearch();
-  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  const qParam = params.get("q") || "";
-  const [q, setQ] = useState(qParam);
-  const [category, setCategory] = useState("Tümü");
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<NewsItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setQ(qParam);
-    setPage(1);
-  }, [qParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,8 +26,6 @@ export default function HaberlerPage() {
       setLoading(true);
       try {
         const sp = new URLSearchParams({ page: String(page), limit: "12" });
-        if (q.trim()) sp.set("q", q.trim());
-        if (category !== "Tümü") sp.set("category", category);
         const res = await fetch(`/api/news?${sp}`);
         const json = await res.json() as { articles?: NewsItem[]; total?: number };
         if (!cancelled) {
@@ -61,7 +37,7 @@ export default function HaberlerPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [page, q, category]);
+  }, [page]);
 
   const totalPages = Math.max(1, Math.ceil(total / 12));
 
@@ -73,56 +49,6 @@ export default function HaberlerPage() {
         </h1>
         <p style={{ color: "#5a7188", fontSize: 14, marginBottom: 16 }}>Özel güvenlik gündeminden seçilen haberler.</p>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            setQ(String(fd.get("q") || ""));
-            setPage(1);
-          }}
-          style={{ display: "flex", gap: 8, marginBottom: 12 }}
-        >
-          <div style={{ flex: 1, position: "relative" }}>
-            <Search style={{ position: "absolute", left: 10, top: 11, width: 16, height: 16, color: "#94a3b8" }} />
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Haber ara…"
-              style={{
-                width: "100%",
-                padding: "10px 12px 10px 34px",
-                borderRadius: 12,
-                border: "1px solid #cfe3f8",
-                fontSize: 14,
-              }}
-            />
-          </div>
-          <button type="submit" style={{ padding: "10px 14px", borderRadius: 12, background: "#0878e8", color: "#fff", fontWeight: 700, border: "none" }}>
-            Ara
-          </button>
-        </form>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
-          {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => { setCategory(c); setPage(1); }}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid #cfe3f8",
-                background: category === c ? "#0878e8" : "#fff",
-                color: category === c ? "#fff" : "#0b3d6e",
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-
         {loading && <p style={{ color: "#64748b" }}>Yükleniyor…</p>}
         {!loading && items.length === 0 && <p style={{ color: "#64748b" }}>Henüz haber yok.</p>}
 
@@ -130,12 +56,14 @@ export default function HaberlerPage() {
           {items.map((item) => (
             <Link key={item.id} href={`/haberler/${item.slug}`} className="og-home-news__card">
               <span className="og-home-news__visual" aria-hidden>
-                <img
-                  src={item.coverImage || "/news/security-exam.png"}
-                  alt=""
-                  loading="lazy"
-                  onError={(e) => { e.currentTarget.src = "/news/security-exam.png"; }}
-                />
+                {item.coverImage ? (
+                  <img
+                    src={item.coverImage}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => { e.currentTarget.remove(); }}
+                  />
+                ) : null}
                 <span>{item.category || "HABER"}</span>
               </span>
               <strong>{item.title}</strong>

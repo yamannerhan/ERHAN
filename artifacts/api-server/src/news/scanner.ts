@@ -7,8 +7,8 @@ import { mapPool, sleep, slugifyTr, sourceHash } from "./utils";
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
 const MAX_SCAN_MS = 12 * 60_000;
-/** Otomatik haberler 10 günden eskiyse silinir */
-export const NEWS_RETENTION_DAYS = 10;
+/** Otomatik haberler 20 günden eskiyse silinir */
+export const NEWS_RETENTION_DAYS = 20;
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let scanning = false;
@@ -62,27 +62,56 @@ export async function purgeExpiredNews(): Promise<number> {
   return deleted.length;
 }
 
+/** Mevcut kaynak/ayarları istenen çalışma moduna çeker */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
-  const [row] = await db.select({ id: newsSourcesTable.id })
+  const [row] = await db.select()
     .from(newsSourcesTable)
     .where(eq(newsSourcesTable.providerKey, "guvenlik_akademi"))
     .limit(1);
-  if (row) return;
-  await db.insert(newsSourcesTable).values({
-    name: "Güvenlik Akademi",
-    baseUrl: "https://guvenlikakademi.com",
-    listingUrl: "https://guvenlikakademi.com/sitemap.xml",
-    providerKey: "guvenlik_akademi",
-    isActive: true,
-    scanIntervalMinutes: 30,
-    initialLookbackDays: 5,
-    importMode: "excerpt",
-    downloadImages: false,
-    showSource: true,
-    showSourceLink: true,
-    publishMode: "draft",
-  });
+
+  if (!row) {
+    await db.insert(newsSourcesTable).values({
+      name: "Güvenlik Akademi",
+      baseUrl: "https://guvenlikakademi.com",
+      listingUrl: "https://guvenlikakademi.com/sitemap.xml",
+      providerKey: "guvenlik_akademi",
+      isActive: true,
+      scanIntervalMinutes: 30,
+      initialLookbackDays: 20,
+      importMode: "full",
+      downloadImages: false,
+      showSource: false,
+      showSourceLink: false,
+      publishMode: "auto",
+    });
+  } else {
+    const needsRescan =
+      row.initialLookbackDays < 20
+      || row.importMode !== "full"
+      || row.publishMode !== "auto";
+    await db.update(newsSourcesTable).set({
+      initialLookbackDays: 20,
+      importMode: "full",
+      publishMode: "auto",
+      showSource: false,
+      showSourceLink: false,
+      ...(needsRescan ? { initialScanDone: false } : {}),
+      updatedAt: new Date(),
+    }).where(eq(newsSourcesTable.id, row.id));
+  }
+
+  // Eski taslak / özet otomatik haberleri hemen yayınla
+  await db.execute(sql`
+    UPDATE news_articles
+    SET
+      status = 'published',
+      publication_type = 'full',
+      published_at = COALESCE(published_at, imported_at, NOW()),
+      updated_at = NOW()
+    WHERE is_manual = FALSE
+      AND (status = 'draft' OR publication_type = 'excerpt')
+  `);
 }
 
 export async function scanNewsSource(sourceId: number, opts?: { force?: boolean }): Promise<{
@@ -109,7 +138,7 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
 
   const stats = { imported: 0, duplicates: 0, skipped: 0, failed: 0, discovered: 0 };
   const started = Date.now();
-  const lookbackDays = source.initialScanDone ? 3 : (source.initialLookbackDays || 5);
+  const lookbackDays = source.initialLookbackDays || NEWS_RETENTION_DAYS;
   const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
   try {
@@ -119,25 +148,21 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
     });
     const candidates = list
       .filter((item) => {
-        if (!item.lastmod) return !source.initialScanDone; // lastmod yoksa sadece ilk taramada dene
+        if (!item.lastmod) return !source.initialScanDone;
         return item.lastmod.getTime() >= cutoff.getTime();
       })
       .sort((a, b) => (b.lastmod?.getTime() ?? 0) - (a.lastmod?.getTime() ?? 0))
-      .slice(0, source.initialScanDone ? 40 : 80);
+      .slice(0, source.initialScanDone ? 60 : 160);
 
     stats.discovered = candidates.length;
 
     await mapPool(candidates, 2, async (item) => {
       if (Date.now() - started > MAX_SCAN_MS) return;
       try {
-        const [exists] = await db.select({ id: newsArticlesTable.id })
+        const [exists] = await db.select()
           .from(newsArticlesTable)
           .where(eq(newsArticlesTable.sourceUrl, item.sourceUrl))
           .limit(1);
-        if (exists) {
-          stats.duplicates += 1;
-          return;
-        }
 
         await sleep(350);
         const article = await provider.getArticleDetail(item.sourceUrl, { lastmod: item.lastmod });
@@ -146,9 +171,34 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           return;
         }
 
-        // 5 günden eski (kaynak tarihi varsa) alma
         if (article.sourcePublishedAt && article.sourcePublishedAt.getTime() < cutoff.getTime()) {
           stats.skipped += 1;
+          return;
+        }
+
+        // Mevcut kaydı tam içerik + kapak ile güncelle
+        if (exists) {
+          const needsRefresh =
+            exists.publicationType !== "full"
+            || !exists.content
+            || (exists.content?.length || 0) < 120
+            || !exists.coverImage
+            || exists.status !== "published";
+          if (needsRefresh) {
+            await db.update(newsArticlesTable).set({
+              content: article.contentHtml,
+              excerpt: article.excerpt || exists.excerpt,
+              coverImage: article.coverImage || exists.coverImage,
+              publicationType: "full",
+              status: "published",
+              publishedAt: exists.publishedAt || new Date(),
+              sourcePublishedAt: article.sourcePublishedAt || exists.sourcePublishedAt,
+              metaDescription: (article.excerpt || exists.metaDescription || "").slice(0, 160),
+              lastCheckedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(newsArticlesTable.id, exists.id));
+          }
+          stats.duplicates += 1;
           return;
         }
 
@@ -168,8 +218,8 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
 
         const slug = await uniqueSlug(article.title);
         const now = new Date();
-        const autoPublish = source.publishMode === "auto";
-        const publicationType = source.importMode === "full" ? "full" : "excerpt";
+        const autoPublish = source.publishMode !== "draft";
+        const publicationType = source.importMode === "excerpt" ? "excerpt" : "full";
         const content = publicationType === "full"
           ? article.contentHtml
           : `<p>${article.excerpt}</p>`;
@@ -190,7 +240,7 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           sourceHash: hash,
           sourcePublishedAt: article.sourcePublishedAt,
           importedAt: now,
-          publishedAt: autoPublish ? now : null,
+          publishedAt: autoPublish ? (article.sourcePublishedAt || now) : null,
           status: autoPublish ? "published" : "draft",
           publicationType,
           isManual: false,
@@ -287,14 +337,13 @@ export async function runNewsScanCycle(force = false): Promise<void> {
 export function startNewsWorker(): void {
   if (intervalHandle) return;
   void ensureDefaultNewsSource().catch(() => undefined);
-  // İlk tarama kısa gecikmeyle
   setTimeout(() => {
     void runNewsScanCycle(true).catch((err) => logger.error({ err }, "news: initial scan failed"));
   }, 15_000);
   intervalHandle = setInterval(() => {
     void runNewsScanCycle(false).catch((err) => logger.error({ err }, "news: interval scan failed"));
-  }, 5 * 60_000); // her 5 dk kontrol; kaynak interval'ı scanner içinde uygulanır
-  logger.info("news: worker started (30dk kaynak aralığı, 10g saklama)");
+  }, 5 * 60_000);
+  logger.info("news: worker started (30dk kaynak aralığı, 20g saklama, otomatik yayın)");
 }
 
 export function stopNewsWorker(): void {

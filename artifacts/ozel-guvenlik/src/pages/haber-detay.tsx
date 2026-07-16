@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "wouter";
 import { Layout } from "@/components/layout";
 import { useDocumentMeta } from "@/hooks/use-document-meta";
-import { ExternalLink } from "lucide-react";
 
 type Article = {
   id: number;
@@ -14,11 +13,7 @@ type Article = {
   category?: string | null;
   publishedAt?: string | null;
   sourcePublishedAt?: string | null;
-  sourceName?: string | null;
-  sourceUrl?: string | null;
   publicationType?: string | null;
-  showSource?: boolean;
-  showSourceLink?: boolean;
   metaTitle?: string | null;
   metaDescription?: string | null;
 };
@@ -60,9 +55,6 @@ export default function HaberDetayPage() {
         image: article.coverImage || undefined,
         datePublished: article.publishedAt || article.sourcePublishedAt || undefined,
         dateModified: article.publishedAt || article.sourcePublishedAt || undefined,
-        author: article.sourceName
-          ? { "@type": "Organization", name: article.sourceName }
-          : undefined,
         mainEntityOfPage: canonical || undefined,
       },
       {
@@ -85,6 +77,9 @@ export default function HaberDetayPage() {
     ogType: "article",
     jsonLd,
   });
+
+  const bodyHtml = article?.content
+    || (article?.excerpt ? `<p>${article.excerpt}</p>` : "");
 
   return (
     <Layout>
@@ -109,41 +104,12 @@ export default function HaberDetayPage() {
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
             )}
-            {article.excerpt && (
-              <p style={{ color: "#334155", fontSize: 15, lineHeight: 1.55, marginBottom: 14 }}>{article.excerpt}</p>
-            )}
-            {article.publicationType === "full" && article.content && (
+            {bodyHtml && (
               <div
-                style={{ color: "#1e293b", fontSize: 15, lineHeight: 1.65 }}
-                dangerouslySetInnerHTML={{ __html: article.content }}
+                className="og-news-body"
+                style={{ color: "#1e293b", fontSize: 15, lineHeight: 1.7 }}
+                dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
-            )}
-            {(article.showSource !== false) && article.sourceName && (
-              <p style={{ marginTop: 20, fontSize: 13, color: "#64748b" }}>
-                Kaynak: <strong>{article.sourceName}</strong>
-              </p>
-            )}
-            {(article.showSourceLink !== false) && article.sourceUrl && (
-              <a
-                href={article.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  marginTop: 10,
-                  background: "#0878e8",
-                  color: "#fff",
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: 14,
-                  textDecoration: "none",
-                }}
-              >
-                Haberin devamını kaynağında oku <ExternalLink className="w-4 h-4" />
-              </a>
             )}
           </>
         )}

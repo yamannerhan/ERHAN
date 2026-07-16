@@ -35,7 +35,20 @@ function metaContent(html: string, prop: string): string | null {
     `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,
     "i",
   );
-  return (html.match(re) || html.match(re2) || [])[1]?.trim() || null;
+  const re3 = new RegExp(
+    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["]([^"]+)["]`,
+    "i",
+  );
+  return decodeEntities((html.match(re) || html.match(re2) || html.match(re3) || [])[1]?.trim() || "") || null;
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
 function extractJsonLd(html: string): Record<string, unknown> | null {
@@ -77,6 +90,43 @@ function parseTrDate(html: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function isBadCover(url: string): boolean {
+  const u = url.toLowerCase();
+  return /logo|favicon|sprite|icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
+}
+
+function pickCoverImage(html: string, pageUrl: string, ld: Record<string, unknown> | null): string | null {
+  const ldImage = ld?.image;
+  let fromLd: string | null = null;
+  if (typeof ldImage === "string") fromLd = ldImage;
+  else if (Array.isArray(ldImage) && ldImage.length) {
+    const first = ldImage[0];
+    fromLd = typeof first === "string" ? first : (first as { url?: string })?.url || null;
+  } else if (ldImage && typeof ldImage === "object") {
+    fromLd = (ldImage as { url?: string }).url || null;
+  }
+
+  const candidates = [
+    fromLd,
+    metaContent(html, "og:image"),
+    metaContent(html, "og:image:secure_url"),
+    metaContent(html, "twitter:image"),
+    metaContent(html, "twitter:image:src"),
+    (html.match(/class=["'][^"']*(?:wp-post-image|featured|post-thumbnail|attachment-post)[^"']*["'][^>]*src=["']([^"']+)/i) || [])[1],
+    (html.match(/src=["']([^"']+)["'][^>]*class=["'][^"']*(?:wp-post-image|featured|post-thumbnail)[^"']*/i) || [])[1],
+    (html.match(/<article[\s\S]{0,4000}?<img[^>]+(?:data-src|src)=["']([^"']+)/i) || [])[1],
+    (html.match(/class=["'][^"']*post-content[^"']*["'][\s\S]{0,2000}?<img[^>]+(?:data-src|src)=["']([^"']+)/i) || [])[1],
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const abs = absolutizeUrl(pageUrl, decodeEntities(String(raw).trim()));
+    if (!abs || !/^https?:\/\//i.test(abs) || isBadCover(abs)) continue;
+    return abs;
+  }
+  return null;
+}
+
 export const guvenlikAkademiProvider: NewsProvider = {
   key: "guvenlik_akademi",
 
@@ -95,7 +145,6 @@ export const guvenlikAkademiProvider: NewsProvider = {
     const ld = extractJsonLd(html);
     const ogTitle = metaContent(html, "og:title");
     const ogDesc = metaContent(html, "og:description");
-    const ogImage = metaContent(html, "og:image");
     const canonical = metaContent(html, "og:url")
       || (html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i) || [])[1]
       || null;
@@ -106,22 +155,14 @@ export const guvenlikAkademiProvider: NewsProvider = {
 
     const contentMatch = html.match(
       /class=["'][^"']*post-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
-    );
+    )
+      || html.match(/class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i)
+      || html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
     const rawContent = contentMatch?.[1] || "";
     const contentHtml = sanitizeNewsHtml(rawContent);
     const plain = stripHtml(contentHtml);
     const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
-
-    const imgFromArticle = (html.match(/<article[\s\S]{0,2500}?<img[^>]+src=["']([^"']+)/i) || [])[1];
-    const coverRel = String(
-      (Array.isArray(ld?.image) ? ld?.image[0] : typeof ld?.image === "object" && ld?.image
-        ? (ld.image as { url?: string }).url
-        : ld?.image)
-      || ogImage
-      || imgFromArticle
-      || "",
-    );
-    const coverImage = absolutizeUrl(url, coverRel);
+    const coverImage = pickCoverImage(html, url, ld);
 
     let sourcePublishedAt: Date | null = null;
     let sourcePublishedMissing = false;
