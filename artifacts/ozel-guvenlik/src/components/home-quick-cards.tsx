@@ -15,7 +15,7 @@ export function HomeQuickCards({
     <section className="og-ref-quick-row" aria-label="Hızlı erişim">
       <Link href="/bana-uygun-isler" className="og-ref-quick-card" aria-label="Bana uygun işler sayfasını aç">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Sparkles className="w-7 h-7" strokeWidth={1.8} />
+          <Sparkles className="w-8 h-8" strokeWidth={2.1} />
         </div>
         <div className="og-ref-quick-title">Bana Uygun İşler</div>
         <div className="og-ref-quick-sub">Tercihine göre ilan bul</div>
@@ -23,7 +23,7 @@ export function HomeQuickCards({
 
       <Link href="/haberler" className="og-ref-quick-card" aria-label="Haberler sayfasını aç">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Newspaper className="w-7 h-7" strokeWidth={2} />
+          <Newspaper className="w-8 h-8" strokeWidth={2.2} />
         </div>
         <div className="og-ref-quick-title">Haberler</div>
         <div className="og-ref-quick-sub">Güncel güvenlik haberleri</div>
@@ -31,7 +31,7 @@ export function HomeQuickCards({
 
       <div className="og-ref-quick-card" aria-label="Bildirimler yakında hizmetinizde">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Bell className="w-7 h-7" strokeWidth={2} />
+          <Bell className="w-8 h-8" strokeWidth={2.2} />
         </div>
         <div className="og-ref-quick-title">Yakında Hizmetinizde</div>
         <div className="og-ref-quick-sub">Bildirimlerle haberdar olun</div>
@@ -39,7 +39,7 @@ export function HomeQuickCards({
 
       <Link href="/cv-olustur" className="og-ref-quick-card" aria-label="CV oluşturma sayfasını aç">
         <div className="og-ref-quick-icon" aria-hidden>
-          <FileText className="w-7 h-7" strokeWidth={2} />
+          <FileText className="w-8 h-8" strokeWidth={2.2} />
         </div>
         <div className="og-ref-quick-title">CV Oluştur</div>
         <div className="og-ref-quick-sub">CV'ni hemen hazırla</div>

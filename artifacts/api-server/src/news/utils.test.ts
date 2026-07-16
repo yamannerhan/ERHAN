@@ -1,10 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeExcerpt, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
+import { cleanNewsTitle, makeExcerpt, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
 
 describe("news utils", () => {
   it("slugifies turkish titles", () => {
     assert.equal(slugifyTr("Özel Güvenlik Sınavı 2026"), "ozel-guvenlik-sinavi-2026");
+  });
+
+  it("strips source brand from titles", () => {
+    assert.equal(
+      cleanNewsTitle("Özel Güvenlik Maaşları - Güvenlik Akademi"),
+      "Özel Güvenlik Maaşları",
+    );
+    assert.ok(!/akademi/i.test(cleanNewsTitle("Güvenlik Akademi: Sınav Sonuçları")));
   });
 
   it("builds stable source hash", () => {

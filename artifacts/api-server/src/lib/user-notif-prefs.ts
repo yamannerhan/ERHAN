@@ -57,7 +57,9 @@ export function prefsAllowPushKind(prefs: UserNotifPrefs, kind: string): boolean
 
 export function prefsAllowInAppType(prefs: UserNotifPrefs, type: string): boolean {
   if (type === "listing") return prefs.notifListings !== false;
-  if (type === "admin" || type === "system" || type === "welcome") return prefs.notifSite !== false;
+  if (type === "news" || type === "admin" || type === "system" || type === "welcome") {
+    return prefs.notifSite !== false;
+  }
   return prefs.notifOther !== false;
 }
 

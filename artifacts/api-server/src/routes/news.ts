@@ -4,7 +4,7 @@ import { and, desc, eq, ilike, lte, or, sql } from "drizzle-orm";
 import { authMiddleware, requireAdmin } from "../middlewares/auth";
 import { ensureNewsSchema } from "../news/ensure";
 import { ensureDefaultNewsSource, runNewsScanCycle, scanNewsSource } from "../news/scanner";
-import { sanitizeNewsHtml, slugifyTr, sourceHash } from "../news/utils";
+import { cleanNewsTitle, sanitizeNewsHtml, slugifyTr, sourceHash } from "../news/utils";
 
 const router = Router();
 
@@ -128,8 +128,8 @@ router.post("/admin/news", authMiddleware, requireAdmin, async (req, res) => {
     title?: string; excerpt?: string; content?: string; coverImage?: string;
     category?: string; status?: string; publishedAt?: string;
   };
-  const title = String(body.title || "").trim();
-  if (!title) {
+  const title = cleanNewsTitle(String(body.title || "").trim());
+  if (!title || title === "Haber") {
     res.status(400).json({ error: "Başlık gerekli" });
     return;
   }

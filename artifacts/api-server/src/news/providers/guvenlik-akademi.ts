@@ -1,5 +1,6 @@
 import {
   absolutizeUrl,
+  cleanNewsTitle,
   fetchText,
   makeExcerpt,
   sanitizeNewsHtml,
@@ -150,7 +151,7 @@ export const guvenlikAkademiProvider: NewsProvider = {
       || null;
 
     const h1 = stripHtml((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
-    const title = String(ld?.headline || ogTitle || h1 || "").trim();
+    const title = cleanNewsTitle(String(ld?.headline || ogTitle || h1 || ""));
     if (!title || title.length < 8) return null;
 
     const contentMatch = html.match(

@@ -16,6 +16,35 @@ export function slugifyTr(input: string): string {
     .slice(0, 120) || "haber";
 }
 
+/** Kaynak site adlarını temizler ve başlığı okunaklı hale getirir */
+export function cleanNewsTitle(raw: string): string {
+  let t = String(raw || "").replace(/\s+/g, " ").trim();
+  const brandPatterns = [
+    /\s*[-|–—:·]\s*güvenlik\s*akademi(si)?\s*$/gi,
+    /^güvenlik\s*akademi(si)?\s*[-|–—:·]\s*/gi,
+    /\(\s*güvenlik\s*akademi(si)?\s*\)/gi,
+    /\bgüvenlik\s*akademi(si)?\b/gi,
+    /\bguvenlik\s*akademi(si)?\b/gi,
+    /\bguvenlikakademi(?:\.com)?\b/gi,
+    /\bwww\.guvenlikakademi\.com\b/gi,
+  ];
+  for (const p of brandPatterns) t = t.replace(p, " ");
+  t = t
+    .replace(/\s+/g, " ")
+    .replace(/^[-|–—:·.\s]+|[-|–—:·.\s]+$/g, "")
+    .trim();
+
+  // Tamamı büyük harfse başlık biçimine çevir
+  const letters = t.replace(/[^\p{L}]/gu, "");
+  if (letters.length >= 8 && letters === letters.toLocaleUpperCase("tr-TR")) {
+    t = t
+      .toLocaleLowerCase("tr-TR")
+      .replace(/(^|[\s(/«"'])(\p{L})/gu, (_m, a: string, b: string) => a + b.toLocaleUpperCase("tr-TR"));
+  }
+  if (t) t = t.charAt(0).toLocaleUpperCase("tr-TR") + t.slice(1);
+  return t || "Haber";
+}
+
 export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
