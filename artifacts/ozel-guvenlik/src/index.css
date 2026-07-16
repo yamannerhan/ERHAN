@@ -3037,6 +3037,10 @@ html:not(.dark) .og-pt-row {
 .cmc-name.name-vip {
   max-width: 11rem;
 }
+/* Admin duman efekti taşmasın diye overflow açık */
+.cmc-name.name-admin {
+  overflow: visible;
+}
 .cmc-role-pill {
   font-size: 0.46rem;
   font-weight: 800;
