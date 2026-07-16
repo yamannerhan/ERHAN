@@ -15,7 +15,7 @@ export function HomeQuickCards({
     <section className="og-ref-quick-row" aria-label="Hızlı erişim">
       <Link href="/bana-uygun-isler" className="og-ref-quick-card" aria-label="Bana uygun işler sayfasını aç">
         <div className="og-ref-quick-icon" aria-hidden>
-          <Sparkles className="w-8 h-8" strokeWidth={2.1} />
+          <Sparkles className="w-8 h-8" strokeWidth={2.2} />
         </div>
         <div className="og-ref-quick-title">Bana Uygun İşler</div>
         <div className="og-ref-quick-sub">Tercihine göre ilan bul</div>

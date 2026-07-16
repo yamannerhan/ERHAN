@@ -2,9 +2,9 @@ import { db, newsArticlesTable, newsImportLogsTable, newsSourcesTable, pool } fr
 import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { ensureNewsSchema } from "./ensure";
-import { announceNewNews } from "./announce";
+import { announceNewNews } from "../lib/news-announcements";
 import { getProvider } from "./providers/guvenlik-akademi";
-import { cleanNewsTitle, mapPool, sleep, slugifyTr, sourceHash } from "./utils";
+import { cleanNewsTitle, mapPool, resolveNewsImageUrl, sleep, slugifyTr, sourceHash } from "./utils";
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
 const MAX_SCAN_MS = 12 * 60_000;
@@ -97,7 +97,8 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       publishMode: "auto",
       showSource: false,
       showSourceLink: false,
-      ...(needsRescan ? { initialScanDone: false } : {}),
+      // Ayar değiştiyse bir kez tam tarama; mevcut ince kayıtlar scan içinde yenilenir
+      ...(needsRescan ? { lastScanAt: null } : {}),
       updatedAt: new Date(),
     }).where(eq(newsSourcesTable.id, row.id));
   }
@@ -114,19 +115,16 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       AND (status = 'draft' OR publication_type = 'excerpt')
   `);
 
-  // Mevcut başlıklardan kaynak site adını temizle
-  const dirty = await db.select({
-    id: newsArticlesTable.id,
-    title: newsArticlesTable.title,
-  }).from(newsArticlesTable).limit(500);
-  for (const row of dirty) {
-    const cleaned = cleanNewsTitle(row.title);
-    if (cleaned && cleaned !== row.title) {
-      await db.update(newsArticlesTable)
-        .set({ title: cleaned, metaTitle: cleaned, updatedAt: new Date() })
-        .where(eq(newsArticlesTable.id, row.id));
-    }
-  }
+  // Başlıklardan kaynak site adını temizle
+  await db.execute(sql`
+    UPDATE news_articles
+    SET
+      title = TRIM(REGEXP_REPLACE(title, '\s*[\|\-–—·•]\s*[Gg][üu]venlik\s*[Aa]kademi(si)?(\.com)?\s*$', '', 'g')),
+      meta_title = TRIM(REGEXP_REPLACE(COALESCE(meta_title, title), '\s*[\|\-–—·•]\s*[Gg][üu]venlik\s*[Aa]kademi(si)?(\.com)?\s*$', '', 'g')),
+      updated_at = NOW()
+    WHERE title ~* 'güvenlik\s*akademi|guvenlikakademi'
+       OR COALESCE(meta_title, '') ~* 'güvenlik\s*akademi|guvenlikakademi'
+  `);
 }
 
 export async function scanNewsSource(sourceId: number, opts?: { force?: boolean }): Promise<{
@@ -153,10 +151,10 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
 
   const stats = { imported: 0, duplicates: 0, skipped: 0, failed: 0, discovered: 0 };
   const started = Date.now();
-  const isInitialScan = !source.initialScanDone;
   const lookbackDays = source.initialLookbackDays || NEWS_RETENTION_DAYS;
   const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-  const newlyImported: Array<{ id: number; title: string; slug: string }> = [];
+  /** İlk tarama hariç yeni haberleri kullanıcıya duyur */
+  const announceEnabled = !!source.initialScanDone;
 
   try {
     const list = await provider.getArticleList({
@@ -165,11 +163,11 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
     });
     const candidates = list
       .filter((item) => {
-        if (!item.lastmod) return isInitialScan;
+        if (!item.lastmod) return !source.initialScanDone;
         return item.lastmod.getTime() >= cutoff.getTime();
       })
       .sort((a, b) => (b.lastmod?.getTime() ?? 0) - (a.lastmod?.getTime() ?? 0))
-      .slice(0, isInitialScan ? 160 : 60);
+      .slice(0, source.initialScanDone ? 60 : 160);
 
     stats.discovered = candidates.length;
 
@@ -194,23 +192,26 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
         }
 
         const title = cleanNewsTitle(article.title);
+        const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl);
 
-        // Mevcut kaydı tam içerik + kapak ile güncelle
+        // Mevcut kaydı tam içerik + kapak + temiz başlık ile güncelle
         if (exists) {
+          const contentLen = exists.content?.length || 0;
+          const coverIsRelative = !!exists.coverImage && !/^https?:\/\//i.test(exists.coverImage);
           const needsRefresh =
             exists.publicationType !== "full"
-            || !exists.content
-            || (exists.content?.length || 0) < 120
+            || contentLen < 400
             || !exists.coverImage
+            || coverIsRelative
             || exists.status !== "published"
-            || cleanNewsTitle(exists.title) !== exists.title;
+            || /güvenlik\s*akademi|guvenlikakademi/i.test(exists.title);
           if (needsRefresh) {
             await db.update(newsArticlesTable).set({
               title,
               metaTitle: title,
               content: article.contentHtml,
               excerpt: article.excerpt || exists.excerpt,
-              coverImage: article.coverImage || exists.coverImage,
+              coverImage: coverImage || resolveNewsImageUrl(exists.coverImage, article.sourceUrl) || exists.coverImage,
               publicationType: "full",
               status: "published",
               publishedAt: exists.publishedAt || new Date(),
@@ -251,7 +252,7 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           slug,
           excerpt: article.excerpt,
           content,
-          coverImage: article.coverImage,
+          coverImage,
           category: article.category,
           authorName: article.authorName,
           sourceId: source.id,
@@ -270,14 +271,20 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           metaDescription: article.excerpt.slice(0, 160),
           tags: article.tags,
           lastCheckedAt: now,
-        }).onConflictDoNothing().returning({ id: newsArticlesTable.id, title: newsArticlesTable.title, slug: newsArticlesTable.slug });
+        }).onConflictDoNothing().returning({ id: newsArticlesTable.id, slug: newsArticlesTable.slug, title: newsArticlesTable.title });
 
         if (inserted.length) {
           stats.imported += 1;
-          if (!isInitialScan && autoPublish) {
-            newlyImported.push(inserted[0]);
+          if (announceEnabled && autoPublish) {
+            void announceNewNews({
+              id: inserted[0].id,
+              title: inserted[0].title,
+              slug: inserted[0].slug,
+            }).catch((err) => logger.warn({ err }, "news: announce failed"));
           }
-        } else stats.duplicates += 1;
+        } else {
+          stats.duplicates += 1;
+        }
         if (article.sourcePublishedMissing) {
           logger.warn({ url: article.sourceUrl }, "news: kaynak yayın tarihi bulunamadı");
         }
@@ -307,16 +314,6 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
     }).where(eq(newsImportLogsTable.id, log.id));
 
     await purgeExpiredNews();
-
-    // İlk tarama hariç: her yeni haber için sohbet + bildirim
-    if (!isInitialScan && newlyImported.length) {
-      for (const item of newlyImported) {
-        await announceNewNews(item).catch((err) => {
-          logger.warn({ err, id: item.id }, "news: announce failed");
-        });
-      }
-    }
-
     return stats;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

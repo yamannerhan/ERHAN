@@ -107,10 +107,17 @@ export default function HaberDetayPage() {
             {bodyHtml && (
               <div
                 className="og-news-body"
-                style={{ color: "#1e293b", fontSize: 15, lineHeight: 1.7 }}
+                style={{ color: "#1e293b", fontSize: 15.5, lineHeight: 1.75 }}
                 dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
             )}
+            <style>{`
+              .og-news-body p { margin: 0 0 1em; }
+              .og-news-body img { max-width: 100%; height: auto; border-radius: 12px; margin: 12px 0; }
+              .og-news-body h2, .og-news-body h3 { color: #0b3d6e; margin: 1.1em 0 0.5em; font-weight: 800; }
+              .og-news-body ul, .og-news-body ol { padding-left: 1.25em; margin: 0 0 1em; }
+              .og-news-body a { color: #0878e8; }
+            `}</style>
           </>
         )}
       </article>

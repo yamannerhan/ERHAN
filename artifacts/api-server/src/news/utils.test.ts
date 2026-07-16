@@ -1,18 +1,28 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cleanNewsTitle, makeExcerpt, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
+import { cleanNewsTitle, makeExcerpt, resolveNewsImageUrl, sanitizeNewsHtml, slugifyTr, sourceHash, stripHtml } from "./utils";
 
 describe("news utils", () => {
   it("slugifies turkish titles", () => {
     assert.equal(slugifyTr("Özel Güvenlik Sınavı 2026"), "ozel-guvenlik-sinavi-2026");
   });
 
-  it("strips source brand from titles", () => {
+  it("cleans source site name from titles", () => {
     assert.equal(
-      cleanNewsTitle("Özel Güvenlik Maaşları - Güvenlik Akademi"),
-      "Özel Güvenlik Maaşları",
+      cleanNewsTitle("Özel Güvenlik Sınavı | Güvenlik Akademi"),
+      "Özel Güvenlik Sınavı",
     );
-    assert.ok(!/akademi/i.test(cleanNewsTitle("Güvenlik Akademi: Sınav Sonuçları")));
+    assert.equal(
+      cleanNewsTitle("Antalya Otogarında Saldırı - Güvenlik Akademisi"),
+      "Antalya Otogarında Saldırı",
+    );
+  });
+
+  it("resolves relative cover urls", () => {
+    assert.equal(
+      resolveNewsImageUrl("/admin/uploads/posts/a.webp", "https://guvenlikakademi.com/haber"),
+      "https://guvenlikakademi.com/admin/uploads/posts/a.webp",
+    );
   });
 
   it("builds stable source hash", () => {

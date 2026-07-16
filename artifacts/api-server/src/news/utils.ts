@@ -16,33 +16,28 @@ export function slugifyTr(input: string): string {
     .slice(0, 120) || "haber";
 }
 
-/** Kaynak site adlarını temizler ve başlığı okunaklı hale getirir */
-export function cleanNewsTitle(raw: string): string {
-  let t = String(raw || "").replace(/\s+/g, " ").trim();
-  const brandPatterns = [
-    /\s*[-|–—:·]\s*güvenlik\s*akademi(si)?\s*$/gi,
-    /^güvenlik\s*akademi(si)?\s*[-|–—:·]\s*/gi,
-    /\(\s*güvenlik\s*akademi(si)?\s*\)/gi,
-    /\bgüvenlik\s*akademi(si)?\b/gi,
-    /\bguvenlik\s*akademi(si)?\b/gi,
-    /\bguvenlikakademi(?:\.com)?\b/gi,
-    /\bwww\.guvenlikakademi\.com\b/gi,
-  ];
-  for (const p of brandPatterns) t = t.replace(p, " ");
-  t = t
-    .replace(/\s+/g, " ")
-    .replace(/^[-|–—:·.\s]+|[-|–—:·.\s]+$/g, "")
-    .trim();
+/** Kaynak site adlarını temizle, başlığı okunaklı bırak */
+export function cleanNewsTitle(input: string): string {
+  let t = stripHtml(String(input || "")).replace(/\s+/g, " ").trim();
+  t = t.replace(/\s*[\|–—·•]\s*(güvenlik\s*akademi(si)?\.?(com)?)\s*$/i, "");
+  t = t.replace(/\s*[\-\–—]\s*(güvenlik\s*akademi(si)?\.?(com)?)\s*$/i, "");
+  t = t.replace(/\(\s*güvenlik\s*akademi(si)?\.?(com)?\s*\)\s*$/i, "");
+  t = t.replace(/\s+güvenlik\s*akademi(si)?\.?(com)?\s*$/i, "");
+  t = t.replace(/\s*[\|–—·•]\s*guvenlikakademi\.com\s*$/i, "");
+  t = t.replace(/\s+/g, " ").trim();
+  // Çift boşluk / bozuk noktalama
+  t = t.replace(/\s+([:?!.])/g, "$1");
+  return t;
+}
 
-  // Tamamı büyük harfse başlık biçimine çevir
-  const letters = t.replace(/[^\p{L}]/gu, "");
-  if (letters.length >= 8 && letters === letters.toLocaleUpperCase("tr-TR")) {
-    t = t
-      .toLocaleLowerCase("tr-TR")
-      .replace(/(^|[\s(/«"'])(\p{L})/gu, (_m, a: string, b: string) => a + b.toLocaleUpperCase("tr-TR"));
-  }
-  if (t) t = t.charAt(0).toLocaleUpperCase("tr-TR") + t.slice(1);
-  return t || "Haber";
+/** Göreli kapak URL'lerini kaynak siteye göre mutlaklaştır */
+export function resolveNewsImageUrl(image: string | null | undefined, sourceUrl?: string | null): string | null {
+  if (!image?.trim()) return null;
+  const raw = image.trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("//")) return `https:${raw}`;
+  const base = sourceUrl?.trim() || "https://guvenlikakademi.com/";
+  return absolutizeUrl(base, raw);
 }
 
 export function sha256(text: string): string {
@@ -103,9 +98,24 @@ export function sanitizeNewsHtml(html: string): string {
   out = out.replace(/\son\w+\s*=\s*(['"]).*?\1/gi, "");
   out = out.replace(/\son\w+\s*=\s*[^\s>]+/gi, "");
   out = out.replace(/javascript:/gi, "");
+  // span/div sarmalayıcıları kaldır, içeriği tut
+  out = out.replace(/<\/?(?:span|div|section|article|header|footer|aside|main|font)[^>]*>/gi, "");
   // yalnızca izinli etiketleri bırak (kabaca)
-  out = out.replace(/<\/?(?!\/?(?:p|h2|h3|strong|em|ul|ol|li|blockquote|figure|figcaption|img|a|br)\b)[a-z0-9-]+[^>]*>/gi, "");
+  out = out.replace(/<\/?(?!\/?(?:p|h1|h2|h3|h4|strong|b|em|i|ul|ol|li|blockquote|figure|figcaption|img|a|br)\b)[a-z0-9-]+[^>]*>/gi, "");
+  // img src göreli ise sonra resolve edilir — data-src -> src
+  out = out.replace(/<img([^>]*?)data-(?:src|lazy-src)=["']([^"']+)["']([^>]*?)>/gi, '<img$1src="$2"$3>');
   return out.trim();
+}
+
+/** İçerikteki göreli img src'lerini mutlaklaştır */
+export function absolutizeContentImages(html: string, pageUrl: string): string {
+  return String(html || "").replace(
+    /(<img[^>]+src=["'])([^"']+)(["'])/gi,
+    (_m, pre: string, src: string, post: string) => {
+      const abs = resolveNewsImageUrl(src, pageUrl) || src;
+      return `${pre}${abs}${post}`;
+    },
+  );
 }
 
 export function makeExcerpt(text: string, max = 220): string {

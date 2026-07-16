@@ -1,8 +1,10 @@
 import {
+  absolutizeContentImages,
   absolutizeUrl,
   cleanNewsTitle,
   fetchText,
   makeExcerpt,
+  resolveNewsImageUrl,
   sanitizeNewsHtml,
   stripHtml,
 } from "../utils";
@@ -16,7 +18,7 @@ function parseSitemap(xml: string, baseUrl: string): NewsListItem[] {
     if (!loc) continue;
     if (!loc.startsWith(baseUrl.replace(/\/$/, ""))) continue;
     if (loc.replace(/\/$/, "") === baseUrl.replace(/\/$/, "")) continue;
-    if (/\/(kategori|category|tag|sayfa|page|giris|uye|admin)\b/i.test(loc)) continue;
+    if (/\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim)\b/i.test(loc)) continue;
     const lastmodRaw = (block.match(/<lastmod>([^<]+)<\/lastmod>/i) || [])[1]?.trim();
     const lastmod = lastmodRaw ? new Date(lastmodRaw) : null;
     out.push({
@@ -36,11 +38,7 @@ function metaContent(html: string, prop: string): string | null {
     `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,
     "i",
   );
-  const re3 = new RegExp(
-    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["]([^"]+)["]`,
-    "i",
-  );
-  return decodeEntities((html.match(re) || html.match(re2) || html.match(re3) || [])[1]?.trim() || "") || null;
+  return decodeEntities((html.match(re) || html.match(re2) || [])[1]?.trim() || "") || null;
 }
 
 function decodeEntities(value: string): string {
@@ -93,10 +91,20 @@ function parseTrDate(html: string): Date | null {
 
 function isBadCover(url: string): boolean {
   const u = url.toLowerCase();
-  return /logo|favicon|sprite|icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
+  return /\/logo\/|favicon|sprite|icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes/.test(u);
+}
+
+function allImageUrls(html: string, pageUrl: string): string[] {
+  const found = [
+    ...html.matchAll(/<(?:img|meta)[^>]+(?:src|content|data-src|data-lazy-src)=["']([^"']+)["']/gi),
+  ].map((m) => resolveNewsImageUrl(decodeEntities(m[1]), pageUrl)).filter((u): u is string => !!u);
+  return [...new Set(found)];
 }
 
 function pickCoverImage(html: string, pageUrl: string, ld: Record<string, unknown> | null): string | null {
+  const slug = (pageUrl.split("/").filter(Boolean).pop() || "").toLowerCase();
+  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 48);
+
   const ldImage = ld?.image;
   let fromLd: string | null = null;
   if (typeof ldImage === "string") fromLd = ldImage;
@@ -107,25 +115,40 @@ function pickCoverImage(html: string, pageUrl: string, ld: Record<string, unknow
     fromLd = (ldImage as { url?: string }).url || null;
   }
 
-  const candidates = [
+  const metaCandidates = [
     fromLd,
     metaContent(html, "og:image"),
     metaContent(html, "og:image:secure_url"),
     metaContent(html, "twitter:image"),
     metaContent(html, "twitter:image:src"),
-    (html.match(/class=["'][^"']*(?:wp-post-image|featured|post-thumbnail|attachment-post)[^"']*["'][^>]*src=["']([^"']+)/i) || [])[1],
-    (html.match(/src=["']([^"']+)["'][^>]*class=["'][^"']*(?:wp-post-image|featured|post-thumbnail)[^"']*/i) || [])[1],
-    (html.match(/<article[\s\S]{0,4000}?<img[^>]+(?:data-src|src)=["']([^"']+)/i) || [])[1],
-    (html.match(/class=["'][^"']*post-content[^"']*["'][\s\S]{0,2000}?<img[^>]+(?:data-src|src)=["']([^"']+)/i) || [])[1],
-  ];
+  ].map((v) => resolveNewsImageUrl(v, pageUrl)).filter((u): u is string => !!u && !isBadCover(u));
 
-  for (const raw of candidates) {
-    if (!raw) continue;
-    const abs = absolutizeUrl(pageUrl, decodeEntities(String(raw).trim()));
-    if (!abs || !/^https?:\/\//i.test(abs) || isBadCover(abs)) continue;
-    return abs;
+  // Haberin kendi post görseli (slug eşleşmesi)
+  const imgs = allImageUrls(html, pageUrl).filter((u) => !isBadCover(u));
+  const postImgs = imgs.filter((u) => /\/uploads\/posts\//i.test(u));
+  const matched = postImgs.find((u) => slugKey.length > 12 && u.toLowerCase().includes(slugKey.slice(0, 24)));
+  if (matched) return matched;
+
+  for (const c of metaCandidates) {
+    if (/\/uploads\/posts\//i.test(c) || !/\/logo\//i.test(c)) return c;
   }
-  return null;
+
+  if (postImgs[0]) return postImgs[0];
+  return metaCandidates[0] || imgs.find((u) => /\.(jpe?g|png|webp)(\?|$)/i.test(u)) || null;
+}
+
+function extractPostContent(html: string): string {
+  const patterns = [
+    /class=["'][^"']*post-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
+    /class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
+    /id=["']content["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
+    /<article[^>]*>([\s\S]*?)<\/article>/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m?.[1] && stripHtml(m[1]).length > 80) return m[1];
+  }
+  return "";
 }
 
 export const guvenlikAkademiProvider: NewsProvider = {
@@ -154,14 +177,12 @@ export const guvenlikAkademiProvider: NewsProvider = {
     const title = cleanNewsTitle(String(ld?.headline || ogTitle || h1 || ""));
     if (!title || title.length < 8) return null;
 
-    const contentMatch = html.match(
-      /class=["'][^"']*post-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i,
-    )
-      || html.match(/class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]*?)(?:<\/div>\s*<(?:div|section|footer|aside)|$)/i)
-      || html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
-    const rawContent = contentMatch?.[1] || "";
-    const contentHtml = sanitizeNewsHtml(rawContent);
+    const rawContent = extractPostContent(html);
+    let contentHtml = sanitizeNewsHtml(rawContent);
+    contentHtml = absolutizeContentImages(contentHtml, url);
     const plain = stripHtml(contentHtml);
+    if (plain.length < 40) return null;
+
     const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
     const coverImage = pickCoverImage(html, url, ld);
 
