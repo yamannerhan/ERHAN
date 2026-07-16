@@ -59,11 +59,14 @@ router.post("/admin/whatsapp/reload-chats", authMiddleware, requireAdmin, async 
       fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil");
       return;
     }
-    await WhatsAppManager.refreshGroups();
+    const groups = await WhatsAppManager.refreshGroups(undefined, true);
     const status = WhatsAppManager.getStatus();
     res.json({
       success: true,
-      message: "Grup listesi yenilendi.",
+      message: groups.length > 0
+        ? `${groups.length} grup/kanal listelendi.`
+        : "Grup listesi yenilendi; henüz sonuç yok, birkaç saniye sonra tekrar deneyin.",
+      groupsCount: groups.length,
       ...status,
     });
   } catch (error) {
@@ -203,15 +206,23 @@ router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, 
     return fail(res, 503, "CLIENT_NOT_READY", "WhatsApp bağlı değil.");
   }
 
-  // Discovery'yi başlat (zaten çalışıyorsa mevcut promise döner)
+  // Discovery'yi başlat; kısa bekle ki ilk sonuç dönsün
   void WhatsAppManager.refreshGroups().catch(() => undefined);
+  const cached = WhatsAppManager.getCachedGroups();
+  if (cached.length === 0 && st.groupDiscoveryStatus !== "READY") {
+    await Promise.race([
+      WhatsAppManager.refreshGroups(),
+      new Promise((r) => setTimeout(r, 8_000)),
+    ]);
+  }
 
   const groups = await listWhatsAppGroupsSafe();
   const diagnostics = await getDiscoveryDiagnostics();
   const status = WhatsAppManager.getStatus();
+  const list = groups.length > 0 ? groups : WhatsAppManager.getCachedGroups();
   res.json({
     success: true,
-    groups: groups.map((g) => ({
+    groups: list.map((g) => ({
       id: g.id,
       name: g.name,
       kind: g.kind ?? (g.isChannel ? "channel" : "group"),
@@ -226,6 +237,7 @@ router.get("/admin/whatsapp/groups", authMiddleware, requireAdmin, async (_req, 
       groupCount: status.groupCount,
       channelCount: status.channelCount,
       state: status.connectionStatus,
+      wwebVersion: status.wwebjsVersion,
       clientInstanceId: status.clientInstanceId,
       groupDiscoveryStatus: status.groupDiscoveryStatus,
       errors: diagnostics.error ? [diagnostics.error] : [],

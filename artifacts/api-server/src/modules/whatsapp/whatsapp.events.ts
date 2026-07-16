@@ -14,6 +14,7 @@ export type WaClientLike = {
   pupPage?: {
     isClosed?: () => boolean;
     on?: (event: string, cb: (...args: unknown[]) => void) => void;
+    evaluate?: <T>(fn: (...args: never[]) => T | Promise<T>, ...args: unknown[]) => Promise<T>;
   } | null;
   on: (event: string, cb: (...args: unknown[]) => void) => void;
   removeAllListeners?: (event?: string) => void;

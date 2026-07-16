@@ -117,3 +117,19 @@ test("status connectionState ve discoveryState birbirine karışmıyor", () => {
   assert.ok(["IDLE", "CONNECTING", "CONNECTED", "AUTHENTICATED", "FAILED", "DISCONNECTED", "RATE_LIMITED"].includes(status.connectionStatus));
   assert.ok(["NOT_STARTED", "LOADING", "RETRYING", "READY", "FAILED"].includes(status.groupDiscoveryStatus));
 });
+
+test("normalizeChatObjects grup ve kanal ayırır, DM atlar", async () => {
+  const { normalizeChatObjects, summariesToGroups } = await import("./whatsapp.discovery");
+  const groups = normalizeChatObjects([
+    { id: { _serialized: "120363@g.us" }, isGroup: true, name: "Güvenlik", timestamp: 1700000000 },
+    { id: { _serialized: "905551112233@c.us" }, isGroup: false, name: "Kişi" },
+    { id: { _serialized: "123@newsletter" }, isChannel: true, name: "Kanal" },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0]?.kind, "group");
+  assert.equal(groups[1]?.kind, "channel");
+  const fromSummary = summariesToGroups([
+    { id: "1@g.us", name: "A", isGroup: true, isChannel: false, timestamp: null },
+  ]);
+  assert.equal(fromSummary[0]?.name, "A");
+});

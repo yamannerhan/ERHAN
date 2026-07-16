@@ -20,6 +20,11 @@ import {
   sessionAuthDir,
   volumeWarning,
 } from "./whatsapp.client";
+import {
+  fetchGroupsFromStore,
+  normalizeChatObjects,
+  probeChatStore,
+} from "./whatsapp.discovery";
 import { attachWhatsAppEvents, type SessionRuntime, type WaClientLike } from "./whatsapp.events";
 import { persistSessionMeta } from "./whatsapp.repository";
 import {
@@ -49,9 +54,11 @@ type WaClient = WaClientLike & {
   getState: () => Promise<string | null>;
   getChatById: (id: string) => Promise<unknown>;
   requestPairingCode?: (phone: string, showNotification?: boolean, intervalMs?: number) => Promise<string>;
+  getChannels?: () => Promise<unknown[]>;
   pupPage?: {
     isClosed?: () => boolean;
     on?: (event: string, cb: (...args: unknown[]) => void) => void;
+    evaluate?: <T>(fn: (...args: never[]) => T | Promise<T>, ...args: unknown[]) => Promise<T>;
   } | null;
 };
 
@@ -499,42 +506,112 @@ class WhatsAppManagerClass {
     return { ok: true };
   }
 
-  private mapChatsToGroups(chats: Record<string, unknown>[]): WhatsAppGroup[] {
-    const result: WhatsAppGroup[] = [];
-    for (const chat of chats) {
+  private mapChatsToGroups(chats: unknown[]): WhatsAppGroup[] {
+    return normalizeChatObjects(chats);
+  }
+
+  /** Hafif Store okuma → gerekirse getChats/getChannels fallback. */
+  private async loadGroupsOnce(client: WaClient): Promise<{
+    groups: WhatsAppGroup[];
+    chatCount: number;
+    method: string;
+    error: string | null;
+  }> {
+    const probe = await probeChatStore(client.pupPage);
+    this.logLifecycle("discovery_probe", {
+      chatCount: probe.chatCount,
+      groupishCount: probe.groupishCount,
+      storeReady: probe.storeReady,
+      probeError: probe.error,
+    });
+
+    // 1) Primary: Store'dan hafif özet (GroupMetadata.update yok)
+    const fromStore = await fetchGroupsFromStore(client.pupPage);
+    if (fromStore.groups.length > 0) {
+      return {
+        groups: fromStore.groups,
+        chatCount: Math.max(fromStore.chatCount, fromStore.groups.length),
+        method: "store_lightweight",
+        error: null,
+      };
+    }
+
+    // 2) Fallback: client.getChats — hata yut; tüm listeyi düşürmesin
+    let getChatsError: string | null = fromStore.error;
+    try {
+      const chats = await Promise.race([
+        client.getChats(),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error("getChats timeout")), GET_CHATS_TIMEOUT_MS)),
+      ]);
+      const groups = this.mapChatsToGroups(chats as unknown[]);
+      if (groups.length > 0) {
+        return {
+          groups,
+          chatCount: (chats as unknown[]).length,
+          method: "getChats",
+          error: null,
+        };
+      }
+      if ((chats as unknown[]).length > 0) {
+        return {
+          groups: [],
+          chatCount: (chats as unknown[]).length,
+          method: "getChats_no_groups",
+          error: null,
+        };
+      }
+    } catch (err) {
+      getChatsError = err instanceof Error ? err.message.split("\n")[0]?.slice(0, 160) ?? "getChats failed" : String(err);
+      logger.warn({ err: getChatsError }, "wa: getChats fallback failed — using store path");
+    }
+
+    // 3) Kanallar ayrı API
+    if (typeof client.getChannels === "function") {
       try {
-        const id = chat.id && typeof chat.id === "object"
-          ? String((chat.id as { _serialized?: string })._serialized ?? "")
-          : String(chat.id ?? "");
-        if (!id) continue;
-        const isChannel = id.includes("@newsletter") || Boolean(chat.isChannel) || Boolean(chat.isNewsletter);
-        const isGroup = (Boolean(chat.isGroup) || id.endsWith("@g.us")) && !isChannel;
-        if (!isGroup && !isChannel) continue;
-        const ts = (chat.timestamp as number | undefined)
-          ?? (chat.lastMessage && typeof chat.lastMessage === "object"
-            ? (chat.lastMessage as { timestamp?: number }).timestamp
-            : undefined);
-        result.push({
-          id,
-          name: String(chat.name || chat.formattedTitle || chat.pushname || "İsimsiz grup"),
-          isGroup,
-          isChannel,
-          kind: isChannel ? "channel" : "group",
-          lastMessageAt: ts && Number.isFinite(ts) ? new Date(ts * 1000).toISOString() : null,
-        });
+        const channels = await Promise.race([
+          client.getChannels(),
+          new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error("getChannels timeout")), 30_000)),
+        ]);
+        const channelGroups = this.mapChatsToGroups(channels as unknown[]).map((g) => ({
+          ...g,
+          isChannel: true,
+          isGroup: false,
+          kind: "channel" as const,
+        }));
+        if (channelGroups.length > 0) {
+          return {
+            groups: channelGroups,
+            chatCount: channelGroups.length,
+            method: "getChannels",
+            error: null,
+          };
+        }
       } catch (err) {
-        logger.warn({ err, chatId: chat.id }, "wa: single chat normalize skipped");
+        logger.warn({ err }, "wa: getChannels fallback failed");
       }
     }
-    return result;
+
+    return {
+      groups: fromStore.groups,
+      chatCount: Math.max(fromStore.chatCount, probe.chatCount),
+      method: "empty",
+      error: getChatsError || probe.error,
+    };
   }
 
   /**
    * CONNECTED (ready) sonrası grup keşfi — ilan taraması beklemez.
+   * @param force true ise mevcut keşif döngüsünü bırakıp yeniden başlatır.
    */
-  async refreshGroups(sessionId = SESSION_ID): Promise<WhatsAppGroup[]> {
+  async refreshGroups(sessionId = SESSION_ID, force = false): Promise<WhatsAppGroup[]> {
     const s = this.state;
-    if (s.groupDiscoveryPromise) return s.groupDiscoveryPromise;
+    if (s.groupDiscoveryPromise && !force) return s.groupDiscoveryPromise;
+    if (force && s.groupDiscoveryPromise) {
+      // Eski promise bitsin diye işaretle; yeni döngü başlat
+      s.groupDiscoveryPromise = null;
+    }
 
     const promise = (async () => {
       const startedAt = Date.now();
@@ -542,15 +619,18 @@ class WhatsAppManagerClass {
       s.groupDiscoveryAttempt = 0;
       s.groupDiscoveryStatus = "LOADING";
       s.groupDiscoveryMessage = "WhatsApp bağlı. Gruplar yükleniyor.";
-      this.logLifecycle("discovery_start");
+      this.logLifecycle("discovery_start", { force, sessionId });
+
+      // ready sonrası Store dolması için kısa başlangıç beklemesi
+      await this.sleep(2_000);
 
       const deadlines = [
-        { untilMs: 60_000, intervalMs: 5_000 },
-        { untilMs: 180_000, intervalMs: 15_000 },
-        { untilMs: 600_000, intervalMs: 30_000 },
+        { untilMs: 45_000, intervalMs: 3_000 },
+        { untilMs: 180_000, intervalMs: 8_000 },
+        { untilMs: 420_000, intervalMs: 20_000 },
       ];
 
-      while (Date.now() - startedAt < 600_000) {
+      while (Date.now() - startedAt < 420_000) {
         if (!this.isConnected()) {
           s.groupDiscoveryStatus = "FAILED";
           s.groupDiscoveryMessage = "Bağlantı koptu — grup listesi alınamadı.";
@@ -570,50 +650,43 @@ class WhatsAppManagerClass {
           try {
             let state: string | null = null;
             try { state = await client.getState(); } catch { /* ignore */ }
-            if (state && state !== "CONNECTED") {
-              s.groupDiscoveryStatus = "RETRYING";
-              s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
-              this.logLifecycle("discovery_retry", { reason: `state=${state}`, attempt: s.groupDiscoveryAttempt });
-            } else {
-              const chats = await Promise.race([
-                client.getChats(),
-                new Promise<never>((_, rej) =>
-                  setTimeout(() => rej(new Error("getChats timeout")), GET_CHATS_TIMEOUT_MS)),
-              ]) as Record<string, unknown>[];
-
-              const groups = this.mapChatsToGroups(chats);
-              // Tek sohbet bile gelse cache güncelle; boşsa retry planına devam et
-              if (groups.length > 0 || chats.length > 0) {
-                s.cachedGroups = groups;
-                s.chatCount = chats.length;
-                s.groupCount = groups.filter((g) => g.isGroup).length;
-                s.channelCount = groups.filter((g) => g.isChannel).length;
-              }
-
-              if (groups.length > 0) {
-                s.groupDiscoveryStatus = "READY";
-                s.groupDiscoveryMessage = `${s.groupCount} grup, ${s.channelCount} kanal bulundu.`;
-                if (s.status === "CONNECTED" || s.status === "SYNCING") {
-                  this.setStatus(s, "CONNECTED", null, null);
-                }
-                this.logLifecycle("discovery_ready", {
-                  chatCount: s.chatCount,
-                  groupCount: s.groupCount,
-                  channelCount: s.channelCount,
-                  attempt: s.groupDiscoveryAttempt,
-                  durationMs: Date.now() - startedAt,
-                });
-                return groups;
-              }
-
-              // WhatsApp Web henüz sohbet listesini doldurmamış; client'i kapatma
-              s.groupDiscoveryStatus = "RETRYING";
-              s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
-              this.logLifecycle("discovery_empty", {
-                chatCount: chats.length,
-                attempt: s.groupDiscoveryAttempt,
-              });
+            // CONNECTED dışında da dene — bazen OPENING/CONNECTED geçişi gecikir
+            if (state && state !== "CONNECTED" && state !== "OPENING") {
+              this.logLifecycle("discovery_state", { state, attempt: s.groupDiscoveryAttempt });
             }
+
+            const loaded = await this.loadGroupsOnce(client);
+            s.chatCount = loaded.chatCount;
+            if (loaded.groups.length > 0) {
+              s.cachedGroups = loaded.groups;
+              s.groupCount = loaded.groups.filter((g) => g.isGroup).length;
+              s.channelCount = loaded.groups.filter((g) => g.isChannel).length;
+              s.groupDiscoveryStatus = "READY";
+              s.groupDiscoveryMessage = `${s.groupCount} grup, ${s.channelCount} kanal bulundu.`;
+              if (s.status === "CONNECTED" || s.status === "SYNCING") {
+                this.setStatus(s, "CONNECTED", null, null);
+              }
+              this.logLifecycle("discovery_ready", {
+                method: loaded.method,
+                chatCount: s.chatCount,
+                groupCount: s.groupCount,
+                channelCount: s.channelCount,
+                attempt: s.groupDiscoveryAttempt,
+                durationMs: Date.now() - startedAt,
+              });
+              return loaded.groups;
+            }
+
+            s.groupDiscoveryStatus = "RETRYING";
+            s.groupDiscoveryMessage = loaded.error
+              ? `WhatsApp bağlı. Grup listesi hazırlanıyor (${loaded.method}).`
+              : "WhatsApp bağlı. Grup listesi hazırlanıyor.";
+            this.logLifecycle("discovery_empty", {
+              method: loaded.method,
+              chatCount: loaded.chatCount,
+              error: loaded.error,
+              attempt: s.groupDiscoveryAttempt,
+            });
           } catch (err) {
             s.groupDiscoveryStatus = "RETRYING";
             s.groupDiscoveryMessage = "WhatsApp bağlı. Grup listesi hazırlanıyor.";
@@ -630,8 +703,9 @@ class WhatsAppManagerClass {
       }
 
       s.groupDiscoveryStatus = "FAILED";
-      s.groupDiscoveryMessage = s.groupDiscoveryMessage
-        || "Grup listesi 10 dakikada alınamadı. «Sohbetleri Yeniden Yükle» deneyin.";
+      s.groupDiscoveryMessage = s.cachedGroups.length > 0
+        ? `${s.cachedGroups.length} kayıt cache'de; yenileme tamamlanamadı.`
+        : "Grup listesi alınamadı. «Sohbetleri Yeniden Yükle» deneyin.";
       this.logLifecycle("discovery_failed", { reason: "timeout", cachedGroups: s.cachedGroups.length });
       return s.cachedGroups;
     })();
@@ -640,7 +714,9 @@ class WhatsAppManagerClass {
     try {
       return await promise;
     } finally {
-      s.groupDiscoveryPromise = null;
+      if (s.groupDiscoveryPromise === promise) {
+        s.groupDiscoveryPromise = null;
+      }
     }
   }
 
