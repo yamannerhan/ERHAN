@@ -215,9 +215,43 @@ export async function listSourcesForAdmin(sessionId = SESSION_ID) {
       const [legacy] = await db.select({
         totalImported: sourcesTable.totalImported,
         lastCheckedAt: sourcesTable.lastCheckedAt,
+        lastScanMessagesRead: sourcesTable.lastScanMessagesRead,
+        lastScanFound: sourcesTable.lastScanFound,
+        lastScanAdded: sourcesTable.lastScanAdded,
+        lastScanDuplicates: sourcesTable.lastScanDuplicates,
+        lastScanErrors: sourcesTable.lastScanErrors,
+        lastScanPublished: sourcesTable.lastScanPublished,
       }).from(sourcesTable).where(eq(sourcesTable.id, legacyId)).limit(1);
       totalImported = legacy?.totalImported ?? 0;
       lastCheckedAt = legacy?.lastCheckedAt?.toISOString() ?? null;
+      return {
+        id: legacyId ?? s.id,
+        waSourceId: s.id,
+        name: s.chatName,
+        url: s.chatId,
+        kind: s.sourceType === "channel" ? "channel" : "group",
+        active: s.isEnabled,
+        checkInterval: 10,
+        initialScanDone: s.initialScanStatus === "completed",
+        initialScanProgress: s.initialScanStatus === "completed" ? 100
+          : s.initialScanStatus === "running" ? 50
+            : s.initialScanStatus === "failed" ? 0 : 1,
+        isScanning: s.initialScanStatus === "running",
+        totalImported,
+        listingCount,
+        lastScanMessagesRead: legacy?.lastScanMessagesRead ?? 0,
+        lastScanFound: legacy?.lastScanFound ?? 0,
+        lastScanAdded: legacy?.lastScanAdded ?? 0,
+        lastScanDuplicates: legacy?.lastScanDuplicates ?? 0,
+        lastScanErrors: legacy?.lastScanErrors ?? 0,
+        lastScanPublished: legacy?.lastScanPublished ?? 0,
+        lastCheckedAt: s.latestScannedAt?.toISOString() ?? lastCheckedAt,
+        lastMessageAt: s.latestScannedTimestamp
+          ? new Date(s.latestScannedTimestamp * 1000).toISOString()
+          : null,
+        lastError: s.lastError ?? null,
+        initialScanStatus: s.initialScanStatus,
+      };
     }
     return {
       id: legacyId ?? s.id,

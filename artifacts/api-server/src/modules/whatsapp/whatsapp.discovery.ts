@@ -140,6 +140,90 @@ export async function fetchGroupsFromStore(page: PageLike | null | undefined): P
   }
 }
 
+export type StoreMessage = {
+  id?: { _serialized?: string } | string;
+  timestamp?: number;
+  body?: string;
+  caption?: string;
+};
+
+/**
+ * Mesajları Store'dan çek — getChatModel / GroupMetadata.update YOK.
+ * Bağlantıyı düşüren ağır getChatById yolunu atlar.
+ */
+export async function fetchMessagesFromStore(
+  page: PageLike | null | undefined,
+  chatId: string,
+  limit: number,
+): Promise<{ ok: boolean; error: string | null; messages: StoreMessage[] }> {
+  if (!page?.evaluate || page.isClosed?.()) {
+    return { ok: false, error: "PAGE_UNAVAILABLE", messages: [] };
+  }
+  try {
+    const result = await page.evaluate(async (id: string, wantLimit: number) => {
+      const w = window as unknown as {
+        WWebJS: {
+          getChat: (chatId: string, opts: { getAsModel: boolean }) => Promise<{
+            msgs?: { getModelsArray?: () => Array<Record<string, unknown>> };
+          } | null>;
+          getMessageModel: (m: Record<string, unknown>) => StoreMessage;
+        };
+        require: (name: string) => {
+          loadEarlierMsgs: (opts: { chat: unknown }) => Promise<Array<Record<string, unknown>>>;
+        };
+      };
+      try {
+        const chat = await w.WWebJS.getChat(id, { getAsModel: false });
+        if (!chat) return { ok: false, error: "CHAT_NOT_FOUND", messages: [] as StoreMessage[] };
+        const filter = (m: Record<string, unknown>) => m && !m.isNotification;
+        let msgs: Array<Record<string, unknown>> = [];
+        try {
+          msgs = chat.msgs?.getModelsArray?.()?.filter(filter) ?? [];
+        } catch {
+          msgs = [];
+        }
+        const want = Math.max(1, Number(wantLimit) || 50);
+        while (msgs.length < want) {
+          const loaded = await w.require("WAWebChatLoadMessages").loadEarlierMsgs({ chat });
+          if (!loaded?.length) break;
+          msgs = [...loaded.filter(filter), ...msgs];
+        }
+        if (msgs.length > want) {
+          msgs.sort((a, b) => (Number(a.t) > Number(b.t) ? 1 : -1));
+          msgs = msgs.splice(msgs.length - want);
+        }
+        const out = msgs.map((m) => {
+          try {
+            return w.WWebJS.getMessageModel(m);
+          } catch {
+            const mid = m.id as { _serialized?: string } | string | undefined;
+            return {
+              id: typeof mid === "object" && mid ? mid._serialized : mid,
+              timestamp: Number(m.t ?? m.timestamp ?? 0) || undefined,
+              body: String(m.body ?? ""),
+              caption: String(m.caption ?? ""),
+            } as StoreMessage;
+          }
+        }).filter(Boolean);
+        return { ok: true, error: null, messages: out };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+          messages: [] as StoreMessage[],
+        };
+      }
+    }, chatId, limit) as { ok: boolean; error: string | null; messages: StoreMessage[] };
+    return result;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      messages: [],
+    };
+  }
+}
+
 /** wwebjs Chat instance / plain object → grup özeti (getChats fallback). */
 export function normalizeChatObjects(chats: unknown[]): WhatsAppGroup[] {
   const result: WhatsAppGroup[] = [];

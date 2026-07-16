@@ -3847,19 +3847,27 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => void connect(false)} disabled={loading} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50">
-              {loading && !pairingMode ? "Bağlanıyor…" : "QR ile Bağlan"}
+            <button
+              onClick={() => void connect(false)}
+              disabled={loading || connected}
+              className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-50"
+              title={connected ? "Zaten bağlı — önce bağlantıyı kesmeyin" : undefined}
+            >
+              {connected ? "Bağlı" : loading && !pairingMode ? "Bağlanıyor…" : "QR ile Bağlan"}
             </button>
             <button
               onClick={() => void connect(true)}
-              disabled={loading || pairingCooldown > 0}
+              disabled={loading || connected || pairingCooldown > 0}
               className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
+              title={connected ? "Zaten bağlı — tekrar kod istemeyin (oturum düşer)" : undefined}
             >
-              {loading && pairingMode
-                ? "Kod isteniyor…"
-                : pairingCooldown > 0
-                  ? `Bekleyin (${pairingCooldown}s)`
-                  : "Onay Kodu ile Bağlan"}
+              {connected
+                ? "Bağlı"
+                : loading && pairingMode
+                  ? "Kod isteniyor…"
+                  : pairingCooldown > 0
+                    ? `Bekleyin (${pairingCooldown}s)`
+                    : "Onay Kodu ile Bağlan"}
             </button>
             <button onClick={() => void refresh()} disabled={loading} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/15 disabled:opacity-50">
               Durumu Yenile
@@ -3953,7 +3961,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={loading || pairingCooldown > 0}
+                    disabled={loading || connected || pairingCooldown > 0}
                     onClick={() => void connect(Boolean(form.phoneNumber.trim()))}
                     className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400 disabled:opacity-50"
                   >

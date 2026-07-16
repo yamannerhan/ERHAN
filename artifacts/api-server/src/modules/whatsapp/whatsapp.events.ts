@@ -62,6 +62,7 @@ export type StatusWriter = (
 
 export type ConnectedHook = (sessionId: string) => void;
 export type CorruptionHook = (err: unknown) => void;
+export type DisconnectedHook = (reason: unknown) => void;
 
 /** Client event listener'larını bağla — Client oluşturma burada yok. */
 export function attachWhatsAppEvents(
@@ -71,6 +72,7 @@ export function attachWhatsAppEvents(
   setStatus: StatusWriter,
   onConnected: ConnectedHook,
   onCorruption?: CorruptionHook,
+  onDisconnected?: DisconnectedHook,
 ): void {
   const markPairingScreenReady = () => {
     const s = getState();
@@ -171,6 +173,7 @@ export function attachWhatsAppEvents(
     setStatus(s, "DISCONNECTED", classified.message, classified.code === "UNKNOWN_ERROR" ? null : classified.code);
     logger.warn({ sessionId, reason: String(reason) }, "wa: disconnected");
     if (classified.corrupted) onCorruption?.(reason);
+    else onDisconnected?.(reason);
   });
 
   // Chromium page error → cache corruption yakala

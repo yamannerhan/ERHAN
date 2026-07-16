@@ -58,6 +58,10 @@ export async function runInitialScan(sourceId: number, sessionId = SESSION_ID) {
   const started = Date.now();
 
   try {
+    if (!WhatsAppManager.isConnected()) {
+      throw new Error("WhatsApp bağlı değil — tarama ertelendi");
+    }
+
     const chat = await WhatsAppManager.getChatById(source.chatId) as {
       fetchMessages: (opts: { limit: number }) => Promise<WaMessage[]>;
     };
@@ -66,6 +70,7 @@ export async function runInitialScan(sourceId: number, sessionId = SESSION_ID) {
     let previousOldestId: string | null = null;
     let pages = 0;
     let limit = FETCH_PAGE_SIZE;
+    let emptyRetries = 0;
 
     while (pages < MAX_INITIAL_PAGES) {
       pages += 1;
@@ -74,13 +79,23 @@ export async function runInitialScan(sourceId: number, sessionId = SESSION_ID) {
         batch = await chat.fetchMessages({ limit });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (/timeout|Execution context|Target closed|Protocol error|Store/i.test(msg) && pages > 1) {
+        if (/timeout|Execution context|Target closed|Protocol error|Store|bağlantı/i.test(msg) && pages > 1) {
           logger.warn({ sourceId, err: msg, pages }, "wa: initial fetch stop (recoverable)");
           break;
         }
         throw err;
       }
-      if (!batch.length) break;
+      if (!batch.length) {
+        // İlk sayfa boşsa Store henüz dolmamış olabilir — 3 kez dene
+        if (pages <= 3 && emptyRetries < 3) {
+          emptyRetries += 1;
+          await new Promise((r) => setTimeout(r, 2_500));
+          pages -= 1;
+          continue;
+        }
+        break;
+      }
+      emptyRetries = 0;
 
       for (const m of batch) {
         const id = messageIdOf(m);
@@ -152,6 +167,23 @@ export async function runInitialScan(sourceId: number, sessionId = SESSION_ID) {
         break;
       }
       await advanceCheckpoint(sourceId, msg.id, msg.timestamp);
+    }
+
+    // Hiç mesaj yokken "completed" yapma — bağlantı kopuk / Store boş olabilir
+    if (stats.messagesRead === 0 && collected.size === 0) {
+      await db.update(whatsappSourcesTable).set({
+        initialScanStatus: "pending",
+        lastError: "Mesaj bulunamadı — Store henüz dolmamış olabilir. Tekrar denenecek.",
+        updatedAt: new Date(),
+      }).where(eq(whatsappSourcesTable.id, sourceId));
+      logger.warn({
+        sessionId,
+        sourceId,
+        chatId: maskChatId(source.chatId),
+        operation: "initial_scan_empty",
+        durationMs: Date.now() - started,
+      }, "wa: initial scan empty — leave pending for retry");
+      return stats;
     }
 
     await db.update(whatsappSourcesTable).set({

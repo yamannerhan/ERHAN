@@ -40,6 +40,9 @@ export async function runIncrementalScan(sourceId: number, sessionId = SESSION_I
   if (!source.legacySourceId) throw new Error("legacySourceId eksik");
 
   const stats = { messagesRead: 0, published: 0, skipped: 0, duplicates: 0, errors: 0 };
+  if (!WhatsAppManager.isConnected()) {
+    throw new Error("WhatsApp bağlı değil — incremental tarama ertelendi");
+  }
   const checkpoint = {
     messageId: source.latestScannedMessageId,
     timestamp: source.latestScannedTimestamp ?? null,
@@ -56,6 +59,9 @@ export async function runIncrementalScan(sourceId: number, sessionId = SESSION_I
 
   while (pages < MAX_INCREMENTAL_PAGES && !reachedCheckpoint) {
     pages += 1;
+    if (!WhatsAppManager.isConnected()) {
+      throw new Error("WhatsApp bağlantısı tarama sırasında koptu");
+    }
     const batch = await chat.fetchMessages({ limit });
     if (!batch.length) break;
     for (const m of batch) {

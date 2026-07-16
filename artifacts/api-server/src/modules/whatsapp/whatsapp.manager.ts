@@ -22,6 +22,7 @@ import {
 } from "./whatsapp.client";
 import {
   fetchGroupsFromStore,
+  fetchMessagesFromStore,
   normalizeChatObjects,
   probeChatStore,
 } from "./whatsapp.discovery";
@@ -106,6 +107,9 @@ class WhatsAppManagerClass {
   /** Panel / diagnostics için görünür */
   readonly managerInstanceId = randomUUID();
   private lastStatusLogAt = 0;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private intentionalDisconnect = false;
+  private restoreTimer: ReturnType<typeof setTimeout> | null = null;
 
   private state: SessionRuntime = {
     sessionId: SESSION_ID,
@@ -317,7 +321,53 @@ class WhatsAppManagerClass {
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
+  /** CONNECTED iken hafif getState — oturumu canlı tutar, yeni client açmaz. */
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      const client = this.client;
+      if (!client || !this.isConnected()) return;
+      void client.getState().catch((err) => {
+        logger.warn({ err }, "wa: keep-alive getState failed");
+      });
+    }, 90_000);
+  }
+
+  private async onClientDisconnected(reason: unknown): Promise<void> {
+    this.stopKeepAlive();
+    const reasonStr = String(reason ?? "");
+    // Zombie client bırakma
+    if (this.client) {
+      try { this.client.removeAllListeners?.(); } catch { /* ignore */ }
+      this.client = null;
+      this.state.clientInstanceId = null;
+    }
+    this.logLifecycle("client_disconnected_cleared", { reason: reasonStr });
+
+    if (this.intentionalDisconnect) return;
+    if (/LOGOUT|LOGGED_OUT/i.test(reasonStr)) return;
+    if (!this.hasSession()) return;
+
+    if (this.restoreTimer) clearTimeout(this.restoreTimer);
+    this.restoreTimer = setTimeout(() => {
+      this.restoreTimer = null;
+      if (this.isReady() || this.isStarting()) return;
+      this.logLifecycle("soft_restore_after_disconnect");
+      void this.connectQr({ restore: true }).catch((err) => {
+        logger.warn({ err }, "wa: soft restore failed");
+      });
+    }, 8_000);
+  }
+
   private async destroyClient(): Promise<void> {
+    this.stopKeepAlive();
     const existing = this.client;
     this.initializePromise = null;
     if (!existing) return;
@@ -437,9 +487,11 @@ class WhatsAppManagerClass {
       (s, status, error, errorCode) => this.setStatus(s, status, error, errorCode),
       (sid) => {
         this.logLifecycle("ready_hook", { sessionId: sid });
+        this.startKeepAlive();
         queueMicrotask(() => { void this.refreshGroups(sid); });
       },
       this.handleCorruption,
+      (reason) => { void this.onClientDisconnected(reason); },
     );
 
     this.logLifecycle("client_created", {
@@ -536,7 +588,17 @@ class WhatsAppManagerClass {
       };
     }
 
-    // 2) Fallback: client.getChats — hata yut; tüm listeyi düşürmesin
+    // Store çalışıyorsa ağır getChats'e GİRME — GroupMetadata.update oturumu düşürebilir
+    if (probe.storeReady && probe.chatCount > 0) {
+      return {
+        groups: [],
+        chatCount: probe.chatCount,
+        method: "store_no_groups",
+        error: null,
+      };
+    }
+
+    // 2) Fallback: yalnızca Store boş/kırıkken
     let getChatsError: string | null = fromStore.error;
     try {
       const chats = await Promise.race([
@@ -831,6 +893,11 @@ class WhatsAppManagerClass {
       }
 
       const s = this.state;
+      // Zaten bağlıysa ikinci pairing oturumu öldürmesin
+      if (this.client && ["READY", "CONNECTED", "SYNCING", "AUTHENTICATED"].includes(s.status)) {
+        this.logLifecycle("pairing_skipped_already_connected");
+        return this.getStatus();
+      }
       if (s.mode === "qr" && s.starting && this.client) {
         throw new WhatsAppModuleError(
           "QR bağlantısı devam ediyor. Önce iptal edin.",
@@ -968,6 +1035,8 @@ class WhatsAppManagerClass {
 
   async disconnect(): Promise<void> {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
+      this.intentionalDisconnect = true;
+      if (this.restoreTimer) { clearTimeout(this.restoreTimer); this.restoreTimer = null; }
       await this.destroyClient();
       const s = this.state;
       s.starting = false;
@@ -975,6 +1044,7 @@ class WhatsAppManagerClass {
       s.pairingCode = null;
       s.mode = null;
       this.setStatus(s, "DISCONNECTED", null, null);
+      this.intentionalDisconnect = false;
     });
   }
 
@@ -984,6 +1054,8 @@ class WhatsAppManagerClass {
    */
   async resetSession(): Promise<void> {
     return getSessionLock(SESSION_ID).runExclusive(async () => {
+      this.intentionalDisconnect = true;
+      if (this.restoreTimer) { clearTimeout(this.restoreTimer); this.restoreTimer = null; }
       await this.destroyClient();
       const cleared = clearSessionAndCache(this.authPath, SESSION_ID, this.cachePath);
       // Eski session-main
@@ -1007,6 +1079,7 @@ class WhatsAppManagerClass {
       this.lastPairingAt = 0;
       this.lastPairingPhone = null;
       this.setStatus(s, "IDLE", null, null);
+      this.intentionalDisconnect = false;
       logger.info({
         authPath: this.authPath,
         cachePath: this.cachePath,
@@ -1041,10 +1114,47 @@ class WhatsAppManagerClass {
     return groups.filter((c) => c.isGroup || c.isChannel);
   }
 
+  /**
+   * Tarama için sohbet tutamacı — ağır getChatById/getChatModel kullanmaz.
+   * fetchMessages Store üzerinden güvenli okur (oturumu düşürmez).
+   */
   async getChatById(chatId: string) {
     const client = this.client;
-    if (!client) throw new WhatsAppModuleError("WhatsApp bağlı değil", 409, "CLIENT_NOT_READY");
-    return client.getChatById(chatId);
+    if (!client || !this.isConnected()) {
+      throw new WhatsAppModuleError("WhatsApp bağlı değil", 409, "CLIENT_NOT_READY");
+    }
+    const id = String(chatId || "").trim();
+    if (!id) throw new WhatsAppModuleError("Geçersiz chatId", 400, "INVALID_CHAT");
+
+    const self = this;
+    return {
+      id: { _serialized: id },
+      async fetchMessages(opts: { limit?: number } = {}) {
+        const limit = Math.max(1, Number(opts.limit) || 50);
+        const result = await fetchMessagesFromStore(client.pupPage, id, limit);
+        if (!result.ok && result.error === "CHAT_NOT_FOUND") {
+          throw new Error(`CHAT_NOT_FOUND:${id}`);
+        }
+        if (!result.ok && result.messages.length === 0) {
+          // Bir kez klasik yola düş — sadece chat bulunursa
+          try {
+            const native = await client.getChatById(id) as {
+              fetchMessages?: (o: { limit: number }) => Promise<unknown[]>;
+            } | null;
+            if (native?.fetchMessages) {
+              return await native.fetchMessages({ limit });
+            }
+          } catch (err) {
+            logger.warn({ err, chatId: id }, "wa: native getChatById fallback failed");
+          }
+          throw new Error(result.error || "fetchMessages failed");
+        }
+        if (!self.isConnected()) {
+          throw new Error("WhatsApp bağlantısı tarama sırasında koptu");
+        }
+        return result.messages;
+      },
+    };
   }
 
   ensureAutoConnect(): void {
