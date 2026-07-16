@@ -3395,6 +3395,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       const discovery = nextStatus.groupDiscoveryStatus ?? nextStatus.syncStatus ?? "";
       const state = nextStatus.sessionState ?? nextStatus.status ?? "";
       const discoveryReady = discovery === "READY";
+      const authPending = connStatus === "AUTHENTICATED"
+        || state === "AUTHENTICATED"
+        || !!nextStatus.authAccepted && connStatus !== "CONNECTED" && state !== "CONNECTED" && state !== "READY";
       // Bağlantı = CONNECTED; grup keşfi ayrı (LOADING/RETRYING iken de bağlı sayılır)
       const waConnected = connStatus === "CONNECTED"
         || nextStatus.whatsappState === "CONNECTED"
@@ -3408,21 +3411,21 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
         || state === "FAILED"
         || state === "DISCONNECTED";
       setSessionState(state);
-      setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : "IDLE"));
+      setConnectionStatus(connStatus || (waConnected ? "CONNECTED" : authPending ? "AUTHENTICATED" : "IDLE"));
       setSyncStatus(discovery || (discoveryReady ? "READY" : waConnected ? "LOADING" : "NOT_STARTED"));
       setWhatsappState(nextStatus.whatsappState ?? null);
       setLastSyncError(nextStatus.lastSyncError ?? nextStatus.groupDiscoveryMessage ?? null);
       setChatCount(nextStatus.chatCount ?? 0);
       setGroupCountUi(nextStatus.groupCount ?? 0);
       const mode = nextStatus.connectionMode ?? nextStatus.mode ?? (nextStatus.pairing ? "pairing_code" : "qr");
-      const isPairing = mode === "pairing_code" && !waConnected && !nextStatus.authAccepted
-        && state !== "AUTHENTICATED" && state !== "CONNECTED";
+      const isPairing = mode === "pairing_code" && !waConnected && !authPending
+        && state !== "CONNECTED";
       setConnected(waConnected);
       setPairingMode(isPairing && !realFailure);
-      setQr((isPairing || waConnected) ? null : (nextStatus.qr ?? null));
+      setQr((isPairing || waConnected || authPending) ? null : (nextStatus.qr ?? null));
       setPairingCode((prev) => {
-        if (waConnected || realFailure) return null;
-        if (!isPairing) return null;
+        if (waConnected || authPending || realFailure) return null;
+        if (!isPairing && !nextStatus.pairingCode) return null;
         if (nextStatus.pairingCode) return nextStatus.pairingCode;
         return prev;
       });
@@ -3437,7 +3440,10 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
             || "WhatsApp bağlı. Grup listesi alınamadı — «Sohbetleri Yeniden Yükle» deneyin.";
         }
         if (waConnected) return "WhatsApp bağlı.";
-        if (nextStatus.pairingCode) return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
+        if (authPending) return "Onay kodu kabul edildi. WhatsApp bağlanıyor — telefonu yeniden bağlamayın.";
+        if (nextStatus.pairingCode || state === "PAIRING_READY" || state === "PAIRING_CODE_READY") {
+          return "Onay kodu hazır. WhatsApp uygulamanızdan girin.";
+        }
         if (state === "STARTING" || state === "PAIRING_CODE_REQUESTING" || nextStatus.starting) {
           return "WhatsApp bağlantısı hazırlanıyor. Lütfen birkaç saniye bekleyin.";
         }
@@ -3452,7 +3458,7 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
       setErrorLog(userFacingError);
       if (waConnected) setQrStatus("ready");
       else if (realFailure) setQrStatus("failed");
-      else if (isPairing || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) {
+      else if (isPairing || authPending || nextStatus.qr || nextStatus.pairingCode || nextStatus.starting) {
         setQrStatus("connecting");
       }
 
@@ -3495,7 +3501,9 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
     const needsFastPoll = (
       (!connected && (
         sessionState === "AUTHENTICATED"
+        || connectionStatus === "AUTHENTICATED"
         || sessionState === "STARTING"
+        || sessionState === "PAIRING_READY"
         || sessionState === "PAIRING_CODE_READY"
         || sessionState === "PAIRING_CODE_REQUESTING"
         || sessionState === "QR_READY"
@@ -3817,6 +3825,12 @@ function WhatsAppSourcesSection({ apiCall, toast }: { apiCall: (path: string, me
                 >
                   Sohbetleri Yeniden Yükle
                 </button>
+              </div>
+            ) : (connectionStatus === "AUTHENTICATED" || sessionState === "AUTHENTICATED") ? (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100 space-y-2">
+                <p className="font-bold">Onay kodu kabul edildi.</p>
+                <p className="text-xs text-sky-200/90">WhatsApp bağlanıyor. Lütfen 10–30 saniye bekleyin.</p>
+                <p className="text-xs font-semibold text-amber-200">Telefonu yeniden bağlamayın / kodu tekrar istemeyin.</p>
               </div>
             ) : (connectionStatus === "FAILED" || connectionStatus === "DISCONNECTED" || sessionState === "FAILED" || sessionState === "DISCONNECTED") && !!errorLog ? (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100 space-y-3">

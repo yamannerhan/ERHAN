@@ -48,6 +48,8 @@ export { classifySecurityJob } from "./whatsapp.classifier.service";
 export { SESSION_ID, HISTORY_DAYS, SCAN_INTERVAL_MS, EXPIRE_DAYS } from "./whatsapp.types";
 
 export async function initWhatsAppClient(): Promise<void> {
+  const { ensureWhatsAppDbSchema } = await import("./whatsapp.schema-ensure");
+  await ensureWhatsAppDbSchema().catch(() => undefined);
   await WhatsAppManager.init();
   startWhatsAppScheduler();
 }

@@ -148,6 +148,11 @@ const {
   longitude: _longitude,
   locationAccuracy: _locationAccuracy,
   locationSource: _locationSource,
+  // Liste için gereksiz; kolon yoksa SELECT patlamasın diye çıkar
+  contentHash: _contentHash,
+  sourceMessageId: _sourceMessageId,
+  sourceChatId: _sourceChatId,
+  sourceMessageTimestamp: _sourceMessageTimestamp,
   ...listingListColumns
 } = getTableColumns(listingsTable);
 

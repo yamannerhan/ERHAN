@@ -86,7 +86,23 @@ export function attachWhatsAppEvents(
       sessionId,
       clientInstanceId: s.clientInstanceId,
       operation: "authenticated",
-    }, "wa: authenticated");
+    }, "wa: authenticated — waiting for ready");
+    // ready gecikirse getState CONNECTED ile bağlanmış say
+    setTimeout(() => {
+      void (async () => {
+        const st = getState();
+        if (st.status !== "AUTHENTICATED") return;
+        try {
+          const state = typeof client.getState === "function" ? await client.getState() : null;
+          if (state === "CONNECTED") {
+            st.starting = false;
+            setStatus(st, "CONNECTED", null);
+            queueMicrotask(() => onConnected(sessionId));
+            logger.info({ sessionId, operation: "authenticated_promoted" }, "wa: AUTHENTICATED → CONNECTED via getState");
+          }
+        } catch { /* ignore */ }
+      })();
+    }, 8_000);
   });
 
   client.on("ready", () => {

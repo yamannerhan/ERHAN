@@ -17,9 +17,17 @@ export async function ensureListingSourceSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS verification_snapshot TEXT`);
   await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS last_renewed_at TIMESTAMPTZ`);
   await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS merged_into_listing_id INTEGER`);
+  // WhatsApp bot şema alanları — yoksa /api/listings 500 verir
+  await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS content_hash TEXT`);
+  await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS source_message_id TEXT`);
+  await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS source_chat_id TEXT`);
+  await db.execute(sql`ALTER TABLE listings ADD COLUMN IF NOT EXISTS source_message_timestamp BIGINT`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_source_type_idx ON listings (source_type)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_direct_priority_until_idx ON listings (direct_priority_until)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_verified_publisher_idx ON listings (verified_publisher)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_content_hash_idx ON listings (content_hash)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS listings_source_message_id_idx ON listings (source_message_id)`);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS listing_source_history (

@@ -1102,13 +1102,16 @@ process.on("uncaughtException", (err) => {
   void gracefulShutdown("uncaughtException");
 });
 
-// Kaynak / yayıncı doğrulama şeması + backfill
+// Kaynak / yayıncı doğrulama şeması + backfill (+ WA kolonları — yoksa /api/listings 500)
 void import("./lib/listing-source-schema").then(async (m) => {
   await m.ensureListingSourceSchema();
   await m.ensurePublisherVerifySchema();
   await m.backfillListingSourceTypes();
   logger.info("Listing source + publisher verify schema ready");
 }).catch((err) => logger.warn({ err }, "listing source schema bootstrap skipped"));
+void import("./modules/whatsapp/whatsapp.schema-ensure")
+  .then((m) => m.ensureWhatsAppDbSchema())
+  .catch((err) => logger.warn({ err }, "whatsapp schema bootstrap skipped"));
 
 void import("./lib/listing-aging").then((m) => m.startListingAgingWorker()).catch(() => {});
 void import("./lib/listing-merge").then((m) => {
