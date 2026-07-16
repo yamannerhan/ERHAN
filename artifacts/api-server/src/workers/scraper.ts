@@ -31,7 +31,7 @@ import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocat
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
-import { announceNewListing } from "../lib/listing-announcements";
+import { announceNewListing, announceSourceLabel } from "../lib/listing-announcements";
 import { emitRealtime } from "../lib/realtime";
 import { createDuplicateHash } from "../lib/job-dedup";
 
@@ -753,7 +753,8 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // İlk tarama + 10 dk grace sonrası: kullanıcı + sohbet (kaynak adı YOK)
+  // İlk tarama + 10 dk grace: yalnız admin (kaynak etiketli).
+  // Sonra: herkese bildirim + sohbet; admin'e ayrıca kaynak (Link/Telegram/…).
   try {
     const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
@@ -762,15 +763,16 @@ async function processMessage(
       initialScanDone: source.initialScanDone,
       initialScanCompletedAt: source.initialScanCompletedAt,
     });
-    if (ready) {
-      void announceNewListing({
-        id: newListing.id,
-        title: newListing.title,
-        city: newListing.city,
-        company: newListing.company,
-      }, {})
-        .catch((err) => logger.error({ err }, "scraper: public announce failed"));
-    }
+    const sourceLabel = announceSourceLabel(source.platform);
+    void announceNewListing({
+      id: newListing.id,
+      title: newListing.title,
+      city: newListing.city,
+      company: newListing.company,
+    }, ready
+      ? { sourceLabel }
+      : { adminOnly: true, sourceLabel })
+      .catch((err) => logger.error({ err }, "scraper: announce failed"));
   } catch (err) {
     logger.warn({ err }, "scraper: announce gate failed");
   }
@@ -1602,19 +1604,21 @@ async function publishElemanJob(
   try {
     const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    if (isBotPublicAnnounceReady({
+    const ready = isBotPublicAnnounceReady({
       isInitialScan: !source.initialScanDone,
       initialScanDone: source.initialScanDone,
       initialScanCompletedAt: source.initialScanCompletedAt,
-    })) {
-      void announceNewListing({
-        id: newListing.id,
-        title: newListing.title,
-        city: newListing.city,
-        company: newListing.company,
-      }, {})
-        .catch((err) => logger.error({ err }, "scraper: Eleman.net public announce failed"));
-    }
+    });
+    const sourceLabel = announceSourceLabel("eleman");
+    void announceNewListing({
+      id: newListing.id,
+      title: newListing.title,
+      city: newListing.city,
+      company: newListing.company,
+    }, ready
+      ? { sourceLabel }
+      : { adminOnly: true, sourceLabel })
+      .catch((err) => logger.error({ err }, "scraper: Eleman.net announce failed"));
   } catch (err) {
     logger.warn({ err }, "scraper: Eleman announce gate failed");
   }
@@ -1969,7 +1973,10 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     }
   }
 
-  const done = true;
+  // İlk tarama bu turda bittiyse completedAt'i şimdi işaretle → 10 dk grace başlar
+  const finishingInitial = !source.initialScanDone;
+  const completedAt = source.initialScanCompletedAt
+    ?? (finishingInitial ? new Date() : null);
   await patchSourceProgress(source.id, {
     isScanning: false,
     lastCheckedAt: new Date(),
@@ -1982,9 +1989,9 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     lastScanErrors: stats.errors,
     lastScanPublished: stats.published,
     totalImported: (source.totalImported ?? 0) + stats.published,
-    initialScanDone: done,
+    initialScanDone: true,
     initialScanProgress: 100,
-    initialScanCompletedAt: source.initialScanCompletedAt ?? (done ? new Date() : null),
+    ...(completedAt ? { initialScanCompletedAt: completedAt } : {}),
   });
 
   logger.info({

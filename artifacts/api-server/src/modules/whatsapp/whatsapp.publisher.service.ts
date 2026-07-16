@@ -16,7 +16,7 @@ import {
   extractCompany,
 } from "../../lib/job-parsing";
 import { createDuplicateHash } from "../../lib/job-dedup";
-import { announceNewListing } from "../../lib/listing-announcements";
+import { announceNewListing, announceSourceLabel } from "../../lib/listing-announcements";
 import { logger } from "../../lib/logger";
 import { classifySecurityJob } from "./whatsapp.classifier.service";
 import { addDays, contentHash, maskChatId, unixSecondsToDate } from "./whatsapp.client";
@@ -177,7 +177,7 @@ export async function processWhatsAppMessage(params: {
       return listing.id;
     });
 
-    // İlk tarama + 10 dk grace sonrası: kullanıcı + sohbet (kaynak adı yok)
+    // İlk tarama + 10 dk grace: yalnız admin. Sonra herkes + sohbet; admin'e WhatsApp etiketi.
     void (async () => {
       try {
         const { isBotPublicAnnounceReady } = await import("../../lib/bot-public-announce");
@@ -190,10 +190,10 @@ export async function processWhatsAppMessage(params: {
           initialScanDone: src?.initialScanStatus === "completed",
           initialScanCompletedAt: src?.initialScanCompletedAt ?? null,
         });
-        if (!ready) return;
+        const sourceLabel = announceSourceLabel("whatsapp");
         await announceNewListing(
           { id: listingId, title, city, company: company || "Belirtilmemiş" },
-          {},
+          ready ? { sourceLabel } : { adminOnly: true, sourceLabel },
         );
       } catch (err) {
         logger.warn({ err, listingId }, "wa: announce failed");

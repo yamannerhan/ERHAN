@@ -19,6 +19,18 @@ export type AnnounceOptions = {
   sourceLabel?: string;
 };
 
+/** Admin bildirimlerinde görünen kısa kaynak adı (kullanıcıya yazılmaz) */
+export function announceSourceLabel(platform: string | null | undefined): string {
+  switch ((platform || "").toLowerCase()) {
+    case "url_pool": return "Link";
+    case "telegram": return "Telegram";
+    case "whatsapp": return "WhatsApp";
+    case "eleman": return "Eleman.net";
+    case "demo": return "Demo";
+    default: return (platform || "Bot").trim() || "Bot";
+  }
+}
+
 const BOT_USER_ID = 0;
 
 /** Sohbet + kullanıcı bildirimi — kaynak adı asla yazılmaz */
