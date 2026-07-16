@@ -113,13 +113,20 @@ export function createVegaCmsProvider(opts: {
       const listing = listOpts.listingUrl?.trim() || opts.defaultListing;
       const res = await fetchText(listing);
       if (!res.ok) throw new Error(`Liste HTTP ${res.status}`);
-      const urls: string[] = [];
+      const urlSet = new Set<string>();
       for (const m of res.text.matchAll(opts.articlePathRe)) {
-        urls.push(normalizeArticleUrl(m[1], wwwHost));
+        urlSet.add(normalizeArticleUrl(m[1], wwwHost));
       }
-      const uniq = [...new Set(urls)];
       const dates = await loadRssDates(opts.rssUrl, wwwHost);
-      return uniq.map((sourceUrl): NewsListItem => ({
+      for (const [u] of dates) {
+        if (opts.articlePathRe.test(u) || /\/haber\//i.test(u)) {
+          urlSet.add(normalizeArticleUrl(u, wwwHost));
+        }
+        // RegExp lastIndex sıfırla (global flag)
+        opts.articlePathRe.lastIndex = 0;
+      }
+      if (!urlSet.size) throw new Error("Liste boş / erişilemedi");
+      return [...urlSet].map((sourceUrl): NewsListItem => ({
         sourceUrl,
         lastmod: dates.get(sourceUrl) || dates.get(sourceUrl.replace(/\/$/, "")) || null,
       }));

@@ -16,7 +16,7 @@ export async function ensureNewsSchema(): Promise<void> {
         provider_key TEXT NOT NULL DEFAULT 'ozel_guvenlik_ajans',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         scan_interval_minutes INTEGER NOT NULL DEFAULT 30,
-        initial_lookback_days INTEGER NOT NULL DEFAULT 5,
+        initial_lookback_days INTEGER NOT NULL DEFAULT 10,
         import_mode TEXT NOT NULL DEFAULT 'full',
         download_images BOOLEAN NOT NULL DEFAULT FALSE,
         show_source BOOLEAN NOT NULL DEFAULT FALSE,
@@ -91,7 +91,7 @@ export async function ensureNewsSchema(): Promise<void> {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_articles_status_pub_idx ON news_articles (status, published_at)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_articles_archived_idx ON news_articles (status, archived_at)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_sources_active_idx ON news_sources (is_active)`);
-    await db.execute(sql`ALTER TABLE news_sources ALTER COLUMN initial_lookback_days SET DEFAULT 5`);
+    await db.execute(sql`ALTER TABLE news_sources ALTER COLUMN initial_lookback_days SET DEFAULT 10`);
     ready = true;
   } catch (e) {
     logger.warn({ err: e }, "news: schema ensure failed");

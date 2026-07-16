@@ -12,7 +12,8 @@ import {
 import type { NewsListItem, NewsProvider, NormalizedArticle } from "./types";
 
 const DEFAULT_BASE = "https://www.ozelguvenlikajans.com";
-const DEFAULT_LISTING = "https://www.ozelguvenlikajans.com/haberler/guncel/";
+const DEFAULT_LISTING = "https://www.ozelguvenlikajans.com/";
+const GUNCEL_LISTING = "https://www.ozelguvenlikajans.com/haberler/guncel/";
 const RSS_URL = "https://ozelguvenlikajans.com/rss.xml";
 
 function normalizeArticleUrl(raw: string): string {
@@ -120,12 +121,21 @@ export const ozelGuvenlikAjansProvider: NewsProvider = {
   key: "ozel_guvenlik_ajans",
 
   async getArticleList(opts) {
-    const listing = opts.listingUrl?.trim() || DEFAULT_LISTING;
-    const res = await fetchText(listing);
-    if (!res.ok) throw new Error(`Liste HTTP ${res.status}`);
-    const urls = parseListingLinks(res.text);
+    const primary = opts.listingUrl?.trim() || DEFAULT_LISTING;
+    const pages = [...new Set([primary, DEFAULT_LISTING, GUNCEL_LISTING])];
+    const urlSet = new Set<string>();
+    for (const page of pages) {
+      const res = await fetchText(page);
+      if (!res.ok) continue;
+      for (const u of parseListingLinks(res.text)) urlSet.add(u);
+    }
     const dates = await loadRssDates();
-    return urls.map((sourceUrl): NewsListItem => ({
+    // RSS’teki haberleri de ekle (son 10 gün için daha geniş havuz)
+    for (const [u] of dates) {
+      if (/\/haber\/.+\.html/i.test(u)) urlSet.add(normalizeArticleUrl(u));
+    }
+    if (!urlSet.size) throw new Error("Ajans listesi boş / erişilemedi");
+    return [...urlSet].map((sourceUrl): NewsListItem => ({
       sourceUrl,
       lastmod: dates.get(sourceUrl) || dates.get(sourceUrl.replace("www.", "")) || null,
     }));

@@ -12,13 +12,13 @@ import { cleanNewsTitle, mapPool, resolveNewsImageUrl, sleep, slugifyTr } from "
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
 const LOCK_KEY_LIFECYCLE = "ozelguvenlik:news:lifecycle";
-const MAX_SCAN_MS = 12 * 60_000;
+const MAX_SCAN_MS = 18 * 60_000;
 /** Yayın süresi: 20 gün sonra arşiv */
 export const NEWS_PUBLISH_DAYS = 20;
 /** Arşivde ek 7 gün, sonra sil */
 export const NEWS_ARCHIVE_DAYS = 7;
 /** İlk / varsayılan geriye bakış */
-export const NEWS_LOOKBACK_DAYS = 5;
+export const NEWS_LOOKBACK_DAYS = 10;
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let lifecycleHandle: ReturnType<typeof setInterval> | null = null;
@@ -133,7 +133,7 @@ const SOURCE_SEEDS: SourceSeed[] = [
   },
 ];
 
-/** 4 aktif kaynak + eski akademiyi kapat + lookback 5 gün */
+/** 4 aktif kaynak + eski akademiyi kapat + lookback 10 gün */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
 
@@ -174,6 +174,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         lastScanAt: null,
       });
     } else {
+      const lookbackGrew = (row.initialLookbackDays || 0) < NEWS_LOOKBACK_DAYS;
       await db.update(newsSourcesTable).set({
         name: seed.name,
         baseUrl: seed.baseUrl,
@@ -185,6 +186,8 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         showSource: true,
         showSourceLink: false,
         scanIntervalMinutes: 30,
+        // Lookback genişlediyse bir sonraki cycle tam tara
+        ...(lookbackGrew ? { lastScanAt: null as Date | null } : {}),
         updatedAt: new Date(),
       }).where(eq(newsSourcesTable.id, row.id));
     }
@@ -237,28 +240,34 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
     });
     const candidates = list
       .filter((item) => {
-        if (!item.lastmod) return !source.initialScanDone;
+        // Tarihsiz adayları da al — kesin tarih kontrolü detayda yapılır
+        if (!item.lastmod) return true;
         return item.lastmod.getTime() >= cutoff.getTime();
       })
       .sort((a, b) => (b.lastmod?.getTime() ?? 0) - (a.lastmod?.getTime() ?? 0))
-      .slice(0, source.initialScanDone ? 80 : 120);
+      .slice(0, source.initialScanDone ? 160 : 220);
 
     stats.discovered = candidates.length;
 
-    // Sırayla (concurrency 1) — kaynaklar arası düzenli ekleme
-    await mapPool(candidates, 1, async (item) => {
+    // Hafif paralellik; kaynaklar döngüde sırayla
+    await mapPool(candidates, 2, async (item) => {
       if (Date.now() - started > MAX_SCAN_MS) return;
       try {
-        await sleep(280);
+        await sleep(220);
         const article = await provider.getArticleDetail(item.sourceUrl, { lastmod: item.lastmod });
         if (!article) {
           stats.failed += 1;
           return;
         }
-        if (!article.excerpt || article.excerpt.trim().length < 8) {
+        // Özet yoksa içerikten üret; tamamen boşsa atla
+        const excerpt = (article.excerpt || "").trim().length >= 8
+          ? article.excerpt
+          : (article.contentHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+        if (!excerpt || excerpt.length < 8) {
           stats.skipped += 1;
           return;
         }
+        article.excerpt = excerpt;
 
         if (article.sourcePublishedAt && article.sourcePublishedAt.getTime() < cutoff.getTime()) {
           stats.skipped += 1;
@@ -559,7 +568,7 @@ export function startNewsWorker(): void {
   lifecycleHandle = setInterval(() => {
     void maybeRunLifecycleAt3am().catch((err) => logger.warn({ err }, "news: lifecycle tick failed"));
   }, 15 * 60_000);
-  logger.info("news: worker started (4 kaynak, 5g lookback, 30dk tarama, 20g arşiv+7g silme)");
+  logger.info("news: worker started (4 kaynak, 10g lookback, 30dk tarama, 20g arşiv+7g silme)");
 }
 
 export function stopNewsWorker(): void {
