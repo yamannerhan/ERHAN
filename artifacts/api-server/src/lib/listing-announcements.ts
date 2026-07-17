@@ -1,8 +1,7 @@
-import { db, chatMessagesTable, notificationsTable, usersTable, adminSettingsTable } from "@workspace/db";
+import { db, chatMessagesTable, notificationsTable, usersTable, adminSettingsTable, buildListingSlug, listingSeoPath } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { emitRealtime } from "./realtime";
 import { stripListingSourceLabels } from "./strip-listing-source";
-import { buildListingSlug, listingSeoPath } from "@workspace/db";
 
 type ListingAnnouncement = {
   id: number;

@@ -96,12 +96,12 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
 }
 
 function renderMessageContent(content: string) {
-  const parts = content.split(/(\*\*[^*]+\*\*|@\w+|\/ilan\/\d+)/g);
+  const parts = content.split(/(\*\*[^*]+\*\*|@\w+|\/ilan\/\d+(?:\/[a-z0-9-]+)?)/g);
   return parts.map((part, i) => {
     if (/^\*\*([^*]+)\*\*$/.test(part)) {
       return <span key={i} className="font-bold text-amber-300 underline underline-offset-2">{part.slice(2, -2)}</span>;
     }
-    if (/^\/ilan\/\d+$/.test(part)) {
+    if (/^\/ilan\/\d+(?:\/[a-z0-9-]+)?$/.test(part)) {
       return <a key={i} href={part} className="ml-1 inline-flex rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-400/30">İlana git</a>;
     }
     if (part.startsWith("@")) return <span key={i} className="text-amber-300 font-semibold">{part}</span>;

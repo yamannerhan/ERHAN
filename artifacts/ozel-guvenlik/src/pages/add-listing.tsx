@@ -357,8 +357,8 @@ export default function AddListing() {
             id: created.id,
             slug: created.slug,
             seoPath: created.seoPath,
-            title: created.title || payload.title,
-            city: created.city || payload.city,
+            title: created.title || String(payload.title || ""),
+            city: created.city || String(payload.city || ""),
           })
         : undefined;
       setPublishSuccess({

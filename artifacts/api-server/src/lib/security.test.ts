@@ -16,6 +16,10 @@ test("unsafe public URL şemaları reddedilir", () => {
   assert.equal(safePublicUrl("//evil.example/x"), null);
   assert.equal(safePublicUrl("data:text/html;base64,WA==", { allowImageData: true }), null);
   assert.equal(safePublicUrl("/ilan/12"), "/ilan/12");
+  assert.equal(
+    safePublicUrl("/ilan/21194/guvenlik-personeli-fabrika-gebze-kocaeli"),
+    "/ilan/21194/guvenlik-personeli-fabrika-gebze-kocaeli",
+  );
   assert.equal(safePublicUrl("https://example.com/a"), "https://example.com/a");
 });
 
