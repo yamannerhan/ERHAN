@@ -116,7 +116,7 @@ export function NewsAdminSection() {
     setScanning(true);
     try {
       await api("/admin/news/scan-now", "POST");
-      toast({ title: "Tarama başlatıldı", description: "Güvenlik Akademi taranıyor." });
+      toast({ title: "Tarama başlatıldı", description: "EGM + Güvenlik Akademi taranıyor (son 2 ay)." });
       setTimeout(() => { void load(); }, 5000);
     } catch (e) {
       toast({ title: "Tarama başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
@@ -140,7 +140,7 @@ export function NewsAdminSection() {
 
   const resetNow = async () => {
     const ok = window.confirm(
-      "Tüm otomatik haberler silinecek ve yalnızca guvenlikakademi.com (son 2 ay) yeniden yüklenecek.\nDaha önce sildiğiniz haberler geri gelmez.\nManuel haberler kalır.\nDevam?",
+      "Tüm otomatik haberler silinecek; EGM haberler + guvenlikakademi.com (son 2 ay) yeniden yüklenecek.\nDaha önce sildiğiniz haberler geri gelmez.\nManuel haberler kalır.\nDevam?",
     );
     if (!ok) return;
     setScanning(true);
@@ -262,7 +262,7 @@ export function NewsAdminSection() {
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
           <p className="text-xs text-slate-400 mt-1">
-            Tek kaynak: guvenlikakademi.com · son 2 ay · detaylı içerik · kapak tekil · 2 ayı dolan silinir
+            Kaynaklar: EGM Özel Güvenlik Haberler + Güvenlik Akademi · 30 dk tarama · son 2 ay · başlık / açıklama / kapak zorunlu
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -312,6 +312,11 @@ export function NewsAdminSection() {
             <div key={a.id} className="rounded-xl border border-white/10 bg-[#131831]/80 p-3 flex flex-wrap gap-2 items-center justify-between">
               <div className="min-w-0">
                 <div className="text-sm font-bold text-white truncate">{a.title}</div>
+                {a.excerpt ? (
+                  <div className="text-[11px] text-slate-300 line-clamp-2 mt-0.5 max-w-xl">{a.excerpt}</div>
+                ) : (
+                  <div className="text-[11px] text-amber-400/90 mt-0.5">Açıklama yok</div>
+                )}
                 <div className="text-[10px] text-slate-400">
                   {a.status} · {a.category} · {a.isManual ? "manuel" : a.sourceName || "otomatik"}
                   {" · "}

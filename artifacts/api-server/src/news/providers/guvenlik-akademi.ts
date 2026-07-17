@@ -30,8 +30,14 @@ export function normalizeAkademiUrl(raw: string): string {
 function isArticlePath(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   if (path === "/") return false;
-  if (path.split("/").filter(Boolean).length !== 1) return false;
-  return !/\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurs|firma|haber-ihbar|sponsor|wp-|feed|sitemap)\b/i.test(path);
+  const segs = path.split("/").filter(Boolean);
+  if (segs.length !== 1) return false;
+  const slug = segs[0]!;
+  // Dosya uzantılı path'ler (favicon.png, style.css)
+  if (/\.[a-z0-9]{2,5}$/i.test(slug)) return false;
+  if (slug.length < 12) return false; // kısa sabit sayfalar
+  return !/^(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurslar?|firmalar?|haber-ihbar|sponsor|wp-|feed|sitemap|assets|favicon|robots|manifest)$/i.test(slug)
+    && !/\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurs|firma|haber-ihbar|sponsor|wp-|feed|sitemap)\b/i.test(path);
 }
 
 function parseSitemap(xml: string, baseUrl: string): NewsListItem[] {
@@ -371,10 +377,10 @@ export const guvenlikAkademiProvider: NewsProvider = {
     const plain = stripHtml(contentHtml);
     if (plain.length < 40) return null;
 
-    const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title), 280);
+    const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title), 320);
     const coverImage = pickCoverImage(html, pageUrl, ld, contentHtml);
     if (!coverImage) return null;
-    if (!excerpt || excerpt.length < 8) return null;
+    if (!excerpt || excerpt.length < 12) return null;
 
     const category = extractPageCategory(html) || mapCategory(title + " " + excerpt);
 

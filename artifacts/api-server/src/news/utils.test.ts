@@ -54,4 +54,9 @@ describe("news utils", () => {
   it("strips html", () => {
     assert.equal(stripHtml("<p>Merhaba <b>dünya</b></p>"), "Merhaba dünya");
   });
+
+  it("decodes named html entities", () => {
+    assert.equal(decodeHtmlEntities("T&uuml;rkiye &Ouml;zel"), "Türkiye Özel");
+    assert.ok(!/&[a-z]+;/i.test(makeExcerpt("g&ouml;re &ccedil;ok istihdam")));
+  });
 });

@@ -74,25 +74,43 @@ export function isPrivateHostname(hostname: string): boolean {
   return false;
 }
 
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+  nbsp: " ", quot: '"', amp: "&", lt: "<", gt: ">", apos: "'",
+  ouml: "ö", Ouml: "Ö", uuml: "ü", Uuml: "Ü", auml: "ä", Auml: "Ä",
+  euml: "ë", iuml: "ï", yuml: "ÿ",
+  ccedil: "ç", Ccedil: "Ç",
+  agrave: "à", aacute: "á", acirc: "â", atilde: "ã",
+  egrave: "è", eacute: "é", ecirc: "ê",
+  igrave: "ì", iacute: "í", icirc: "î",
+  ograve: "ò", oacute: "ó", ocirc: "ô", otilde: "õ",
+  ugrave: "ù", uacute: "ú", ucirc: "û",
+  ntilde: "ñ", szlig: "ß",
+  rdquo: "\u201D", ldquo: "\u201C", rsquo: "\u2019", lsquo: "\u2018",
+  ndash: "\u2013", mdash: "\u2014", hellip: "\u2026",
+  deg: "°", trade: "™", copy: "©", reg: "®",
+};
+
 export function decodeHtmlEntities(input: string): string {
-  return String(input || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&#x0*27;/gi, "'")
-    .replace(/&#0*34;/g, '"')
-    .replace(/&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-    .replace(/&#(\d+);/g, (_m, n) => {
-      const code = Number(n);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
-    })
-    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => {
-      const code = Number.parseInt(h, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
-    });
+  let out = String(input || "");
+  // Birkaç tur: &amp;ouml; gibi çift encode'u aç
+  for (let i = 0; i < 3; i++) {
+    const prev = out;
+    out = out
+      .replace(/&([a-zA-Z]{2,16});/g, (m, name: string) => NAMED_HTML_ENTITIES[name] ?? m)
+      .replace(/&#0*39;/g, "'")
+      .replace(/&#x0*27;/gi, "'")
+      .replace(/&#0*34;/g, '"')
+      .replace(/&#(\d+);/g, (_m, n) => {
+        const code = Number(n);
+        return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : _m;
+      })
+      .replace(/&#x([0-9a-f]+);/gi, (_m, h) => {
+        const code = Number.parseInt(h, 16);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
+      });
+    if (out === prev) break;
+  }
+  return out;
 }
 
 export function stripHtml(html: string): string {
@@ -135,8 +153,8 @@ export function absolutizeContentImages(html: string, pageUrl: string): string {
   );
 }
 
-export function makeExcerpt(text: string, max = 220): string {
-  const t = stripHtml(text).replace(/\s+/g, " ").trim();
+export function makeExcerpt(text: string, max = 280): string {
+  const t = decodeHtmlEntities(stripHtml(text)).replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1).trim()}…`;
 }
@@ -159,7 +177,9 @@ export async function fetchText(url: string, timeoutMs = 20_000): Promise<{ ok: 
       redirect: "follow",
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "User-Agent": "ozelguvenlik-newsbot/1.0 (+https://ozelguvenlik.online)",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
       },
       signal: ctrl.signal,
     });

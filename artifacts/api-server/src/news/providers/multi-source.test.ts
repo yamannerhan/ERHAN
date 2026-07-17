@@ -34,7 +34,7 @@ describe("multi-source news providers", () => {
       baseUrl: "https://www.egm.gov.tr",
       listingUrl: "https://www.egm.gov.tr/ozelguvenlik/haberler",
     });
-    assert.ok(list.length >= 1, `egm haberler ${list.length}`);
+    assert.ok(list.length >= 10, `egm haberler ${list.length}`);
     const article = await egmHaberlerProvider.getArticleDetail(list[0]!.sourceUrl, {
       lastmod: list[0]!.lastmod,
     });

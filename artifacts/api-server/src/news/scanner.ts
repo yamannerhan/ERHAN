@@ -120,9 +120,17 @@ const SOURCE_SEEDS: SourceSeed[] = [
     baseUrl: "https://guvenlikakademi.com",
     listingUrl: "https://guvenlikakademi.com/sitemap.xml",
   },
+  {
+    providerKey: "egm_haberler",
+    name: "EGM Özel Güvenlik Haberler",
+    baseUrl: "https://www.egm.gov.tr",
+    listingUrl: "https://www.egm.gov.tr/ozelguvenlik/haberler",
+  },
 ];
 
-/** Tek kaynak: guvenlikakademi.com · lookback 10 gün · sürekli dinleme */
+const DEFAULT_SCAN_INTERVAL_MINUTES = 30;
+
+/** Kaynaklar: Akademi (sitemap+liste) + EGM haberler · 30 dk · son 2 ay */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
 
@@ -141,7 +149,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         listingUrl: seed.listingUrl,
         providerKey: seed.providerKey,
         isActive: true,
-        scanIntervalMinutes: 5,
+        scanIntervalMinutes: DEFAULT_SCAN_INTERVAL_MINUTES,
         initialLookbackDays: NEWS_LOOKBACK_DAYS,
         importMode: "full",
         downloadImages: false,
@@ -165,7 +173,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         publishMode: "auto",
         showSource: false,
         showSourceLink: false,
-        scanIntervalMinutes: 5,
+        scanIntervalMinutes: DEFAULT_SCAN_INTERVAL_MINUTES,
         ...((lookbackGrew || reactivated || listingChanged)
           ? { lastScanAt: null as Date | null, initialScanDone: false }
           : {}),
@@ -174,7 +182,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
     }
   }
 
-  // Diğer tüm kaynakları kapat — yalnızca Akademi
+  // Diğer tüm kaynakları kapat — yalnızca seed'ler
   if (seedKeys.length) {
     await db.update(newsSourcesTable)
       .set({ isActive: false, updatedAt: new Date() })
@@ -260,7 +268,11 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           stats.skipped += 1;
           return;
         }
-        const article = await provider.getArticleDetail(item.sourceUrl, { lastmod: item.lastmod });
+        const article = await provider.getArticleDetail(item.sourceUrl, {
+          lastmod: item.lastmod,
+          coverImage: item.coverImage,
+          title: item.title,
+        });
         if (!article) {
           stats.failed += 1;
           return;
@@ -271,8 +283,8 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
         }
         // Özet yoksa içerikten üret; tamamen boşsa atla
         const excerpt = (article.excerpt || "").trim().length >= 8
-          ? article.excerpt
-          : (article.contentHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+          ? article.excerpt.trim()
+          : (article.contentHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
         if (!excerpt || excerpt.length < 8) {
           stats.skipped += 1;
           return;
@@ -285,7 +297,9 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
         }
 
         const title = cleanNewsTitle(article.title);
-        const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl);
+        // Liste kapağı detaydan gelmezse hint ile tamamla
+        const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl)
+          || resolveNewsImageUrl(item.coverImage, article.sourceUrl);
         // Açıklama + kapak yoksa alma (sıfırla / tarama)
         if (!coverImage) {
           stats.skipped += 1;
@@ -535,7 +549,7 @@ export async function runNewsScanCycle(force = false): Promise<void> {
       .orderBy(newsSourcesTable.id);
     for (const source of sources) {
       // Dinleme: en az 1 dk (eski min 10dk yeni haberi geciktiriyordu)
-      const intervalMs = Math.max(1, source.scanIntervalMinutes || 5) * 60_000;
+      const intervalMs = Math.max(5, source.scanIntervalMinutes || 30) * 60_000;
       const last = source.lastScanAt?.getTime() ?? 0;
       if (!force && source.initialScanDone && Date.now() - last < intervalMs) continue;
       try {

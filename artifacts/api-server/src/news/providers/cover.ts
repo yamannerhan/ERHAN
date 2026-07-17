@@ -49,7 +49,7 @@ function extractLdImage(html: string): string | null {
 
 function isBadCover(url: string): boolean {
   const u = url.toLowerCase();
-  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|advert|reklam|1x1|pixel|banner|emoji/.test(u);
+  return /\/logo\/|logo2?\.png|favicon|sprite|\/icon|avatar|placeholder|advert|reklam|1x1|pixel|banner|emoji|tasar[iı]m|yenilogo|ataturk|\.svg(\?|$)/i.test(u);
 }
 
 /** Kapak önceliği: NewsArticle image → og:image → twitter → ilk büyük görsel */
@@ -77,8 +77,10 @@ export function pickCoverImage(html: string, pageUrl: string, contentHtml?: stri
   const uniq = [...new Set(candidates)];
   if (!uniq.length) return null;
 
-  const preferred = uniq.find((u) => /\/uploads\/news\/|\/files\/uploads\/|\/IcSite\/|\/kurumlar\//i.test(u));
-  return preferred || uniq[0]!;
+  const preferred = uniq.find((u) =>
+    /\/uploads\/news\/|\/files\/uploads\/|IcSite\/ozelguvenlik\/(?:resimler|Faaliyet)|\/wp-content\/uploads\//i.test(u),
+  );
+  return preferred || uniq.find((u) => !isBadCover(u)) || null;
 }
 
 export { metaContent };
