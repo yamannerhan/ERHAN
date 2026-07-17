@@ -49,7 +49,16 @@ export async function announceNewListing(
   opts: AnnounceOptions & { authorName?: string | null } = {},
 ): Promise<void> {
   const linkUrl = `/ilan/${listing.id}`;
-  const adminOnly = !!opts.adminOnly;
+  let adminOnly = !!opts.adminOnly;
+
+  // Herhangi bir bot ilk taramadaysa kullanıcıya asla bildirim/sohbet/push gitmez
+  try {
+    const { isUserListingAnnounceGloballyMuted } = await import("./bot-public-announce");
+    if (await isUserListingAnnounceGloballyMuted()) {
+      adminOnly = true;
+    }
+  } catch { /* ignore */ }
+
   const skipChat = opts.skipChat ?? adminOnly;
   const sourceLabel = opts.sourceLabel?.trim() || null;
   const authorName = (opts.authorName || "").trim();

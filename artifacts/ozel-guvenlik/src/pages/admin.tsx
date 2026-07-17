@@ -2691,16 +2691,17 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
 
   const resetAllPlatformBots = async () => {
     if (!confirm(
-      "TÜM BOTLAR sıfırlanacak (Telegram + WhatsApp + Eleman.net):\n" +
-      "• Geçmiş ilanlar silinir\n" +
+      "TÜM BOTLAR sıfırlanacak (Telegram + Link URL + Eleman.net):\n" +
+      "• Geçmiş bot ilanları silinir\n" +
       "• Sırayla yeniden taranır\n" +
-      "• Eleman.net: sadece telefonlu özel güvenlik\n\nDevam?",
+      "• İlk taramalar bitene kadar kullanıcılara bildirim GİTMEZ\n" +
+      "• Bitince her 5 dk kaldığı yerden dinler\n\nDevam?",
     )) return;
     setResettingAll(true);
     try {
       const r = await apiCall("/admin/bots/reset-all", "POST") as { message?: string };
       setTgPaused(false);
-      toast({ title: "Tüm botlar sıfırlandı", description: r.message ?? "Yeniden tarama başladı." });
+      toast({ title: "Tüm botlar sıfırlandı", description: r.message ?? "Yeniden tarama başladı. İlk tarama bitene kadar bildirim yok." });
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
     finally { setResettingAll(false); }
@@ -2825,7 +2826,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
           <p className="text-[10px] text-amber-300 text-center">Telegram tarama duraklatıldı — WhatsApp / Eleman.net çalışmaya devam eder</p>
         )}
         <p className="text-[10px] text-muted-foreground text-center">
-          Sıfırla: Telegram → WhatsApp → Eleman.net sırasıyla siler ve yeniden tarar
+          Sıfırla: Telegram → Link URL → Eleman.net sırayla siler ve tarar. İlk tarama bitene kadar kullanıcıya bildirim yok. Sonra her 5 dk.
         </p>
       </div>
 
@@ -2844,7 +2845,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         </button>
       </div>
       <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
-        <strong>Tüm Botları Sıfırla:</strong> TG + WA + Eleman geçmiş ilanları siler, sırayla yeniden tarar. <strong>Durdur:</strong> sadece Telegram taramayı durdurur. <strong>Telegram Sıfırla:</strong> sadece Telegram.
+        <strong>Tüm Botları Sıfırla:</strong> Telegram + Link URL + Eleman.net geçmiş ilanları siler, sırayla yeniden tarar; ilk tarama bitene kadar kullanıcıya bildirim yok. Sonra her 5 dk. <strong>Durdur:</strong> sadece Telegram. <strong>Telegram Sıfırla:</strong> sadece Telegram.
       </p>
 
       <div className="flex justify-between items-center mb-3">
@@ -3494,7 +3495,7 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
             <div className="grid gap-2 text-xs text-slate-400">
               <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj Havuzu</strong> linkinden çeker</div>
               <div>• Örnek: <span className="text-sky-300 break-all">https://wpbot-production-cf99.up.railway.app</span></div>
-              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">15 gün</strong>; bitince her <strong className="text-slate-200">1 dk</strong> dinler, yeni ilanı hemen yayınlar</div>
+              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">15 gün</strong>; bitince her <strong className="text-slate-200">5 dk</strong> dinler (ilk tarama bitene kadar kullanıcıya bildirim yok)</div>
               <div>• Sadece özel güvenlik iş ilanları; çift = metin %100 aynı olanlar</div>
             </div>
           </div>

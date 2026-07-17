@@ -180,8 +180,8 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
 const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
-/** İlan havuzu dinleme aralığı (dk) — yeni ilan düşünce hemen yakala */
-const URL_POOL_LISTEN_INTERVAL_MIN = 1;
+/** İlan havuzu dinleme aralığı (dk) — artımlı mod 5 dk */
+const URL_POOL_LISTEN_INTERVAL_MIN = 5;
 /** WhatsApp geçmişi — Chromium ne kadar verirse (üst sınır sadece cutoff hesabı) */
 const WA_INITIAL_SCAN_DAYS = 730;
 const WA_INITIAL_SCAN_MS = WA_INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
@@ -870,7 +870,14 @@ async function processBotUpdatesUnlocked(): Promise<void> {
         : `https://t.me/c/${chatId.replace("-100", "")}/${post.message_id}`;
       const postedAt = typeof post.date === "number" ? new Date(post.date * 1000) : undefined;
       try {
-        await processMessage(source, `bot_${chatId}_${post.message_id}`, post.text, msgUrl, postedAt, false);
+        await processMessage(
+          source,
+          `bot_${chatId}_${post.message_id}`,
+          post.text,
+          msgUrl,
+          postedAt,
+          !source.initialScanDone,
+        );
       } catch (e) {
         logger.error(e, `scraper: bot update processing error`);
         throw e;
@@ -2283,7 +2290,7 @@ export async function getUrlPoolStatus() {
   };
 }
 
-export async function resetUrlPoolSource(): Promise<{ deletedListings: number }> {
+export async function resetUrlPoolSource(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable)
     .where(eq(sourcesTable.platform, "url_pool"))
     .orderBy(asc(sourcesTable.id))
@@ -2300,7 +2307,9 @@ export async function resetUrlPoolSource(): Promise<{ deletedListings: number }>
     initialScanCompletedAt: null,
     isScanning: false,
     lastError: null,
-    checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
+    checkInterval: 5,
+    active: true,
+    status: "active",
     totalImported: 0,
     lastScanMessagesRead: 0,
     lastScanFound: 0,
@@ -2309,7 +2318,9 @@ export async function resetUrlPoolSource(): Promise<{ deletedListings: number }>
     lastScanErrors: 0,
     lastScanPublished: 0,
   }).where(eq(sourcesTable.id, source.id));
-  void runScraperCycle(true).catch(() => undefined);
+  if (!opts?.deferRescan) {
+    void runScraperCycle(true).catch(() => undefined);
+  }
   return { deletedListings };
 }
 
@@ -2772,31 +2783,38 @@ export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Pr
     lastScanErrors: 0,
     isScanning: false,
     lastError: null,
+    checkInterval: INCREMENTAL_SCAN_INTERVAL_MIN,
+    active: true,
+    status: "active",
   }).where(eq(sourcesTable.platform, "telegram"));
 
-  logger.info({ sources: telegramSources.length, deletedListings: totalDeleted }, "scraper: tüm botlar sıfırlandı");
+  logger.info({ sources: telegramSources.length, deletedListings: totalDeleted }, "scraper: tüm telegram botları sıfırlandı");
   await refreshScraperInterval();
   if (!opts?.deferRescan) await triggerRescan();
   return { deletedListings: totalDeleted };
 }
 
 /**
- * Telegram + WhatsApp + Eleman.net: sırayla ilanları sil, imleçleri sıfırla, yeniden tara.
- * WA bağlı değilse atlanır (oturumu bozmaz).
+ * Telegram + Link (URL havuzu) + Eleman.net (+ WA varsa):
+ * ilanları sil, imleçleri sıfırla, sırayla yeniden tara.
+ * İlk taramalar bitene kadar kullanıcı bildirimi yok (global mute).
+ * Bitince her 5 dk kaldığı yerden dinler.
  */
 export async function resetAllBotsAndRescan(): Promise<{
   telegramDeleted: number;
   whatsappDeleted: number;
   elemanDeleted: number;
+  urlPoolDeleted: number;
   whatsappSkipped: boolean;
   message: string;
 }> {
   await releaseStaleScanLocks(true);
 
-  logger.info("scraper: TÜM BOTLAR sıfırlama başlıyor (TG → WA → Eleman)");
+  logger.info("scraper: TÜM BOTLAR sıfırlama (TG → Link → Eleman → WA)");
 
-  // Önce hepsini sil/sıfırla (tarama tetiklemeden), sonra sırayla başlat
   const tg = await resetAllTelegramBots({ deferRescan: true });
+  const pool = await resetUrlPoolSource({ deferRescan: true });
+  const el = await resetAllElemanSources({ deferRescan: true });
 
   let whatsappDeleted = 0;
   let whatsappSkipped = true;
@@ -2805,30 +2823,44 @@ export async function resetAllBotsAndRescan(): Promise<{
     const wa = await resetAllWhatsAppSources({ deferRescan: true });
     whatsappDeleted = wa.deletedListings;
   } else {
-    logger.warn("scraper: WhatsApp bağlı değil — WA sıfırlama atlandı (oturum korunur)");
+    logger.warn("scraper: WhatsApp bağlı değil — WA sıfırlama atlandı");
   }
 
-  const el = await resetAllElemanSources({ deferRescan: true });
+  await db.update(sourcesTable).set({
+    checkInterval: INCREMENTAL_SCAN_INTERVAL_MIN,
+    active: true,
+    status: "active",
+  }).where(inArray(sourcesTable.platform, ["telegram", "url_pool", "eleman"]));
 
-  // Sıra: Telegram → WhatsApp → Eleman.net
-  await triggerRescan();
-  if (!whatsappSkipped) {
-    void runWhatsAppSequentialDeepScan();
-  }
-  void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: Eleman.net global reset tarama hatası"));
+  await refreshScraperInterval();
+
+  void (async () => {
+    try {
+      await triggerRescan();
+      await sleep(2_000);
+      await runScraperCycle(true);
+      if (!whatsappSkipped) void runWhatsAppSequentialDeepScan();
+    } catch (err) {
+      logger.error({ err }, "scraper: global reset tarama hatası");
+    }
+  })();
 
   const parts = [
-    `Telegram: ${tg.deletedListings} ilan silindi, yeniden taranıyor`,
+    `Telegram: ${tg.deletedListings} ilan silindi`,
+    `Link havuzu: ${pool.deletedListings} ilan silindi`,
+    `Eleman.net: ${el.deletedListings} ilan silindi`,
     whatsappSkipped
-      ? "WhatsApp: bağlı değil (önce QR ile bağlanın)"
-      : `WhatsApp: ${whatsappDeleted} ilan silindi, gidebildiği kadar taranıyor`,
-    `Eleman.net: ${el.deletedListings} ilan silindi, iller taranıyor (telefon zorunlu)`,
+      ? "WhatsApp: bağlı değil (atlandı)"
+      : `WhatsApp: ${whatsappDeleted} ilan silindi`,
+    "İlk taramalar bitene kadar kullanıcılara bildirim gitmez",
+    "Bitince her 5 dk kaldığı yerden dinler",
   ];
 
   return {
     telegramDeleted: tg.deletedListings,
     whatsappDeleted,
     elemanDeleted: el.deletedListings,
+    urlPoolDeleted: pool.deletedListings,
     whatsappSkipped,
     message: parts.join(". ") + ".",
   };
