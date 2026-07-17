@@ -65,7 +65,7 @@ export function pickCoverImage(html: string, pageUrl: string, contentHtml?: stri
     push(metaContent(html, prop));
   }
 
-  for (const m of html.matchAll(/<(?:img|source)[^>]+(?:src|data-src|content)=["']([^"']+\.(?:jpe?g|png|webp|gif)[^"']*)["']/gi)) {
+  for (const m of html.matchAll(/<(?:img|source)[^>]+(?:src|data-src|content)=["']([^"']+\.(?:jpe?g|jfif|png|webp|gif)[^"']*)["']/gi)) {
     push(m[1]);
   }
   if (contentHtml) {

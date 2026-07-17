@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { ChevronRight, Newspaper } from "lucide-react";
+import { ChevronRight, Newspaper, Trash2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import "./home-news-cards.css";
 
 type NewsItem = {
@@ -25,9 +26,26 @@ function relativeDate(value?: string | null): string {
   return days === 1 ? "Dün" : `${days} gün önce`;
 }
 
+function getToken() {
+  return localStorage.getItem("auth_token") ?? "";
+}
+
 export function HomeNewsCards() {
+  const { isAdmin } = useAuth();
   const [items, setItems] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    try {
+      const res = await fetch("/api/news/home");
+      const json = await res.json() as { articles?: NewsItem[] };
+      setItems(Array.isArray(json.articles) ? json.articles.slice(0, 3) : []);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +62,23 @@ export function HomeNewsCards() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const deleteArticle = async (id: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm("Bu haber silinsin mi?")) return;
+    try {
+      const r = await fetch(`/api/admin/news/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!r.ok) throw new Error("Silinemedi");
+      setItems((prev) => prev.filter((a) => a.id !== id));
+      void load();
+    } catch {
+      window.alert("Haber silinemedi");
+    }
+  };
 
   return (
     <section className="og-home-news" aria-labelledby="home-news-title">
@@ -68,40 +103,51 @@ export function HomeNewsCards() {
           <p className="og-home-news__empty">Henüz yayınlanmış haber yok. Yakında güncellenecek.</p>
         )}
         {!loading && items.map((item) => (
-          <Link key={item.id} href={`/haberler/${item.slug}`} className="og-home-news__card">
-            <span className="og-home-news__visual" aria-hidden>
-              {item.coverImage ? (
-                <img
-                  src={item.coverImage}
-                  alt=""
-                  width={640}
-                  height={280}
-                  loading="lazy"
-                  decoding="async"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    const img = e.currentTarget;
-                    // Proxy bozulursa doğrudan mutlak URL dene
-                    if (img.src.includes("/api/news/image?url=")) {
-                      try {
-                        const u = new URL(img.src, window.location.origin);
-                        const raw = u.searchParams.get("url");
-                        if (raw) { img.src = raw; return; }
-                      } catch { /* ignore */ }
-                    }
-                    img.style.opacity = "0";
-                  }}
-                />
-              ) : null}
-              <span>{item.category || "HABER"}</span>
-            </span>
-            <strong>{item.title}</strong>
-            {item.excerpt ? <em className="og-home-news__excerpt">{item.excerpt}</em> : null}
-            <small>
-              {relativeDate(item.publishedAt || item.sourcePublishedAt)}
-              <span className="og-home-news__read">Haberi Oku</span>
-            </small>
-          </Link>
+          <div key={item.id} className="og-home-news__card-wrap">
+            <Link href={`/haberler/${item.slug}`} className="og-home-news__card">
+              <span className="og-home-news__visual" aria-hidden>
+                {item.coverImage ? (
+                  <img
+                    src={item.coverImage}
+                    alt=""
+                    width={640}
+                    height={280}
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.src.includes("/api/news/image?url=")) {
+                        try {
+                          const u = new URL(img.src, window.location.origin);
+                          const raw = u.searchParams.get("url");
+                          if (raw) { img.src = raw; return; }
+                        } catch { /* ignore */ }
+                      }
+                      img.style.opacity = "0";
+                    }}
+                  />
+                ) : null}
+                <span>{item.category || "HABER"}</span>
+              </span>
+              <strong>{item.title}</strong>
+              {item.excerpt ? <em className="og-home-news__excerpt">{item.excerpt}</em> : null}
+              <small>
+                {relativeDate(item.publishedAt || item.sourcePublishedAt)}
+                <span className="og-home-news__read">Haberi Oku</span>
+              </small>
+            </Link>
+            {isAdmin && (
+              <button
+                type="button"
+                className="og-home-news__admin-del"
+                title="Haberi sil"
+                onClick={(e) => void deleteArticle(item.id, e)}
+              >
+                <Trash2 aria-hidden /> Sil
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </section>

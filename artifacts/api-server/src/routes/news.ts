@@ -8,6 +8,18 @@ import { cleanNewsTitle, resolveNewsImageUrl, sanitizeNewsHtml, slugifyTr, sourc
 
 const router = Router();
 
+/** Upstream yanlış Content-Type verse bile JPEG/PNG/GIF/WEBP kabul et */
+function sniffImageMime(buf: Buffer, pathname = ""): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "image/gif";
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (/\.jfif$/i.test(pathname) || /\.jpe?g$/i.test(pathname)) return "image/jpeg";
+  return null;
+}
+
 function toProxiedImage(abs: string | null | undefined): string | null {
   if (!abs) return null;
   if (abs.startsWith("/api/news/image")) return abs;
@@ -132,15 +144,22 @@ router.get("/news/image", async (req, res) => {
       res.status(upstream.status).type("text/plain").send("upstream error");
       return;
     }
-    const ctype = upstream.headers.get("content-type") || "";
-    if (!/^image\//i.test(ctype)) {
-      res.status(415).type("text/plain").send("not an image");
-      return;
-    }
     const buf = Buffer.from(await upstream.arrayBuffer());
     if (buf.length > 8 * 1024 * 1024) {
       res.status(413).type("text/plain").send("too large");
       return;
+    }
+    // Ajans .jfif bazen text/plain döner — magic byte ile JPEG kabul et
+    let ctype = upstream.headers.get("content-type") || "";
+    const sniffed = sniffImageMime(buf, parsed.pathname);
+    if (!/^image\//i.test(ctype)) {
+      if (!sniffed) {
+        res.status(415).type("text/plain").send("not an image");
+        return;
+      }
+      ctype = sniffed;
+    } else if (sniffed && /jfif$/i.test(parsed.pathname)) {
+      ctype = sniffed;
     }
     res.setHeader("Content-Type", ctype);
     res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
@@ -152,6 +171,15 @@ router.get("/news/image", async (req, res) => {
 
 const newestOrder = sql`COALESCE(${newsArticlesTable.publishedAt}, ${newsArticlesTable.sourcePublishedAt}, ${newsArticlesTable.importedAt})`;
 
+/** Kapak + özet zorunlu — eksik haberler sitede görünmesin */
+const completeNewsWhere = and(
+  eq(newsArticlesTable.status, "published"),
+  sql`${newsArticlesTable.coverImage} IS NOT NULL`,
+  sql`length(trim(${newsArticlesTable.coverImage})) > 8`,
+  sql`${newsArticlesTable.excerpt} IS NOT NULL`,
+  sql`length(trim(${newsArticlesTable.excerpt})) >= 8`,
+);
+
 /** Ana sayfa: en yeni 3 yayınlanmış haber (en yeniden eskiye) */
 router.get("/news/home", async (_req, res) => {
   try {
@@ -159,7 +187,7 @@ router.get("/news/home", async (_req, res) => {
     const now = new Date();
     const rows = await db.select().from(newsArticlesTable)
       .where(and(
-        eq(newsArticlesTable.status, "published"),
+        completeNewsWhere!,
         or(
           sql`${newsArticlesTable.publishedAt} IS NULL`,
           lte(newsArticlesTable.publishedAt, now),
@@ -180,7 +208,13 @@ router.get("/news", async (req, res) => {
     const limit = Math.min(48, Math.max(1, Number(req.query["limit"] ?? 12)));
     const q = String(req.query["q"] ?? "").trim();
     const category = String(req.query["category"] ?? "").trim();
-    const conditions = [eq(newsArticlesTable.status, "published")];
+    const conditions = [
+      eq(newsArticlesTable.status, "published"),
+      sql`${newsArticlesTable.coverImage} IS NOT NULL`,
+      sql`length(trim(${newsArticlesTable.coverImage})) > 8`,
+      sql`${newsArticlesTable.excerpt} IS NOT NULL`,
+      sql`length(trim(${newsArticlesTable.excerpt})) >= 8`,
+    ];
     if (category) conditions.push(eq(newsArticlesTable.category, category));
     if (q) {
       conditions.push(or(

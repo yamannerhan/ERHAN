@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Layout } from "@/components/layout";
-import { Newspaper } from "lucide-react";
+import { Newspaper, Trash2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import "@/components/home-news-cards.css";
 
 type NewsItem = {
@@ -14,7 +15,12 @@ type NewsItem = {
   publishedAt?: string | null;
 };
 
+function getToken() {
+  return localStorage.getItem("auth_token") ?? "";
+}
+
 export default function HaberlerPage() {
+  const { isAdmin } = useAuth();
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<NewsItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -54,36 +60,55 @@ export default function HaberlerPage() {
 
         <div className="og-home-news__grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))" }}>
           {items.map((item) => (
-            <Link key={item.id} href={`/haberler/${item.slug}`} className="og-home-news__card">
-              <span className="og-home-news__visual" aria-hidden>
-                {item.coverImage ? (
-                  <img
-                    src={item.coverImage}
-                    alt=""
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      const img = e.currentTarget;
-                      if (img.src.includes("/api/news/image?url=")) {
-                        try {
-                          const u = new URL(img.src, window.location.origin);
-                          const raw = u.searchParams.get("url");
-                          if (raw) { img.src = raw; return; }
-                        } catch { /* ignore */ }
-                      }
-                      img.style.opacity = "0";
-                    }}
-                  />
-                ) : null}
-                <span>{item.category || "HABER"}</span>
-              </span>
-              <strong>{item.title}</strong>
-              {item.excerpt ? <em className="og-home-news__excerpt">{item.excerpt}</em> : null}
-              <small>
-                {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString("tr-TR") : ""}
-                <span className="og-home-news__read">Haberi Oku</span>
-              </small>
-            </Link>
+            <div key={item.id} className="og-home-news__card-wrap">
+              <Link href={`/haberler/${item.slug}`} className="og-home-news__card">
+                <span className="og-home-news__visual" aria-hidden>
+                  {item.coverImage ? (
+                    <img
+                      src={item.coverImage}
+                      alt=""
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (img.src.includes("/api/news/image?url=")) {
+                          try {
+                            const u = new URL(img.src, window.location.origin);
+                            const raw = u.searchParams.get("url");
+                            if (raw) { img.src = raw; return; }
+                          } catch { /* ignore */ }
+                        }
+                        img.style.opacity = "0";
+                      }}
+                    />
+                  ) : null}
+                  <span>{item.category || "HABER"}</span>
+                </span>
+                <strong>{item.title}</strong>
+                {item.excerpt ? <em className="og-home-news__excerpt">{item.excerpt}</em> : null}
+                <small>
+                  {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString("tr-TR") : ""}
+                  <span className="og-home-news__read">Haberi Oku</span>
+                </small>
+              </Link>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="og-home-news__admin-del"
+                  onClick={() => {
+                    if (!window.confirm("Bu haber silinsin mi?")) return;
+                    void fetch(`/api/admin/news/${item.id}`, {
+                      method: "DELETE",
+                      headers: { Authorization: `Bearer ${getToken()}` },
+                    }).then((r) => {
+                      if (r.ok) setItems((prev) => prev.filter((a) => a.id !== item.id));
+                    });
+                  }}
+                >
+                  <Trash2 aria-hidden /> Sil
+                </button>
+              )}
+            </div>
           ))}
         </div>
 

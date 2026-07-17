@@ -163,7 +163,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         listingUrl: seed.listingUrl,
         providerKey: seed.providerKey,
         isActive: true,
-        scanIntervalMinutes: 30,
+        scanIntervalMinutes: 5,
         initialLookbackDays: NEWS_LOOKBACK_DAYS,
         importMode: "full",
         downloadImages: false,
@@ -175,6 +175,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       });
     } else {
       const lookbackGrew = (row.initialLookbackDays || 0) < NEWS_LOOKBACK_DAYS;
+      const listingChanged = (row.listingUrl || "") !== seed.listingUrl;
       const reactivated = !row.isActive;
       await db.update(newsSourcesTable).set({
         name: seed.name,
@@ -186,13 +187,27 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         publishMode: "auto",
         showSource: true,
         showSourceLink: false,
-        scanIntervalMinutes: 30,
-        // Lookback genişledi veya kaynak yeniden açıldıysa hemen tara
-        ...((lookbackGrew || reactivated) ? { lastScanAt: null as Date | null, initialScanDone: false } : {}),
+        scanIntervalMinutes: 5,
+        // Lookback / liste URL değişti veya kaynak yeniden açıldıysa hemen tara
+        ...((lookbackGrew || reactivated || listingChanged)
+          ? { lastScanAt: null as Date | null, initialScanDone: false }
+          : {}),
         updatedAt: new Date(),
       }).where(eq(newsSourcesTable.id, row.id));
     }
   }
+
+  // Kapak veya özeti olmayan otomatik haberleri yayından kaldır
+  await db.execute(sql`
+    UPDATE news_articles
+    SET status = 'hidden', updated_at = NOW()
+    WHERE is_manual = false
+      AND status = 'published'
+      AND (
+        cover_image IS NULL OR length(trim(cover_image)) < 8
+        OR excerpt IS NULL OR length(trim(excerpt)) < 8
+      )
+  `);
 
   await db.execute(sql`
     UPDATE news_articles
@@ -203,6 +218,8 @@ export async function ensureDefaultNewsSource(): Promise<void> {
       updated_at = NOW()
     WHERE is_manual = FALSE
       AND status = 'draft'
+      AND cover_image IS NOT NULL AND length(trim(cover_image)) >= 8
+      AND excerpt IS NOT NULL AND length(trim(excerpt)) >= 8
   `);
 }
 
@@ -524,7 +541,8 @@ export async function runNewsScanCycle(force = false): Promise<void> {
       .where(eq(newsSourcesTable.isActive, true))
       .orderBy(newsSourcesTable.id);
     for (const source of sources) {
-      const intervalMs = Math.max(10, source.scanIntervalMinutes || 30) * 60_000;
+      // Dinleme: en az 1 dk (eski min 10dk yeni haberi geciktiriyordu)
+      const intervalMs = Math.max(1, source.scanIntervalMinutes || 5) * 60_000;
       const last = source.lastScanAt?.getTime() ?? 0;
       if (!force && source.initialScanDone && Date.now() - last < intervalMs) continue;
       try {
@@ -574,7 +592,7 @@ export function startNewsWorker(): void {
   lifecycleHandle = setInterval(() => {
     void maybeRunLifecycleAt3am().catch((err) => logger.warn({ err }, "news: lifecycle tick failed"));
   }, 15 * 60_000);
-  logger.info("news: worker started (6 kaynak, 10g lookback, 30dk tarama, 20g arşiv+7g silme)");
+  logger.info("news: worker started (6 kaynak, 10g lookback, 5dk dinleme, 20g arşiv+7g silme)");
 }
 
 export function stopNewsWorker(): void {
