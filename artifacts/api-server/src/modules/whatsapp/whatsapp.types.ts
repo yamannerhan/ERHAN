@@ -132,9 +132,9 @@ export interface WhatsAppStatusDto {
 
 /** Varsayılanlar — Railway Variables zorunlu değil. */
 export const SESSION_ID = process.env.WHATSAPP_SESSION_ID?.trim() || "main-whatsapp";
-export const HISTORY_DAYS = Math.max(1, Number(process.env.WHATSAPP_HISTORY_DAYS ?? 15));
+export const HISTORY_DAYS = Math.max(1, Number(process.env.WHATSAPP_HISTORY_DAYS ?? 20));
 export const SCAN_INTERVAL_MS = Math.max(60_000, Number(process.env.WHATSAPP_SCAN_INTERVAL_MS ?? 10 * 60 * 1000));
-export const EXPIRE_DAYS = Math.max(1, Number(process.env.WHATSAPP_EXPIRE_DAYS ?? 15));
+export const EXPIRE_DAYS = Math.max(1, Number(process.env.WHATSAPP_EXPIRE_DAYS ?? 20));
 export const FETCH_PAGE_SIZE = 50;
 export const MAX_INITIAL_PAGES = 400;
 export const MAX_INCREMENTAL_PAGES = 40;

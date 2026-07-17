@@ -55,12 +55,14 @@ export function buildCompanyDescription(company: string): string {
   );
 }
 
+/** @deprecated Prefer buildListingSeoTitle from listing-seo — geriye uyum için tutulur */
 export function buildListingTitle(title: unknown, company: unknown): string {
   const t = safeText(title, "Güvenlik Personeli Aranıyor");
   const c = safeText(company, "Belirtilmemiş");
   return `${t} | ${c} | Özel Güvenlik İş İlanları`;
 }
 
+/** @deprecated Prefer buildListingSeoDescription from listing-seo */
 export function buildListingDescription(
   city: unknown,
   company: unknown,
@@ -188,6 +190,8 @@ export function buildBaseSalary(opts: {
 
 export function buildJobPostingSchema(listing: {
   id: number;
+  slug?: string | null;
+  seoPath?: string | null;
   title?: string | null;
   description?: string | null;
   company?: string | null;
@@ -202,11 +206,19 @@ export function buildJobPostingSchema(listing: {
   sourcePublishedAt?: string | null;
   expiresAt?: string | null;
   applyUrl?: string | null;
+  pageUrl?: string | null;
 }) {
-  const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
+  const slug = (listing.slug || "").trim() || `ilan-${listing.id}`;
+  const pageUrl =
+    listing.pageUrl
+    || (listing.seoPath ? `${SEO_BASE_URL}${listing.seoPath}` : null)
+    || `${SEO_BASE_URL}/ilan/${listing.id}/${slug}`;
   const title = safeText(listing.title, "");
   const company = safeText(listing.company, "");
-  const city = safeText(listing.city, "");
+  const cityRaw = safeText(listing.city, "");
+  const locParts = cityRaw.split(/\s*[\/|,·–—]\s*/).map((p) => p.trim()).filter(Boolean);
+  const locDistrict = locParts.length >= 2 ? locParts[0]! : "";
+  const locCity = locParts.length >= 2 ? locParts[locParts.length - 1]! : cityRaw;
   const description = safeText(listing.description, "");
   const datePosted = toIsoDate(listing.publishedAt)
     ?? toIsoDate(listing.sourcePublishedAt)
@@ -237,16 +249,27 @@ export function buildJobPostingSchema(listing: {
     ...(datePosted ? { datePosted } : {}),
     ...(validThrough ? { validThrough } : {}),
     ...(employmentType ? { employmentType } : {}),
-    ...(company ? { hiringOrganization: { "@type": "Organization", name: company } } : {}),
-    ...(city ? {
+    hiringOrganization: {
+      "@type": "Organization",
+      name: company || SEO_SITE_NAME,
+      sameAs: SEO_BASE_URL,
+      ...(image ? { logo: image } : {}),
+    },
+    ...(locCity ? {
       jobLocation: {
         "@type": "Place",
-        address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" },
+        address: {
+          "@type": "PostalAddress",
+          addressLocality: locDistrict || locCity,
+          addressRegion: locCity,
+          addressCountry: "TR",
+        },
       },
     } : {}),
     ...(baseSalary ? { baseSalary } : {}),
     ...(image ? { image } : {}),
     url: pageUrl,
+    directApply: true,
   };
 }
 

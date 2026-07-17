@@ -263,7 +263,7 @@ router.post("/admin/whatsapp/add-source", authMiddleware, requireAdmin, async (r
       success: true,
       source: { id: legacySourceId, name: source.chatName, url: source.chatId },
       message: created
-        ? `${kind} kaydedildi. 15 günlük ilk tarama kuyruğa alındı.`
+        ? `${kind} kaydedildi. 20 günlük ilk tarama kuyruğa alındı.`
         : "Bu grup zaten kayıtlı. Tarama devam ediyor.",
     });
   } catch (e) {
@@ -316,7 +316,7 @@ router.post("/admin/whatsapp/scan-now", authMiddleware, requireAdmin, async (_re
       return;
     }
     const msg = result.mode === "initial"
-      ? `${result.pendingGroups} grupta 15 gün tarama devam ediyor`
+      ? `${result.pendingGroups} grupta 20 gün tarama devam ediyor`
         + (result.currentGroup ? ` — şimdi: ${result.currentGroup}` : "")
         + ". Bitince her 10 dakikada yeni mesajlar taranır."
       : `${result.pendingGroups} grup kaldığı yerden taranıyor (sadece yeni mesajlar).`;
@@ -346,7 +346,7 @@ router.post("/admin/whatsapp/reset", authMiddleware, requireAdmin, async (_req, 
       success: true,
       deletedListings: result.deletedListings,
       pendingGroups: result.pendingGroups,
-      message: `${result.deletedListings} WhatsApp ilanı silindi. ${result.pendingGroups} grup 15 günden temiz taranacak.`,
+      message: `${result.deletedListings} WhatsApp ilanı silindi. ${result.pendingGroups} grup 20 günden temiz taranacak.`,
     });
   } catch (e) {
     fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));
@@ -361,7 +361,7 @@ router.post("/admin/whatsapp/sources/:id/reset", authMiddleware, requireAdmin, a
     res.json({
       success: true,
       deletedListings: result.deletedListings,
-      message: `${result.deletedListings} ilan silindi. Bu grup 15 günden yeniden taranıyor.`,
+      message: `${result.deletedListings} ilan silindi. Bu grup 20 günden yeniden taranıyor.`,
     });
   } catch (e) {
     fail(res, 500, "UNKNOWN_ERROR", e instanceof Error ? e.message : String(e));

@@ -14,6 +14,7 @@ import {
   supportTicketsTable,
   supportMessagesTable,
   supportTicketEventsTable,
+  listingSeoPath,
 } from "@workspace/db";
 import { eq, desc, asc, and, sql, ilike, inArray, or, isNull, ne, getTableColumns } from "drizzle-orm";
 import { authMiddleware, optionalAuthMiddleware, requireAdmin } from "../middlewares/auth";
@@ -493,6 +494,8 @@ function formatListing(
   return {
     id: listing.id,
     title: listing.title,
+    slug: listing.slug || `ilan-${listing.id}`,
+    seoPath: `/ilan/${listing.id}/${listing.slug || `ilan-${listing.id}`}`,
     company: companyName,
     city: listing.city,
     salary: listing.salary,
@@ -649,9 +652,9 @@ router.get("/listings", optionalAuthMiddleware, async (req, res): Promise<void> 
   conditions.push(realListingFilter());
   // Birleştirilmiş bot kopyalarını gizle
   conditions.push(isNull(listingsTable.mergedIntoListingId));
-  // Sitede görünme: siteye eklenme tarihine göre 15 gün (kaynak mesaj tarihi değil)
-  const activeCutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
-  conditions.push(sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
+  // Sitede görünme: kaynak mesaj/yayın tarihinden 20 gün (yoksa firstSeen/created)
+  const activeCutoff = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  conditions.push(sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.publishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${activeCutoff}`);
 
   const settings = await db.select({ hiddenListingCities: adminSettingsTable.hiddenListingCities }).from(adminSettingsTable).limit(1);
   const hiddenCities = parseHiddenListingCities(settings[0]?.hiddenListingCities);
@@ -759,7 +762,7 @@ router.get("/listings/cities", async (_req, res): Promise<void> => {
       eq(listingsTable.status, "active"),
       eq(listingsTable.isActive, true),
       realListingFilter(),
-      sql`COALESCE(${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)}`,
+      sql`COALESCE(${listingsTable.sourcePublishedAt}, ${listingsTable.publishedAt}, ${listingsTable.firstSeenAt}, ${listingsTable.createdAt}) >= ${new Date(Date.now() - 20 * 24 * 60 * 60 * 1000)}`,
     ))
     .groupBy(listingsTable.city)
     .orderBy(sql`count(*) desc`, listingsTable.city);
@@ -914,6 +917,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
     title,
     company: resolvedCompany,
     city: String(city),
+    slug: await (await import("../lib/listing-slug")).allocateUniqueListingSlug(null, String(title), String(city)),
     salary: normalizedSalary,
     workType: workType ?? "Tam Zamanlı",
     description: description ?? null,
@@ -933,6 +937,9 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
   }).returning();
 
   if (listing) {
+    void import("../lib/listing-slug").then((m) =>
+      m.syncListingSlug(listing.id, listing.title, listing.city),
+    ).catch(() => undefined);
     void logListingSourceHistory(listing.id, sourceResolved);
     if (sourceResolved.directPriorityUntil) {
       void logListingPriority(
@@ -990,8 +997,9 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
   // Announce new listing in chat if enabled
   try {
     const settings = await db.select().from(adminSettingsTable).limit(1);
+    const listingPath = listingSeoPath(listing!.id, listing!.slug);
     if (settings[0]?.chatAnnounceListings !== false) {
-      const chatContent = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city})${salary ? ` • ${salary}` : ""}\n/ilan/${listing!.id}`;
+      const chatContent = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city})${salary ? ` • ${salary}` : ""}\n${listingPath}`;
       const [chatMsg] = await db.insert(chatMessagesTable).values({
         content: chatContent,
         userId: 0, // bot duyurusu — kalıcı (trim son 200)
@@ -1034,7 +1042,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
         ? "İlanınız başarıyla yayınlandı. Doğrulanmış hesabınız sayesinde ilanınız ilk 72 saat boyunca Doğrudan Yayınlandı ve Doğrulanmış Hesap rozetleriyle öncelikli olarak gösterilecektir."
         : "İlanınız başarıyla yayınlandı. Doğrudan paylaştığınız ilan ilk 48 saat boyunca öncelikli olarak gösterilecektir. İlanınız 7 gün sonra güncellik kontrolüne alınacaktır.",
       relatedId: listing!.id,
-      linkUrl: `/ilan/${listing!.id}`,
+      linkUrl: listingSeoPath(listing!.id, listing!.slug),
       isRead: false,
     });
   } catch { /* don't fail the listing creation */ }
@@ -1055,7 +1063,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
       if (allUsers.length > 0) {
         const priorityHours = sourceResolved.verifiedPublisher ? 72 : 48;
         const msg = `${authorName} yeni ilan paylaştı: ${title} — ${resolvedCompany} (${city}) · ${priorityHours}s öncelikli görünürlük`;
-        const link = `/ilan/${listing!.id}`;
+        const link = listingSeoPath(listing!.id, listing!.slug);
         await db.insert(notificationsTable).values(
           allUsers.map(u => ({
             userId: u.id,
@@ -1074,7 +1082,7 @@ router.post("/listings", authMiddleware, async (req, res): Promise<void> => {
             title: "Yeni kullanıcı ilanı incele",
             message: `${authorName} #${listing!.id} numaralı ilan yayınladı: ${title} — ${resolvedCompany} (${city})`,
             relatedId: listing!.id,
-            linkUrl: `/ilan/${listing!.id}`,
+            linkUrl: listingSeoPath(listing!.id, listing!.slug),
             isRead: false,
           }))
         );
@@ -1369,6 +1377,17 @@ router.patch("/listings/:id", authMiddleware, async (req, res): Promise<void> =>
   }
 
   const [updated] = await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id)).returning();
+  if (updated && (updates.title != null || updates.city != null)) {
+    await import("../lib/listing-slug").then((m) =>
+      m.syncListingSlug(updated.id, updated.title, updated.city),
+    ).catch(() => undefined);
+    const [fresh] = await db.select().from(listingsTable).where(eq(listingsTable.id, id)).limit(1);
+    if (fresh) {
+      const companyMap = await loadCompanyOverlays([fresh]);
+      res.json(formatListing(fresh, req.user!.id, new Set(), new Set(), req.user!.username, companyMap.get(fresh.id) ?? null));
+      return;
+    }
+  }
   const companyMap = await loadCompanyOverlays([updated!]);
   res.json(formatListing(updated!, req.user!.id, new Set(), new Set(), req.user!.username, companyMap.get(updated!.id) ?? null));
 });

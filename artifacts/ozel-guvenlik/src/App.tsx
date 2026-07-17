@@ -57,6 +57,7 @@ function Router() {
         <Switch>
           <Route path="/" component={Home} />
           <Route path="/ilanlar" component={ListingsWithSeo} />
+          <Route path="/ilan/:id/:slug" component={ListingDetail} />
           <Route path="/ilan/:id" component={ListingDetail} />
           <Route path="/blog/:postSlug" component={BlogPostPage} />
           <Route path="/blog" component={BlogIndexPage} />

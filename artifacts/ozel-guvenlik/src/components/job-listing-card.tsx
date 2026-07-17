@@ -8,6 +8,7 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead, useListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
+import { listingHref } from "@/lib/listing-seo";
 import "./job-card.css";
 
 export type JobCardListing = {
@@ -15,6 +16,8 @@ export type JobCardListing = {
   title: string;
   company: string;
   city: string;
+  slug?: string | null;
+  seoPath?: string | null;
   salary?: string | null;
   workType?: string | null;
   description?: string | null;
@@ -164,7 +167,7 @@ export function JobListingCard({
   const isNew = useIsNewListing(listing.createdAt);
   const isUrgent = isListingUrgentText(listing);
   const isSaved = saved ?? !!listing.isFavoritedByMe;
-  const detailHref = `/ilan/${listing.id}`;
+  const detailHref = listingHref(listing);
 
   const resolvedApply = resolveApplyHref({
     applyUrl: listing.applyUrl,

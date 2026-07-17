@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useGetListing, useToggleListingFavorite, getGetListingQueryKey } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
-import { useParams, Link, useLocation } from "wouter";
+import { useParams, Link, useLocation, Redirect } from "wouter";
 import {
   MapPin, Briefcase, Bookmark, Calendar, ArrowLeft, Share2,
   ShieldAlert, LogIn, UserPlus, Shield, Trash2, Star, Eye, Clock,
@@ -21,9 +21,17 @@ import { displayCompany } from "@/lib/utils";
 import { markListingRead } from "@/lib/read-listings";
 import { resolveApplyHref, collectListingPhones } from "@/lib/apply-url";
 import {
-  SEO_BASE_URL, SEO_OG_IMAGE, buildListingTitle, buildListingDescription,
-  buildJobPostingSchema, breadcrumbSchema,
+  SEO_BASE_URL, SEO_OG_IMAGE, buildJobPostingSchema, breadcrumbSchema,
 } from "@/lib/seo-config";
+import {
+  listingHref,
+  listingSeoUrl,
+  splitListingLocation,
+  buildListingSeoTitle,
+  buildListingSeoDescription,
+  buildListingH1,
+  toCitySlug,
+} from "@/lib/listing-seo";
 import { ListingSourceInfoCard } from "@/components/listing-source-badges";
 import "@/components/listing-detail-page.css";
 
@@ -43,6 +51,8 @@ type ExtListing = {
   lastCheckedAt?: string | null;
   lastSeenAt?: string | null;
   messageId?: string | null;
+  slug?: string | null;
+  seoPath?: string | null;
   badges?: {
     showDirect?: boolean;
     showVerified?: boolean;
@@ -130,8 +140,9 @@ function splitDescription(desc: string): { intro: string; duties: string[] } {
 }
 
 export default function ListingDetail() {
-  const { id } = useParams();
-  const listingId = parseInt(id || "0", 10);
+  const params = useParams<{ id?: string; slug?: string }>();
+  const listingId = parseInt(params.id || "0", 10);
+  const urlSlug = (params.slug || "").trim();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -174,13 +185,28 @@ export default function ListingDetail() {
   const canDeleteListing = user?.role === "admin";
   const ext = listing as (typeof listing & ExtListing) | undefined;
 
-  const pageUrl = `${SEO_BASE_URL}/ilan/${listingId}`;
+  const seoHref = listing
+    ? listingHref({
+        id: listing.id,
+        slug: ext?.slug,
+        seoPath: ext?.seoPath,
+        title: listing.title,
+        city: listing.city,
+      })
+    : `/ilan/${listingId}`;
+  const pageUrl = listing ? `${SEO_BASE_URL}${seoHref}` : listingSeoUrl(listingId);
+  const expectedSlug = seoHref.split("/").pop() || "";
+  const needsSlugRedirect = !!listing && (!urlSlug || urlSlug !== expectedSlug);
+
+  const { city: locCity, district: locDistrict } = splitListingLocation(listing?.city || "");
+  const cityName = locCity || listing?.city || "Türkiye";
+
   useDocumentMeta({
     title: listing
-      ? buildListingTitle(listing.title, displayCompany(listing.company))
+      ? buildListingSeoTitle({ title: listing.title, city: listing.city, salary: listing.salary })
       : "İlan Bulunamadı | Özel Güvenlik Online",
     description: listing
-      ? buildListingDescription(listing.city, displayCompany(listing.company), listing.workType, listing.salary, listing.description)
+      ? buildListingSeoDescription({ title: listing.title, city: listing.city, salary: listing.salary })
       : "Aradığınız ilan yayında değil veya kaldırılmış olabilir.",
     robots: listing ? undefined : "noindex, follow",
     canonical: listing ? pageUrl : null,
@@ -189,6 +215,8 @@ export default function ListingDetail() {
     jsonLd: listing ? [
       buildJobPostingSchema({
         id: listing.id,
+        slug: ext?.slug,
+        seoPath: ext?.seoPath,
         title: listing.title,
         description: listing.description,
         company: listing.company,
@@ -200,10 +228,15 @@ export default function ListingDetail() {
         sourcePublishedAt: ext?.sourcePublishedAt,
         expiresAt: ext?.expiresAt,
         applyUrl: listing.applyUrl,
+        pageUrl,
       }),
       breadcrumbSchema([
-        { name: "Ana Sayfa", item: SEO_BASE_URL },
-        { name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
+        { name: "Anasayfa", item: SEO_BASE_URL },
+        { name: "İş İlanları", item: `${SEO_BASE_URL}/ilanlar` },
+        { name: cityName, item: `${SEO_BASE_URL}/${toCitySlug(cityName)}` },
+        ...(locDistrict
+          ? [{ name: locDistrict, item: `${SEO_BASE_URL}/${toCitySlug(locDistrict)}` }]
+          : []),
         { name: listing.title ?? "İlan", item: pageUrl },
       ]),
     ] : undefined,
@@ -373,11 +406,15 @@ export default function ListingDetail() {
     );
   }
 
+  if (needsSlugRedirect) {
+    return <Redirect to={seoHref} />;
+  }
+
   if (!user) {
     return (
       <Layout>
         <div className="og-ld-gate">
-          <h1 className="sr-only">{listing.title}</h1>
+          <h1 className="sr-only">{buildListingH1({ title: listing.title, city: listing.city })}</h1>
           <ShieldAlert className="w-12 h-12 text-[#f5c518] mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Üyelere Özel İçerik</h2>
           <p className="text-sm text-muted-foreground mb-6">
@@ -419,7 +456,19 @@ export default function ListingDetail() {
   return (
     <Layout>
       <div className="og-ld-page">
-        <header className="og-ld-top">
+        <header>
+          <nav aria-label="Breadcrumb" className="og-ld-breadcrumb">
+            <ol className="og-ld-breadcrumb-list">
+              <li><Link href="/">Anasayfa</Link></li>
+              <li><Link href="/ilanlar">İş İlanları</Link></li>
+              <li><Link href={`/${toCitySlug(cityName)}`}>{cityName}</Link></li>
+              {locDistrict && (
+                <li><Link href={`/${toCitySlug(locDistrict)}`}>{locDistrict}</Link></li>
+              )}
+              <li aria-current="page">{listing.title}</li>
+            </ol>
+          </nav>
+          <div className="og-ld-top">
           <Link href="/ilanlar" className="og-ld-back">
             <ArrowLeft size={14} />
             İlanlara Geri Dön
@@ -447,6 +496,7 @@ export default function ListingDetail() {
               Favorilere Ekle
             </button>
           </div>
+          </div>
         </header>
 
         <div className="og-ld-layout">
@@ -460,7 +510,7 @@ export default function ListingDetail() {
 
               <div className="og-ld-head">
                 <div>
-                  <h1 className="og-ld-title">{listing.title}</h1>
+                  <h1 className="og-ld-title">{buildListingH1({ title: listing.title, city: listing.city })}</h1>
                   <div className="og-ld-salary">{listing.salary || "Maaş görüşmede"}</div>
                   <div className="og-ld-quick">
                     <span className="og-ld-quick-item"><MapPin /> {listing.city}</span>
@@ -476,7 +526,7 @@ export default function ListingDetail() {
                 </div>
                 <div className="og-ld-company-box">
                   <div className="og-ld-company-logo">
-                    <img src={logoUrl} alt={companyName} onError={(event) => useBrandLogoFallback(event.currentTarget)} />
+                    <img src={logoUrl} alt={`${companyName} logosu`} loading="lazy" onError={(event) => useBrandLogoFallback(event.currentTarget)} />
                   </div>
                   <div className="og-ld-company-name">{companyName}</div>
                   {ext?.verifiedPublisher && (

@@ -20,6 +20,7 @@ import {
   buildNotFoundSeoMeta,
   getSeoMetaForPath,
   injectSeoIntoHtml,
+  resolveListingSeoRedirect,
   SEO_BASE_URL,
   slugToCity,
 } from "./lib/seo-render";
@@ -313,6 +314,33 @@ app.use("/api", router);
 app.use((req, res, next) => {
   if (req.path.startsWith("/api")) {
     next();
+    return;
+  }
+
+  // İlan SEO URL: /ilan/:id → 301 /ilan/:id/:slug ; yanlış slug → 301 doğru slug
+  const listingUrlMatch = req.path.match(/^\/ilan\/(\d+)(?:\/([^/]+))?\/?$/i);
+  if (listingUrlMatch && clientIndexHtml) {
+    const id = parseInt(listingUrlMatch[1]!, 10);
+    const urlSlug = listingUrlMatch[2] ? decodeURIComponent(listingUrlMatch[2]) : null;
+    void (async () => {
+      try {
+        const resolved = await resolveListingSeoRedirect(id, urlSlug);
+        if (resolved && "redirectTo" in resolved) {
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          res.redirect(301, resolved.redirectTo);
+          return;
+        }
+        const meta = await getSeoMetaForPath(req.originalUrl);
+        res.setHeader("Cache-Control", "private, no-store");
+        if (!meta) {
+          res.status(404).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
+          return;
+        }
+        res.status(200).type("html").send(injectSeoIntoHtml(clientIndexHtml!, meta));
+      } catch {
+        res.status(500).type("html").send(injectSeoIntoHtml(clientIndexHtml!, buildNotFoundSeoMeta()));
+      }
+    })();
     return;
   }
 

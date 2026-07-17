@@ -454,7 +454,7 @@ export async function fetchChannelMessages(
   }
 
   const minId = options.minMessageId ?? 0;
-  const maxAgeDays = options.maxAgeDays ?? 30;
+  const maxAgeDays = options.maxAgeDays ?? 20;
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   const entity = await withTelegramRetry(() => client!.getEntity(username), `getEntity:${username}`);
   const results: ChannelMessage[] = [];

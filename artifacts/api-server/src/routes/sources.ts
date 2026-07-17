@@ -150,14 +150,14 @@ router.delete("/admin/sources/:id", authMiddleware, requireAdmin, async (req, re
   res.json({ success: true });
 });
 
-// Botları sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara.
+// Botları sıfırla: bot ilanlarını sil, sırayla 20 gün yeniden tara.
 router.post("/admin/sources/reset", authMiddleware, requireAdmin, async (_req, res): Promise<void> => {
   try {
     const result = await resetAllTelegramBots();
     res.json({
       success: true,
       deletedListings: result.deletedListings,
-      message: `${result.deletedListings} bot ilanı silindi. Gruplar sırayla %1'den %100'e 15 gün taranacak.`,
+      message: `${result.deletedListings} bot ilanı silindi. Gruplar sırayla %1'den %100'e 20 gün taranacak.`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -199,7 +199,7 @@ router.post("/admin/sources/deep-rescan", authMiddleware, requireAdmin, async (_
   void triggerDeepRescan30Days().catch(() => {});
   res.json({
     success: true,
-    message: "15 gün derin tarama başlatıldı. Tüm kaynaklar geriye doğru taranacak (yayındaki ilanlar silinmez).",
+    message: "20 gün derin tarama başlatıldı. Tüm kaynaklar geriye doğru taranacak (yayındaki ilanlar silinmez).",
   });
 });
 
@@ -218,7 +218,7 @@ router.post("/admin/sources/dedupe-listings", authMiddleware, requireAdmin, asyn
   }
 });
 
-/** Tek Telegram grubunu sıfırla: o kaynaktan gelen ilanları sil, son 15 günü yeniden tara. */
+/** Tek Telegram grubunu sıfırla: o kaynaktan gelen ilanları sil, son 20 günü yeniden tara. */
 router.post("/admin/sources/:id/reset", authMiddleware, requireAdmin, async (req, res): Promise<void> => {
   const id = safeId(req.params["id"]);
   if (!id) { res.status(400).json({ error: "Geçersiz ID" }); return; }
@@ -227,7 +227,7 @@ router.post("/admin/sources/:id/reset", authMiddleware, requireAdmin, async (req
     res.json({
       success: true,
       deletedListings: result.deletedListings,
-      message: `${result.deletedListings} ilan silindi. Son 15 gün yeniden taranıyor.`,
+      message: `${result.deletedListings} ilan silindi. Son 20 gün yeniden taranıyor.`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -399,7 +399,7 @@ router.post("/admin/url-pool/reset", authMiddleware, requireAdmin, async (_req, 
     res.json({
       success: true,
       deletedListings: result.deletedListings,
-      message: `${result.deletedListings} havuz ilanı silindi. Son 15 gün baştan taranacak; bitince 1 dk dinleme.`,
+      message: `${result.deletedListings} havuz ilanı silindi. Son 20 gün baştan taranacak; bitince 1 dk dinleme.`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

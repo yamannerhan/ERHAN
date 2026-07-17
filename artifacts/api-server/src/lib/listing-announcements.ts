@@ -2,6 +2,7 @@ import { db, chatMessagesTable, notificationsTable, usersTable, adminSettingsTab
 import { eq, or } from "drizzle-orm";
 import { emitRealtime } from "./realtime";
 import { stripListingSourceLabels } from "./strip-listing-source";
+import { buildListingSlug, listingSeoPath } from "@workspace/db";
 
 type ListingAnnouncement = {
   id: number;
@@ -38,9 +39,10 @@ function publicAnnouncementText(listing: ListingAnnouncement, authorName?: strin
   const location = listing.city ? ` · ${listing.city}` : "";
   const company = listing.company && listing.company !== "Belirtilmemiş" ? ` · ${listing.company}` : "";
   const who = (authorName || "").trim();
+  const path = listingSeoPath(listing.id, buildListingSlug(listing.title, listing.city || ""));
   const raw = who
-    ? `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n/ilan/${listing.id}`
-    : `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n/ilan/${listing.id}`;
+    ? `📢 ${who} yeni ilan paylaştı: ${listing.title}${location}${company}\n${path}`
+    : `📢 Yeni ilan eklendi: ${listing.title}${location}${company}\n${path}`;
   return stripListingSourceLabels(raw);
 }
 
@@ -48,7 +50,7 @@ export async function announceNewListing(
   listing: ListingAnnouncement,
   opts: AnnounceOptions & { authorName?: string | null } = {},
 ): Promise<void> {
-  const linkUrl = `/ilan/${listing.id}`;
+  const linkUrl = listingSeoPath(listing.id, buildListingSlug(listing.title, listing.city || ""));
   let adminOnly = !!opts.adminOnly;
 
   // Herhangi bir bot ilk taramadaysa kullanıcıya asla bildirim/sohbet/push gitmez

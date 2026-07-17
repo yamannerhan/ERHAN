@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, integer, index, numeric, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, integer, index, numeric, bigint, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -9,6 +9,8 @@ export const listingsTable = pgTable(
     title: text("title").notNull(),
     company: text("company").notNull(),
     city: text("city").notNull(),
+    /** SEO slug: baslik-ilce-sehir — unique, not null (backfill sonrası) */
+    slug: text("slug").notNull().default("ilan"),
     salary: text("salary"),
     salaryMin: integer("salary_min"),
     salaryMax: integer("salary_max"),
@@ -75,6 +77,7 @@ export const listingsTable = pgTable(
     index("listings_verified_publisher_idx").on(t.verifiedPublisher),
     index("listings_content_hash_idx").on(t.contentHash),
     index("listings_source_message_id_idx").on(t.sourceMessageId),
+    uniqueIndex("listings_slug_uidx").on(t.slug),
   ],
 );
 

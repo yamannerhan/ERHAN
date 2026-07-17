@@ -48,6 +48,7 @@ export type SitemapEntry = {
 
 type SitemapListing = {
   id: number;
+  slug?: string | null;
   title: string;
   company: string;
   city: string;
@@ -191,6 +192,7 @@ async function getSitemapSnapshot(): Promise<SitemapSnapshot> {
   const rows = await db
     .select({
       id: listingsTable.id,
+      slug: listingsTable.slug,
       title: listingsTable.title,
       company: listingsTable.company,
       city: listingsTable.city,
@@ -323,7 +325,7 @@ export async function generateJobsSitemapXml(page: number): Promise<string | nul
   if (!Number.isInteger(page) || page < 1 || page > pageCount) return null;
   const rows = snapshot.listings.slice((page - 1) * JOB_SITEMAP_LIMIT, page * JOB_SITEMAP_LIMIT);
   return buildSitemapXml(rows.map((row) => ({
-    url: `${SEO_BASE_URL}/ilan/${row.id}`,
+    url: `${SEO_BASE_URL}/ilan/${row.id}/${(row.slug || `ilan-${row.id}`).trim()}`,
     lastmod: listingLastmod(row),
   })));
 }

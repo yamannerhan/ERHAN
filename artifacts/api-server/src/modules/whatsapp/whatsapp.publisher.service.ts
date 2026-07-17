@@ -4,6 +4,7 @@ import {
   importedPostsTable,
   whatsappProcessedMessagesTable,
   whatsappSourcesTable,
+  buildListingSlug,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import {
@@ -127,6 +128,7 @@ export async function processWhatsAppMessage(params: {
         title,
         company: company || "Belirtilmemiş",
         city,
+        slug: `${buildListingSlug(title, city)}-${Date.now().toString(36)}`,
         salary,
         workType: workType || "Tam Zamanlı",
         description: body,
@@ -176,6 +178,10 @@ export async function processWhatsAppMessage(params: {
 
       return listing.id;
     });
+
+    void import("../../lib/listing-slug").then((m) =>
+      m.syncListingSlug(listingId, title, city),
+    ).catch(() => undefined);
 
     // İlk tarama: yalnız admin. Bitince yeni WhatsApp ilanları herkese.
     void (async () => {

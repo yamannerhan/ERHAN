@@ -13,10 +13,10 @@ import { classifySecurityJob } from "./whatsapp.classifier.service";
 import { HISTORY_DAYS, SCAN_INTERVAL_MS, SESSION_ID, EXPIRE_DAYS } from "./whatsapp.types";
 import { WhatsAppManager } from "./whatsapp.manager";
 
-test("defaults: session main-whatsapp, 15 gün, 10 dk", () => {
+test("defaults: session main-whatsapp, 20 gün, 10 dk", () => {
   assert.equal(SESSION_ID, "main-whatsapp");
-  assert.equal(HISTORY_DAYS, 15);
-  assert.equal(EXPIRE_DAYS, 15);
+  assert.equal(HISTORY_DAYS, 20);
+  assert.equal(EXPIRE_DAYS, 20);
   assert.equal(SCAN_INTERVAL_MS, 10 * 60 * 1000);
 });
 

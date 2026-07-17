@@ -1,5 +1,5 @@
 import webpush from "web-push";
-import { db, adminSettingsTable, pushSubscriptionsTable, listingsTable, pushCampaignsTable } from "@workspace/db";
+import { db, adminSettingsTable, pushSubscriptionsTable, listingsTable, pushCampaignsTable, listingSeoPath, buildListingSlug } from "@workspace/db";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import {
@@ -288,6 +288,7 @@ export async function maybePushNewListing(listing: {
   id: number;
   title: string;
   city?: string | null;
+  slug?: string | null;
   authorName?: string | null;
 }): Promise<void> {
   try {
@@ -295,10 +296,11 @@ export async function maybePushNewListing(listing: {
     if (s.pushEnabled === false || s.pushOnNewListing === false) return;
     const city = listing.city ? ` · ${listing.city}` : "";
     const who = (listing.authorName || "").trim();
+    const slug = listing.slug || buildListingSlug(listing.title, listing.city || "");
     await broadcastPush({
       title: who ? `${who} ilan paylaştı` : "Yeni ilan",
       body: `${listing.title}${city}`,
-      url: `/ilan/${listing.id}`,
+      url: listingSeoPath(listing.id, slug),
       tag: `listing-${listing.id}`,
       kind: "listing",
     });

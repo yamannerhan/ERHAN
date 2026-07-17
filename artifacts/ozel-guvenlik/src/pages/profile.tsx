@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { displayCompany } from "@/lib/utils";
 import { resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
+import { listingHref } from "@/lib/listing-seo";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ProfileBadgesRow } from "@/components/chat-user-identity";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
@@ -1062,7 +1063,7 @@ export default function Profile() {
                     transition={{ delay: Math.min(i * 0.04, 0.2) }}
                     className={`og-list-row-wrap ${isExpired ? "opacity-70" : ""}`}
                   >
-                    <Link href={`/ilan/${listing.id}`} className="og-list-row">
+                    <Link href={listingHref(listing)} className="og-list-row">
                       <div className="og-list-img">
                         <img
                           src={img}

@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Star, StarOff, Trash2, RefreshCw, Building2, User, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { listingHref } from "@/lib/listing-seo";
 
 type FeaturedListing = {
   id: number;
   title: string;
   company: string;
   city: string;
+  slug?: string | null;
+  seoPath?: string | null;
   status: string;
   isFeatured: boolean;
   featuredUntil: string | null;
@@ -157,7 +160,7 @@ export function FeaturedListingsAdminSection({
                 </div>
               </div>
               <a
-                href={`/ilan/${l.id}`}
+                href={listingHref(l)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-muted-foreground hover:text-white shrink-0 p-1"

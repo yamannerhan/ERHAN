@@ -1,4 +1,4 @@
-import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable } from "@workspace/db";
+import { db, sourcesTable, importedPostsTable, pendingJobsTable, listingsTable, listingLikesTable, listingFavoritesTable, buildListingSlug } from "@workspace/db";
 import { eq, and, isNotNull, isNull, lt, or, sql, inArray, like, desc, asc, ne } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getUpdates, isBotTokenSet, isClientConnected, fetchChannelMessages, PAGES_PER_CYCLE, ensureTelegramConnected, hasTelegramSessionStored } from "../services/telegram-client";
@@ -129,9 +129,14 @@ async function findDuplicateImported(hash: string, sourceId: number, externalId?
       .limit(1);
     if (sameMsg) return true;
   }
+  // Hash yalnızca AYNI kaynakta — Eleman/WA orphan imported_posts TG sıfırlamayı engellemesin.
+  // Çapraz platform çift ilan: findDuplicateActiveListing (aktif listings).
   const [row] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
-    .where(eq(importedPostsTable.duplicateHash, hash))
+    .where(and(
+      eq(importedPostsTable.duplicateHash, hash),
+      eq(importedPostsTable.sourceId, sourceId),
+    ))
     .limit(1);
   return !!row;
 }
@@ -176,17 +181,17 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
   return source.autoPublish || !source.requireApproval;
 }
 
-// Telegram / havuz ilk tarama + sıfırla: son 15 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
+// Telegram / havuz ilk tarama + sıfırla: son 20 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
-const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 20;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 /** İlan havuzu dinleme aralığı (dk) — artımlı mod 5 dk */
 const URL_POOL_LISTEN_INTERVAL_MIN = 5;
 /** WhatsApp geçmişi — Chromium ne kadar verirse (üst sınır sadece cutoff hesabı) */
 const WA_INITIAL_SCAN_DAYS = 730;
 const WA_INITIAL_SCAN_MS = WA_INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
-/** Bot ilanları sitede kalma süresi (tarama penceresinden bağımsız) */
-const LISTING_TTL_DAYS = 15;
+/** Bot ilanları sitede kalma süresi = mesaj/yayın tarihinden itibaren */
+const LISTING_TTL_DAYS = 20;
 const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 90 * 1000;
@@ -206,8 +211,8 @@ const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
 const ELEMAN_LISTEN_INTERVAL_MIN = 5;
 /** İlk taramada döngü başına kaç şehir */
 const ELEMAN_CITIES_PER_INITIAL_CYCLE = 4;
-/** Her döngüde geriye kaç sayfa (×100 mesaj) — 15 güne daha hızlı ulaşmak için */
-const BACKWARD_PAGES_PER_RUN = 8;
+/** Her döngüde geriye kaç sayfa (×100 mesaj) — 20 güne daha hızlı ulaşmak için */
+const BACKWARD_PAGES_PER_RUN = 12;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
 let scanBackoffMinutes = 0;
@@ -374,10 +379,12 @@ function bumpScanBackoffOnRateLimit(): void {
 }
 
 /**
- * Bot ilanı sitede LISTING_TTL_DAYS (15) gün kalsın — tarama süresi (15g / WA geçmiş) ayrı.
+ * Bot ilanı sitede LISTING_TTL_DAYS (20) gün kalsın.
+ * Süre mesaj/yayın tarihinden hesaplanır (sisteme eklenme anından değil).
  */
-function listingExpiryFrom(_postedAt?: Date): Date {
-  return new Date(Date.now() + LISTING_TTL_MS);
+function listingExpiryFrom(postedAt?: Date): Date {
+  const base = postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : new Date();
+  return new Date(base.getTime() + LISTING_TTL_MS);
 }
 
 /** Tekrar görülen ilan: lastSeen / lastChecked güncelle, yayın tarihini değiştirme. */
@@ -555,11 +562,13 @@ async function processMessage(
     ? isUrlPoolJobPosting(text)
     : (
       isSecurityJobPosting(text)
-      || (source.platform === "whatsapp" && isWhatsAppSecurityJobPosting(text))
+      // Telegram + WhatsApp: kısa ama gerçek güvenlik ilanlarını kaçırma
+      || ((source.platform === "whatsapp" || source.platform === "telegram")
+        && isWhatsAppSecurityJobPosting(text))
     );
   if (!matchesSecurityJob) return "skipped";
 
-  // İlk tarama / sıfırla: Telegram+havuz max 15g, WA 730g. Dinlemede yaş kesme yok.
+  // İlk tarama / sıfırla: Telegram+havuz max 20g, WA 730g. Dinlemede yaş kesme yok.
   if (isInitialScan && postedAt) {
     const maxAgeMs = source.platform === "whatsapp"
       ? WA_INITIAL_SCAN_MS
@@ -704,6 +713,7 @@ async function processMessage(
       title: title ?? "Güvenlik Personeli Aranıyor",
       company: companyName,
       city,
+      slug: `${buildListingSlug(title ?? "ilan", city)}-${Date.now().toString(36)}`,
       salary: salary ?? undefined,
       workType,
       description: listingDescription,
@@ -736,6 +746,9 @@ async function processMessage(
   if (outcome.kind === "duplicate") return "duplicate";
   if (outcome.kind === "pending") return "skipped";
   const newListing = outcome.listing;
+  void import("../lib/listing-slug").then((m) =>
+    m.syncListingSlug(newListing.id, newListing.title, newListing.city),
+  ).catch(() => undefined);
 
   try {
     const { logListingSourceHistory } = await import("../lib/listing-rank");
@@ -1042,7 +1055,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         result = await fetchWithReconnect(username, {
           maxAgeDays: INITIAL_SCAN_DAYS,
           offsetId: currentOffset,
-          maxPages: 2,
+          maxPages: 3,
         });
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
@@ -1112,8 +1125,11 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
         currentOffset = nextOff;
       }
 
+      // Boş ilk sayfa = geçici API hatası olabilir; done sayma (az ilan bug'ı).
+      const historyExhausted = result.noMoreMessages
+        && (totalRead > 0 || currentOffset > 0 || baseMessagesRead > 0);
       const done = result.reachedCutoff
-        || result.noMoreMessages
+        || historyExhausted
         || (cumulativeOldest != null && cumulativeOldest.getTime() <= Date.now() - INITIAL_SCAN_MS);
 
       stats.messagesRead = baseMessagesRead + totalRead;
@@ -1569,6 +1585,7 @@ async function publishElemanJob(
       title: job.title || "Güvenlik Personeli Aranıyor",
       company: companyName,
       city,
+      slug: `${buildListingSlug(job.title || "ilan", city)}-${Date.now().toString(36)}`,
       salary: extractSalary(job.rawText) ?? undefined,
       workType: extractWorkType(job.rawText),
       description: cleanDescription,
@@ -1602,6 +1619,9 @@ async function publishElemanJob(
   });
   if (!outcome) return "duplicate";
   const newListing = outcome;
+  void import("../lib/listing-slug").then((m) =>
+    m.syncListingSlug(newListing.id, newListing.title, newListing.city),
+  ).catch(() => undefined);
 
   // İlk tarama: kullanıcıya bildirim yok. Otomatik moda geçince yeni ilanlar gider.
   try {
@@ -1969,7 +1989,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   kickWhatsAppDeepScanNew();
 }
 
-/** WhatsApp ilanlarını sil + 15 günlük temiz tarama (yeni job kuyruğu). */
+/** WhatsApp ilanlarını sil + 20 günlük temiz tarama (yeni job kuyruğu). */
 export async function resetAllWhatsAppSources(_opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; pendingGroups: number }> {
   waScanGeneration++;
   waSequentialRunning = false;
@@ -2047,7 +2067,7 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
   const cursorId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
   const fresh = await fetchAllPoolMessages(base, {
     pageSize: 100,
-    // Dinlemede sık ve geniş; ilk taramada 15 güne yetecek kadar sayfa
+    // Dinlemede sık ve geniş; ilk taramada 20 güne yetecek kadar sayfa
     maxPages: source.initialScanDone ? 40 : 100,
     minIdExclusive: source.initialScanDone ? cursorId : 0,
   });
@@ -2659,25 +2679,27 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi dolan ilanları sil. Süre = siteye eklenme (firstSeenAt) + LISTING_TTL_DAYS (15). */
+/** Süresi dolan ilanları sil. Süre = yayın/mesaj tarihi + LISTING_TTL_DAYS (20). */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
   const days = LISTING_TTL_DAYS;
 
-  // Bot ilanları 15 gün sitede kalır (tarama 15g / WA geçmişinden bağımsız)
+  // expires_at = kaynak yayın tarihi (mesaj) + 20 gün; yoksa published_at / first_seen_at
   try {
     await db.execute(sql.raw(`
       UPDATE listings
       SET
         first_seen_at = COALESCE(first_seen_at, NOW()),
-        expires_at = COALESCE(first_seen_at, NOW()) + INTERVAL '${days} days',
+        expires_at = COALESCE(source_published_at, published_at, first_seen_at, NOW())
+          + INTERVAL '${days} days',
         auto_delete_on_expiry = true
       WHERE status = 'active'
         AND is_active = true
         AND (
           expires_at IS NULL
           OR first_seen_at IS NULL
-          OR expires_at < COALESCE(first_seen_at, NOW()) + INTERVAL '${Math.max(1, days - 1)} days'
+          OR source_published_at IS NOT NULL
+          OR published_at IS NOT NULL
         )
     `));
   } catch (e) {
@@ -2741,7 +2763,7 @@ export async function expireImportedListings(): Promise<number> {
   return purgeExpiredListings();
 }
 
-/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara. */
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 20 gün yeniden tara. */
 export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
@@ -2866,7 +2888,7 @@ export async function resetAllBotsAndRescan(): Promise<{
   };
 }
 
-/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 15 günü yeniden tara. */
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 20 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");

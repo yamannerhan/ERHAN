@@ -1113,6 +1113,11 @@ void import("./lib/listing-source-schema").then(async (m) => {
   await m.backfillListingSourceTypes();
   logger.info("Listing source + publisher verify schema ready");
 }).catch((err) => logger.warn({ err }, "listing source schema bootstrap skipped"));
+void import("./lib/listing-slug").then(async (m) => {
+  await m.ensureListingSlugSchema();
+  const r = await m.backfillListingSlugs();
+  logger.info({ updated: r.updated }, "Listing SEO slug schema ready");
+}).catch((err) => logger.warn({ err }, "listing slug schema bootstrap skipped"));
 void import("./modules/whatsapp/whatsapp.schema-ensure")
   .then((m) => m.ensureWhatsAppDbSchema())
   .catch((err) => logger.warn({ err }, "whatsapp schema bootstrap skipped"));

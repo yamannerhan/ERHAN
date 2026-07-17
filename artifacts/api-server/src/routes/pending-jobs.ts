@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, pendingJobsTable, importedPostsTable, listingsTable, sourcesTable } from "@workspace/db";
+import { db, pendingJobsTable, importedPostsTable, listingsTable, sourcesTable, buildListingSlug } from "@workspace/db";
 import { eq, desc, and } from "drizzle-orm";
 import { authMiddleware, requireAdmin, requireAdminOrModerator } from "../middlewares/auth";
 import { buildListingRequirements, extractBenefits, extractGender, extractLocation, extractPhoneNumbers, extractProjectType, extractWorkType, formatTelApplyUrl } from "../lib/job-parsing";
@@ -117,6 +117,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
       title,
       company: companyName,
       city,
+      slug: `${buildListingSlug(title, city)}-${Date.now().toString(36)}`,
       salary: job.salary ?? undefined,
       workType: extractWorkType(job.rawText),
       description: job.description ?? job.rawText,
@@ -135,7 +136,7 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
       companyLogoUrl,
       applyUrl: formatTelApplyUrl(extractPhoneNumbers(job.phone || job.rawText || "").slice(0, 1)),
       autoDeleteOnExpiry: true,
-      expiresAt: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
       publishedAt: job.createdAt ?? new Date(),
       lastSeenAt: new Date(),
       firstSeenAt: new Date(),
@@ -154,6 +155,9 @@ router.post("/admin/pending-jobs/:id/approve", authMiddleware, requireAdmin, asy
     return created;
   });
   if (listing) {
+    void import("../lib/listing-slug").then((m) =>
+      m.syncListingSlug(listing.id, listing.title, listing.city),
+    ).catch(() => undefined);
     // Manuel onay: sitede normal ilan gibi duyur (kaynak adı yok)
     await announceNewListing(listing, {});
   }

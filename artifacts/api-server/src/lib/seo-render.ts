@@ -4,7 +4,7 @@
  * ve JSON-LD enjekte eder. React mount edildiğinde içerik değişmez (replace).
  */
 
-import { db, listingsTable } from "@workspace/db";
+import { db, listingsTable, listingSeoPath, listingSeoUrl, splitListingLocation } from "@workspace/db";
 import { and, desc, eq, ilike } from "drizzle-orm";
 import { indexableListingCondition } from "./seo-listing-policy";
 import {
@@ -18,6 +18,29 @@ export { ALL_LOCATIONS, SEO_DISTRICTS, SEO_PROVINCES, slugToCity, toSlug } from 
 
 export const SEO_BASE_URL = "https://ozelguvenlik.online";
 export const SEO_DISPLAY_URL = "ozelguvenlik.online";
+
+/** /ilan/:id veya /ilan/:id/:slug için doğru SEO path (slug yoksa null) */
+export async function resolveListingSeoRedirect(
+  id: number,
+  urlSlug: string | null,
+): Promise<{ redirectTo: string } | { ok: true; slug: string } | null> {
+  try {
+    const [listing] = await db
+      .select({ id: listingsTable.id, slug: listingsTable.slug })
+      .from(listingsTable)
+      .where(eq(listingsTable.id, id))
+      .limit(1);
+    if (!listing) return null;
+    const slug = (listing.slug || `ilan-${listing.id}`).trim();
+    const correct = listingSeoPath(listing.id, slug);
+    if (!urlSlug || urlSlug !== slug) {
+      return { redirectTo: correct };
+    }
+    return { ok: true, slug };
+  } catch {
+    return null;
+  }
+}
 
 function parseSalaryMinMax(salary: unknown): { min: number | null; max: number | null } {
   const raw = String(salary ?? "").trim();
@@ -271,11 +294,12 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
   const { title, description } = makeCitySeo(city);
   const pageUrl = `${SEO_BASE_URL}/${slug}`;
 
-  let cityListings: { id: number; title: string; company: string; city: string; updatedAt: Date; applyUrl: string | null }[] = [];
+  let cityListings: { id: number; slug: string | null; title: string; company: string; city: string; updatedAt: Date; applyUrl: string | null }[] = [];
   try {
     const rows = await db
       .select({
         id: listingsTable.id,
+        slug: listingsTable.slug,
         title: listingsTable.title,
         company: listingsTable.company,
         city: listingsTable.city,
@@ -294,7 +318,7 @@ async function buildCityMeta(city: string, slug: string): Promise<SeoMeta> {
 
   const listingLinks = cityListings.length
     ? `<h2>${escapeHtml(city)} Aktif İlanlar</h2><ul>${cityListings
-        .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a> <small>(${escapeHtml(l.city)})</small></li>`)
+        .map(l => `<li><a href="${SEO_BASE_URL}/ilan/${l.id}/${escapeHtml((l.slug || `ilan-${l.id}`).trim())}">${escapeHtml(l.title)} - ${escapeHtml(l.company || "")}</a> <small>(${escapeHtml(l.city)})</small></li>`)
         .join("")}</ul>`
     : `<p>${escapeHtml(city)} için şu an yayında ilan yok; yeni ilanlar eklendiğinde burada listelenir.</p>`;
 
@@ -370,14 +394,35 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
     const listing = rows[0];
     if (!listing) return null;
 
-    const pageUrl = `${SEO_BASE_URL}/ilan/${listing.id}`;
-    const listingTitle = (listing.title || "").trim();
+    const slug = (listing.slug || `ilan-${listing.id}`).trim();
+    const pageUrl = listingSeoUrl(SEO_BASE_URL, listing.id, slug);
+    const listingTitle = (listing.title || "").trim() || "Güvenlik Personeli";
     const company = (listing.company || "").trim();
-    const city = (listing.city || "").trim();
-    const title = `${listingTitle || "Güvenlik Personeli"}${company ? ` | ${company}` : ""} | Özel Güvenlik İş İlanları`;
-    const desc = ((listing.description || "") + "")
-      .replace(/\s+/g, " ")
-      .slice(0, 158) || `${city || "Türkiye"} bölgesinde özel güvenlik görevlisi alımı.`;
+    const { city, district } = splitListingLocation(listing.city || "");
+    const locCity = city || (listing.city || "").trim() || "Türkiye";
+    const locDistrict = district || "";
+    const salaryText = (listing.salary || "").trim();
+
+    // Meta title: {Başlık} İş İlanı | {İlçe} {Şehir} | {Maaş}
+    const locForTitle = [locDistrict, locCity].filter(Boolean).join(" ");
+    const titleParts = [
+      `${listingTitle} İş İlanı`,
+      locForTitle || null,
+      salaryText || null,
+    ].filter(Boolean);
+    const title = titleParts.join(" | ");
+
+    // Meta description
+    const locPhrase = locDistrict ? `${locDistrict} / ${locCity}` : locCity;
+    const salaryPart = salaryText ? ` Maaş ${salaryText}.` : "";
+    const desc = truncateSeoDesc(
+      `${locPhrase}'de ${listingTitle} iş ilanı.${salaryPart} Servis ve yemek imkanı. Hemen başvurun.`,
+    );
+
+    const h1 = locDistrict
+      ? `${listingTitle} İş İlanı - ${locDistrict} / ${locCity}`
+      : `${listingTitle} İş İlanı - ${locCity}`;
+
     const validThrough = toIsoDate(listing.expiresAt);
     const datePosted = toIsoDate(listing.publishedAt) ?? toIsoDate(listing.sourcePublishedAt) ?? toIsoDate(listing.createdAt);
     const employmentType = mapEmploymentType(listing.workType);
@@ -386,55 +431,99 @@ async function buildListingMeta(id: number): Promise<SeoMeta | null> {
       ? (listing.companyLogoUrl.startsWith("http") ? listing.companyLogoUrl : `${SEO_BASE_URL}${listing.companyLogoUrl.startsWith("/") ? "" : "/"}${listing.companyLogoUrl}`)
       : undefined;
 
+    const citySlug = toSlug(locCity);
+    const districtSlug = locDistrict ? toSlug(locDistrict) : null;
+    const breadcrumbItems = [
+      { "@type": "ListItem", position: 1, name: "Anasayfa", item: SEO_BASE_URL },
+      { "@type": "ListItem", position: 2, name: "İş İlanları", item: `${SEO_BASE_URL}/ilanlar` },
+      { "@type": "ListItem", position: 3, name: locCity, item: `${SEO_BASE_URL}/${citySlug}` },
+      ...(locDistrict && districtSlug
+        ? [{ "@type": "ListItem", position: 4, name: locDistrict, item: `${SEO_BASE_URL}/${districtSlug}` }]
+        : []),
+      {
+        "@type": "ListItem",
+        position: locDistrict ? 5 : 4,
+        name: listingTitle,
+        item: pageUrl,
+      },
+    ];
+
     return {
       title,
       description: desc,
       canonical: pageUrl,
+      robots: "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1",
       ogImage: companyLogo || `${SEO_BASE_URL}/og-brand.jpg`,
       ogType: "article",
       jsonLd: [
         {
           "@context": "https://schema.org",
           "@type": "JobPosting",
-          ...(listingTitle ? { title: listingTitle } : {}),
-          ...(listing.description?.trim() ? { description: listing.description.trim() } : {}),
+          title: listingTitle,
+          description: (listing.description || desc).trim(),
           identifier: { "@type": "PropertyValue", name: "Özel Güvenlik Online", value: String(listing.id) },
           ...(datePosted ? { datePosted } : {}),
           ...(validThrough ? { validThrough } : {}),
           ...(employmentType ? { employmentType } : {}),
-          ...(company ? { hiringOrganization: { "@type": "Organization", name: company } } : {}),
-          ...(city ? { jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "TR" } } } : {}),
+          hiringOrganization: {
+            "@type": "Organization",
+            name: company || "Özel Güvenlik Online",
+            sameAs: SEO_BASE_URL,
+            ...(companyLogo ? { logo: companyLogo } : {}),
+          },
+          jobLocation: {
+            "@type": "Place",
+            address: {
+              "@type": "PostalAddress",
+              addressLocality: locDistrict || locCity,
+              addressRegion: locCity,
+              addressCountry: "TR",
+            },
+          },
           ...(baseSalary ? { baseSalary } : {}),
           url: pageUrl,
           ...(companyLogo ? { image: companyLogo } : {}),
+          directApply: true,
         },
         {
           "@context": "https://schema.org",
           "@type": "BreadcrumbList",
-          itemListElement: [
-            { "@type": "ListItem", position: 1, name: "Ana Sayfa", item: SEO_BASE_URL },
-            { "@type": "ListItem", position: 2, name: "İlanlar", item: `${SEO_BASE_URL}/ilanlar` },
-            { "@type": "ListItem", position: 3, name: listing.title, item: pageUrl },
-          ],
+          itemListElement: breadcrumbItems,
         },
       ],
       bodyHtml: `
-<header><h1>${escapeHtml(listing.title)}</h1></header>
+<nav aria-label="Breadcrumb">
+  <ol>
+    <li><a href="${SEO_BASE_URL}">Anasayfa</a></li>
+    <li><a href="${SEO_BASE_URL}/ilanlar">İş İlanları</a></li>
+    <li><a href="${SEO_BASE_URL}/${citySlug}">${escapeHtml(locCity)}</a></li>
+    ${locDistrict && districtSlug ? `<li><a href="${SEO_BASE_URL}/${districtSlug}">${escapeHtml(locDistrict)}</a></li>` : ""}
+    <li>${escapeHtml(listingTitle)}</li>
+  </ol>
+</nav>
+<header><h1>${escapeHtml(h1)}</h1></header>
 <main>
-<p><strong>Firma:</strong> ${escapeHtml(listing.company || "")}<br/>
-<strong>Şehir:</strong> ${escapeHtml(listing.city || "")}<br/>
+<p><strong>Firma:</strong> ${escapeHtml(company || "")}<br/>
+<strong>Konum:</strong> ${escapeHtml(locPhrase)}<br/>
 <strong>Pozisyon:</strong> Özel Güvenlik Görevlisi<br/>
 ${listing.workType ? `<strong>Çalışma Tipi:</strong> ${escapeHtml(listing.workType)}<br/>` : ""}
-${listing.salary ? `<strong>Maaş:</strong> ${escapeHtml(listing.salary)}` : ""}</p>
+${salaryText ? `<strong>Maaş:</strong> ${escapeHtml(salaryText)}` : ""}</p>
 <h2>İlan Açıklaması</h2>
 <p>${escapeHtml(listing.description || desc)}</p>
 ${listing.requirements ? `<h2>Aranan Şartlar</h2><p>${escapeHtml(listing.requirements)}</p>` : ""}
-<p><a href="${SEO_BASE_URL}/ilanlar">Tüm İlanlar</a> · <a href="${SEO_BASE_URL}/${toSlug(listing.city || "turkiye")}">${escapeHtml(listing.city || "")} İlanları</a></p>
+<h3>Başvuru</h3>
+<p><a href="${pageUrl}">Bu ilana başvurun</a> · <a href="${SEO_BASE_URL}/ilanlar">Tüm İlanlar</a></p>
 </main>`,
     };
   } catch {
     return null;
   }
+}
+
+function truncateSeoDesc(text: string, max = 158): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max - 1).trim()}…`;
 }
 
 /* ───────────── ROUTING ───────────── */
@@ -578,7 +667,7 @@ export async function getSeoMetaForPath(pathname: string): Promise<SeoMeta | nul
     if (city) return buildCityMeta(city, slug);
   }
 
-  const listingMatch = clean.match(/^\/ilan\/(\d+)$/);
+  const listingMatch = clean.match(/^\/ilan\/(\d+)(?:\/([^/]+))?$/);
   if (listingMatch) {
     const id = parseInt(listingMatch[1]!, 10);
     if (Number.isFinite(id)) return buildListingMeta(id);
@@ -659,7 +748,10 @@ export function injectSeoIntoHtml(html: string, meta: SeoMeta): string {
     );
   }
 
-  // twitter:title / description / image
+  // twitter:title / description / image / card
+  if (!/<meta name="twitter:card"/.test(out)) {
+    out = out.replace("</head>", `<meta name="twitter:card" content="summary_large_image" />\n</head>`);
+  }
   out = out.replace(
     /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
     `<meta name="twitter:title" content="${escapeHtml(meta.title)}" />`,
@@ -673,6 +765,21 @@ export function injectSeoIntoHtml(html: string, meta: SeoMeta): string {
       /<meta name="twitter:image" content="[^"]*"\s*\/?>/,
       `<meta name="twitter:image" content="${escapeHtml(meta.ogImage)}" />`,
     );
+  }
+
+  // hreflang (çok dil hazırlığı — şimdilik tr-TR)
+  if (meta.canonical) {
+    if (/hreflang="tr-TR"/.test(out)) {
+      out = out.replace(
+        /<link rel="alternate" hreflang="tr-TR" href="[^"]*"\s*\/?>/,
+        `<link rel="alternate" hreflang="tr-TR" href="${escapeHtml(meta.canonical)}" />`,
+      );
+    } else {
+      out = out.replace(
+        "</head>",
+        `<link rel="alternate" hreflang="tr-TR" href="${escapeHtml(meta.canonical)}" />\n<link rel="alternate" hreflang="x-default" href="${escapeHtml(meta.canonical)}" />\n</head>`,
+      );
+    }
   }
 
   // JSON-LD: append before </head>

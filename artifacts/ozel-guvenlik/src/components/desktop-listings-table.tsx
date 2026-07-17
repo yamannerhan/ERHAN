@@ -6,6 +6,7 @@ import { markListingRead } from "@/lib/read-listings";
 import { resolveApplyHref } from "@/lib/apply-url";
 import { isRealCompanyLogo, resolveCompanyLogo, useBrandLogoFallback } from "@/lib/brand-logo";
 import type { JobCardListing } from "@/components/job-listing-card";
+import { listingHref } from "@/lib/listing-seo";
 
 function formatSalary(raw?: string | null): string {
   const s = (raw || "").trim();
@@ -44,10 +45,10 @@ export function DesktopListingsTable({
 }: Props) {
   const [, navigate] = useLocation();
 
-  const openListing = (id: number) => {
-    markListingRead(id);
+  const openListing = (listing: JobCardListing) => {
+    markListingRead(listing.id);
     onNavigate?.();
-    navigate(`/ilan/${id}`);
+    navigate(listingHref(listing));
   };
 
   return (
@@ -92,7 +93,7 @@ export function DesktopListingsTable({
               const logo = resolveCompanyLogo(listing.companyLogoUrl);
               const hasOwnLogo = isRealCompanyLogo(listing.companyLogoUrl);
               const salary = formatSalary(listing.salary);
-              const detailHref = `/ilan/${listing.id}`;
+              const detailHref = listingHref(listing);
               const resolvedApply = resolveApplyHref({
                 applyUrl: listing.applyUrl,
                 description: listing.description,
@@ -111,14 +112,14 @@ export function DesktopListingsTable({
                   onClick={(e) => {
                     const t = e.target as HTMLElement;
                     if (t.closest("a, button")) return;
-                    openListing(listing.id);
+                    openListing(listing);
                   }}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" && e.key !== " ") return;
                     const t = e.target as HTMLElement;
                     if (t.closest("a, button")) return;
                     e.preventDefault();
-                    openListing(listing.id);
+                    openListing(listing);
                   }}
                 >
                   <td>

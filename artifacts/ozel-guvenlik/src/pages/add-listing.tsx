@@ -15,6 +15,7 @@ import "@/components/add-listing-page.css";
 import { formatSalaryInput } from "@/lib/salary-format";
 import { formatTelApplyUrl, normalizeContactNames, normalizePhoneList } from "@/lib/apply-url";
 import { LogoCropDialog } from "@/components/logo-crop-dialog";
+import { listingHref, buildListingSlug, listingSeoPath } from "@/lib/listing-seo";
 
 const POSITIONS = [
   "Özel Güvenlik Görevlisi",
@@ -113,7 +114,7 @@ export default function AddListing() {
   const createMutation = useCreateListing();
   const { user, isLoading } = useAuth();
   const [dupWarning, setDupWarning] = useState<string | null>(null);
-  const [publishSuccess, setPublishSuccess] = useState<{ message: string; listingId?: number } | null>(null);
+  const [publishSuccess, setPublishSuccess] = useState<{ message: string; listingId?: number; href?: string } | null>(null);
   const [smartText, setSmartText] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
   const [extractStatus, setExtractStatus] = useState<ExtractStatus | null>(null);
@@ -344,15 +345,29 @@ export default function AddListing() {
       };
       const created = await createMutation.mutateAsync({ data: payload as never }) as {
         id?: number;
+        slug?: string | null;
+        seoPath?: string | null;
+        title?: string | null;
+        city?: string | null;
         publishMeta?: { message?: string; priorityHours?: number; verifiedPublisher?: boolean };
       };
       const meta = created?.publishMeta;
+      const href = created?.id
+        ? listingHref({
+            id: created.id,
+            slug: created.slug,
+            seoPath: created.seoPath,
+            title: created.title || payload.title,
+            city: created.city || payload.city,
+          })
+        : undefined;
       setPublishSuccess({
         message: meta?.message
           || (meta?.verifiedPublisher
             ? "İlanınız doğrulanmış hesap olarak 72 saat öncelikli gösterilecek. İlk sıra garantisi yoktur."
             : "İlanınız 48 saat öncelikli gösterilecek. İlk sıra garantisi yoktur."),
         listingId: created?.id,
+        href,
       });
       toast({
         title: "İlan başarıyla yayınlandı",
@@ -791,7 +806,12 @@ export default function AddListing() {
                   <button
                     type="button"
                     className="flex-1 min-w-[120px] rounded-xl bg-emerald-500 text-black font-semibold text-sm py-2.5"
-                    onClick={() => setLocation(`/ilan/${publishSuccess.listingId}`)}
+                    onClick={() => setLocation(
+                      publishSuccess.href
+                        || (publishSuccess.listingId
+                          ? listingSeoPath(publishSuccess.listingId, buildListingSlug("ilan", ""))
+                          : "/ilanlar"),
+                    )}
                   >
                     İlana git
                   </button>

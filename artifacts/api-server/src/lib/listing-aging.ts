@@ -1,4 +1,4 @@
-import { db, listingsTable, notificationsTable } from "@workspace/db";
+import { db, listingsTable, notificationsTable, listingSeoPath } from "@workspace/db";
 import { and, eq, lt, gte, lte, or, isNull, isNotNull } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -48,7 +48,7 @@ export async function runListingAgingPass(): Promise<{ reminded: number; deactiv
         title: "İlanınızı yenileyin",
         message: `"${l.title}" 7 gündür yenilenmedi. Aktif kalsın istiyorsanız yenileyin; 14. günde pasife alınır.`,
         relatedId: l.id,
-        linkUrl: `/ilan/${l.id}`,
+        linkUrl: listingSeoPath(l.id, l.slug),
         isRead: false,
       }).catch(() => undefined);
       reminded += 1;
@@ -96,7 +96,7 @@ export async function runListingAgingPass(): Promise<{ reminded: number; deactiv
           title: "İlan pasife alındı",
           message: `"${l.title}" 14 gün yenilenmediği için pasife alındı. Yenileyerek tekrar yayınlayabilirsiniz.`,
           relatedId: l.id,
-          linkUrl: `/ilan/${l.id}`,
+          linkUrl: listingSeoPath(l.id, l.slug),
           isRead: false,
         }).catch(() => undefined);
       }

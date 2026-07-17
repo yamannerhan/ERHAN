@@ -1947,6 +1947,7 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
   const sourceResolved = resolveListingSourceOnCreate({ isAdminCreate: true });
   const [listing] = await db.insert(listingsTable).values({
     title: String(title), company: String(company), city: String(city), workType: String(workType),
+    slug: await (await import("../lib/listing-slug")).allocateUniqueListingSlug(null, String(title), String(city)),
     salary: salary ? String(salary) : null, description: description ? String(description) : null,
     requirements: requirements ? String(requirements) : null, applyUrl: applyUrl ? String(applyUrl) : null,
     isFeatured: Boolean(isFeatured), cardTheme: normalizeListingCardTheme(cardTheme), status: "active",
@@ -1959,6 +1960,9 @@ router.post("/admin/listings", authMiddleware, async (req, res): Promise<void> =
     ...(coords ?? {}),
   }).returning();
   if (listing) {
+    void import("../lib/listing-slug").then((m) =>
+      m.syncListingSlug(listing.id, listing.title, listing.city),
+    ).catch(() => undefined);
     void logListingSourceHistory(listing.id, sourceResolved);
     if (sourceResolved.directPriorityUntil) {
       void logListingPriority(listing.id, "admin_created", new Date(), sourceResolved.directPriorityUntil, "create", req.user.id);
@@ -2073,6 +2077,18 @@ router.patch("/admin/listings/:id", authMiddleware, requireAdminOrModerator, asy
   if (cardTheme !== undefined) updates.cardTheme = normalizeListingCardTheme(cardTheme);
   if (expiresAt !== undefined) updates.expiresAt = expiresAt ? new Date(String(expiresAt)) : null;
   await db.update(listingsTable).set(updates).where(eq(listingsTable.id, id));
+  if (updates.title != null || updates.city != null) {
+    const [row] = await db.select({
+      id: listingsTable.id,
+      title: listingsTable.title,
+      city: listingsTable.city,
+    }).from(listingsTable).where(eq(listingsTable.id, id)).limit(1);
+    if (row) {
+      await import("../lib/listing-slug").then((m) =>
+        m.syncListingSlug(row.id, row.title, row.city),
+      ).catch(() => undefined);
+    }
+  }
   res.json({ success: true });
 });
 
