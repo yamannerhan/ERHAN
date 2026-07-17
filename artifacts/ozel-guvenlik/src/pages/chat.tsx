@@ -243,8 +243,9 @@ export default function Chat() {
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 3000,
-      timeout: 20000,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000,
+      timeout: 25000,
       forceNew: true,
     });
     setSocket(s);

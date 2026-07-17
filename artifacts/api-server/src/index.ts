@@ -39,8 +39,11 @@ export const io = new SocketIOServer(httpServer, {
   allowRequest: (req, callback) => callback(null, isAllowedOrigin(req.headers.origin)),
   transports: ["polling", "websocket"],
   allowUpgrades: true,
-  pingInterval: 25000,
-  pingTimeout: 60000,
+  // Railway / proxy altında kopmayı azalt
+  pingInterval: 20_000,
+  pingTimeout: 90_000,
+  connectTimeout: 45_000,
+  maxHttpBufferSize: 1e6,
 });
 setRealtimeServer(io);
 app.set("io", io);

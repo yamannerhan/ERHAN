@@ -111,6 +111,11 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
       secure: window.location.protocol === "https:",
       withCredentials: true,
       forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000,
+      timeout: 25000,
     });
     socketRef.current = s;
     const auth = () => {

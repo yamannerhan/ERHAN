@@ -460,37 +460,61 @@ export async function fetchChannelMessages(
   const results: ChannelMessage[] = [];
   const seen = new Set<number>();
 
-  // Artımlı tarama: son bilinen mesajdan sonrakiler (100+ mesaj için sayfalı)
+  // Artımlı tarama: en yeniden geriye doğru yürü, lastId'ye kadar tüm boşluğu kapat
+  // (sadece minId ile newest-page almak 100+ birikimde ara mesajları kaçırıyordu)
   if (minId > 0) {
-    let cursorMinId = minId;
+    let offsetId = 0;
     let page = 0;
-    const maxPages = options.maxPages ?? 10;
+    const maxPages = options.maxPages ?? 20;
+    let reachedCursor = false;
     while (page < maxPages) {
       const batch = await withTelegramRetry(
-        () => client!.getMessages(entity, { limit: 100, minId: cursorMinId }),
-        `getMessages:${username}`,
+        () => client!.getMessages(entity, {
+          limit: 100,
+          minId,
+          ...(offsetId > 0 ? { offsetId } : {}),
+        }),
+        `getMessages:${username}:inc${page}`,
       );
-      if (!batch.length) break;
+      if (!batch.length) {
+        reachedCursor = true;
+        break;
+      }
 
-      let maxInBatch = cursorMinId;
+      let oldestInBatch = Number.POSITIVE_INFINITY;
       for (const m of batch) {
-        if (m.id <= minId) continue;
+        if (m.id < oldestInBatch) oldestInBatch = m.id;
+        if (m.id <= minId) {
+          reachedCursor = true;
+          continue;
+        }
         if (seen.has(m.id)) continue;
         seen.add(m.id);
-        if (m.id > maxInBatch) maxInBatch = m.id;
         const mapped = mapGramMessage(username, m);
         if (mapped) results.push(mapped);
       }
 
-      if (batch.length < 100 || maxInBatch <= cursorMinId) break;
-      cursorMinId = maxInBatch;
+      if (reachedCursor || oldestInBatch <= minId + 1) {
+        reachedCursor = true;
+        break;
+      }
+      if (batch.length < 100) {
+        reachedCursor = true;
+        break;
+      }
+      const nextOffset = batch[batch.length - 1]?.id ?? 0;
+      if (!nextOffset || nextOffset === offsetId) {
+        reachedCursor = true;
+        break;
+      }
+      offsetId = nextOffset;
       page++;
       await sleep(BATCH_DELAY_MS);
     }
     return {
       messages: results.sort((a, b) => Number(a.id) - Number(b.id)),
       reachedCutoff: false,
-      noMoreMessages: true,
+      noMoreMessages: reachedCursor,
       nextOffsetId: 0,
       minIdInBatch: results.length ? Math.min(...results.map(m => Number(m.id))) : 0,
       maxIdInBatch: results.length ? Math.max(...results.map(m => Number(m.id))) : 0,

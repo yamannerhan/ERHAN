@@ -192,7 +192,7 @@ function parseStructuredJobLocation(
   };
 }
 
-function isOzelGuvenlikJob(title: string, description: string): boolean {
+export function isOzelGuvenlikJob(title: string, description: string): boolean {
   const t = `${title}\n${description}`.toLocaleLowerCase("tr-TR");
   const ok = /(?:özel\s+güvenlik|ögg\b|güvenlik\s+görevlisi|güvenlik\s+personeli|kimlikli\s+güvenlik|silahl[ıi]\s+güvenlik|silahs[ıi]z\s+güvenlik|5188|guvenlik\s+gorevlisi|ozel\s+guvenlik)/.test(t);
   if (!ok) return false;

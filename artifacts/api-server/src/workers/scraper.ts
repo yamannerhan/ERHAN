@@ -17,7 +17,11 @@ import {
   getElemanCityByIndex,
   parseElemanCursor,
   scrapeElemanCityPages,
+  fetchElemanListPage,
+  fetchElemanJobDetail,
   finalizeElemanListingText,
+  ELEMAN_CITY_LIST,
+  isOzelGuvenlikJob,
 } from "../services/eleman-client";
 import type { ElemanJobDetail } from "../services/eleman-client";
 import {
@@ -193,10 +197,15 @@ const WA_MESSAGE_PROCESS_DELAY_MS = 200;
 const WA_GROUP_GAP_MS = 1_500;
 const WA_INCREMENTAL_SCAN_INTERVAL_MS = 30 * 60 * 1000;
 const WA_CURSOR_OVERLAP_MS = 2 * 60 * 1000;
-const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
-const INCREMENTAL_SOURCE_GAP_MS = 60_000;
+/** İlk tarama bitince Telegram artımlı tarama (dk) — kaldığı mesajdan devam */
+const INCREMENTAL_SCAN_INTERVAL_MIN = 5;
+const INCREMENTAL_SOURCE_GAP_MS = 15_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
+/** Eleman.net otomatik mod: tüm şehirler (dk) */
+const ELEMAN_LISTEN_INTERVAL_MIN = 5;
+/** İlk taramada döngü başına kaç şehir */
+const ELEMAN_CITIES_PER_INITIAL_CYCLE = 4;
 /** Her döngüde geriye kaç sayfa (×100 mesaj) — 15 güne daha hızlı ulaşmak için */
 const BACKWARD_PAGES_PER_RUN = 8;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
@@ -745,18 +754,11 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // URL havuzu: ilk tarama dışında yeni ilan hemen herkese duyurulur (grace yok).
-  // Telegram/WA: ilk tarama + 10 dk grace sonrası herkese.
+  // İlk tarama dışında yeni ilan hemen herkese duyurulur (grace yok — kaçırma olmasın).
   try {
-    const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    const { ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    const ready = source.platform === "url_pool"
-      ? !isInitialScan
-      : isBotPublicAnnounceReady({
-        isInitialScan,
-        initialScanDone: source.initialScanDone,
-        initialScanCompletedAt: source.initialScanCompletedAt,
-      });
+    const ready = !isInitialScan;
     const sourceLabel = announceSourceLabel(source.platform);
     void announceNewListing({
       id: newListing.id,
@@ -1154,7 +1156,7 @@ async function checkTelegramSource(source: typeof sourcesTable.$inferSelect): Pr
   try {
     const fetchOpts = isInitialScan && phase === "forward"
       ? { minMessageId: lastId, maxPages: PAGES_PER_CYCLE }
-      : { minMessageId: lastId, maxPages: 15 };
+      : { minMessageId: lastId, maxPages: 25 };
     const result = await fetchWithReconnect(username, fetchOpts);
     messages = result.messages;
     noMoreMessages = result.noMoreMessages;
@@ -1343,17 +1345,12 @@ async function recoverStuckTelegramQueue(
 function scheduleNextTelegramCycle(hasActiveTelegram: boolean, delayMs = INITIAL_BACKFILL_INTERVAL_MS): void {
   if (telegramScraperPaused) return;
   void hasIncompleteInitialScan().then((incomplete) => {
-    if (incomplete) {
-      setTimeout(() => {
-        if (telegramScraperPaused) return;
-        void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
-      }, delayMs);
-    } else if (hasActiveTelegram) {
-      setTimeout(() => {
-        if (telegramScraperPaused) return;
-        void runScraperCycle(true).catch((e) => logger.error(e, "scraper: incremental chain error"));
-      }, INCREMENTAL_SOURCE_GAP_MS);
-    }
+    // Sadece ilk tarama zinciri; artımlı mod 5 dk ana interval ile çalışır
+    if (!incomplete || !hasActiveTelegram) return;
+    setTimeout(() => {
+      if (telegramScraperPaused) return;
+      void runScraperCycle(true).catch((e) => logger.error(e, "scraper: chained cycle error"));
+    }, delayMs);
   }).catch(() => {});
 }
 
@@ -1596,13 +1593,9 @@ async function publishElemanJob(
   const newListing = outcome;
 
   try {
-    const { isBotPublicAnnounceReady, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    const { ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    const ready = isBotPublicAnnounceReady({
-      isInitialScan: !source.initialScanDone,
-      initialScanDone: source.initialScanDone,
-      initialScanCompletedAt: source.initialScanCompletedAt,
-    });
+    const ready = !!source.initialScanDone;
     const sourceLabel = announceSourceLabel("eleman");
     void announceNewListing({
       id: newListing.id,
@@ -1620,59 +1613,69 @@ async function publishElemanJob(
   return "added";
 }
 
-async function checkElemanSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
+/** Otomatik mod: tüm şehirlerin 1. sayfasını tara; bilinen id'leri atla, yeni olanı hemen yayınla */
+async function checkElemanListenAllCities(
+  source: typeof sourcesTable.$inferSelect,
+): Promise<ScanStats> {
   const stats: ScanStats = { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: 0 };
-  const isInitialScan = !source.initialScanDone;
-  const { cityIndex, page } = parseElemanCursor(source.initialScanOffsetId);
-  const city = isInitialScan ? getElemanCityByIndex(cityIndex) : null;
-
-  if (isInitialScan && !city) {
-    await patchSourceProgress(source.id, {
-      initialScanDone: true,
-      initialScanProgress: 100,
-      initialScanOffsetId: null,
-      isScanning: false,
-      lastCheckedAt: new Date(),
-      lastError: null,
-    });
-    return stats;
-  }
-
   await patchSourceProgress(source.id, {
     isScanning: true,
-    lastError: isInitialScan
-      ? `Eleman.net: ${city?.name ?? "?"} taranıyor…`
-      : "Eleman.net: yeni ilanlar kontrol ediliyor…",
+    lastError: "Eleman.net: tüm şehirler taranıyor (otomatik)…",
   });
-  const jobs = await scrapeElemanCityPages(city?.slug ?? null, isInitialScan ? page : 1, 2);
-  stats.messagesRead = jobs.length;
 
-  for (const job of jobs) {
+  for (let i = 0; i < ELEMAN_CITY_LIST.length; i++) {
+    const city = ELEMAN_CITY_LIST[i]!;
     try {
-      const result = await publishElemanJob(source, job);
-      if (result === "added") {
-        stats.added++;
-        stats.found++;
-      } else if (result === "duplicate") {
-        stats.duplicates++;
-        stats.found++;
+      const listings = await fetchElemanListPage(city.slug, 1);
+      for (const listing of listings) {
+        stats.messagesRead++;
+        if (!isOzelGuvenlikJob(listing.title, "")) continue;
+        const existing = await findListingBySourceMessage(source.id, listing.id);
+        if (existing) {
+          stats.duplicates++;
+          stats.found++;
+          continue;
+        }
+        await sleep(200);
+        const detail = await fetchElemanJobDetail(listing);
+        if (!detail) continue;
+        try {
+          const result = await publishElemanJob(source, detail);
+          if (result === "added") {
+            stats.added++;
+            stats.found++;
+          } else if (result === "duplicate") {
+            stats.duplicates++;
+            stats.found++;
+          }
+        } catch (err) {
+          stats.errors++;
+          logger.warn({ err, jobId: listing.id, city: city.slug }, "scraper: Eleman listen publish failed");
+        }
       }
     } catch (err) {
       stats.errors++;
-      logger.warn({ err, sourceId: source.id, jobId: job.id }, "scraper: Eleman.net ilanı işlenemedi");
+      logger.warn({ err, city: city.slug }, "scraper: Eleman şehir listesi alınamadı");
     }
+    if (i % 10 === 9) {
+      await patchSourceProgress(source.id, {
+        lastError: `Eleman.net otomatik: ${city.name}… (+${stats.added} yeni)`,
+        lastScanMessagesRead: stats.messagesRead,
+        lastScanFound: stats.found,
+        lastScanAdded: stats.added,
+        lastScanDuplicates: stats.duplicates,
+        lastScanErrors: stats.errors,
+      });
+    }
+    await sleep(120);
   }
 
-  const nextCityIndex = isInitialScan ? cityIndex + 1 : 0;
-  const initialComplete = isInitialScan && nextCityIndex >= elemanCityCount();
-  const progress = isInitialScan
-    ? Math.min(100, Math.floor((nextCityIndex / elemanCityCount()) * 100))
-    : 100;
   await patchSourceProgress(source.id, {
     lastCheckedAt: new Date(),
-    initialScanDone: initialComplete || source.initialScanDone,
-    initialScanProgress: initialComplete ? 100 : progress,
-    initialScanOffsetId: isInitialScan && !initialComplete ? formatElemanCursor(nextCityIndex, 1) : null,
+    initialScanDone: true,
+    initialScanProgress: 100,
+    initialScanOffsetId: null,
+    checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
     lastScanMessagesRead: stats.messagesRead,
     lastScanFound: stats.found,
     lastScanAdded: stats.added,
@@ -1686,13 +1689,104 @@ async function checkElemanSource(source: typeof sourcesTable.$inferSelect): Prom
   return stats;
 }
 
+async function checkElemanSource(source: typeof sourcesTable.$inferSelect): Promise<ScanStats> {
+  const isInitialScan = !source.initialScanDone;
+
+  // Otomatik: her döngüde TÜM şehirler
+  if (!isInitialScan) {
+    return checkElemanListenAllCities(source);
+  }
+
+  const stats: ScanStats = { messagesRead: 0, found: 0, added: 0, duplicates: 0, errors: 0, maxId: 0 };
+  let { cityIndex } = parseElemanCursor(source.initialScanOffsetId);
+  const totalCities = elemanCityCount();
+
+  for (let step = 0; step < ELEMAN_CITIES_PER_INITIAL_CYCLE; step++) {
+    const city = getElemanCityByIndex(cityIndex);
+    if (!city) {
+      await patchSourceProgress(source.id, {
+        initialScanDone: true,
+        initialScanProgress: 100,
+        initialScanOffsetId: null,
+        checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
+        isScanning: false,
+        lastCheckedAt: new Date(),
+        lastError: null,
+      });
+      return stats;
+    }
+
+    await patchSourceProgress(source.id, {
+      isScanning: true,
+      lastError: `Eleman.net ilk tarama: ${city.name} (${cityIndex + 1}/${totalCities})…`,
+    });
+
+    const jobs = await scrapeElemanCityPages(city.slug, 1, 2);
+    stats.messagesRead += jobs.length;
+
+    for (const job of jobs) {
+      try {
+        const result = await publishElemanJob(source, job);
+        if (result === "added") {
+          stats.added++;
+          stats.found++;
+        } else if (result === "duplicate") {
+          stats.duplicates++;
+          stats.found++;
+        }
+      } catch (err) {
+        stats.errors++;
+        logger.warn({ err, sourceId: source.id, jobId: job.id }, "scraper: Eleman.net ilanı işlenemedi");
+      }
+    }
+
+    cityIndex += 1;
+    const initialComplete = cityIndex >= totalCities;
+    const progress = Math.min(100, Math.floor((cityIndex / totalCities) * 100));
+    await patchSourceProgress(source.id, {
+      lastCheckedAt: new Date(),
+      initialScanDone: initialComplete,
+      initialScanProgress: initialComplete ? 100 : Math.max(1, progress),
+      initialScanOffsetId: initialComplete ? null : formatElemanCursor(cityIndex, 1),
+      checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
+      lastScanMessagesRead: stats.messagesRead,
+      lastScanFound: stats.found,
+      lastScanAdded: stats.added,
+      lastScanDuplicates: stats.duplicates,
+      lastScanErrors: stats.errors,
+      lastScanPublished: stats.added,
+      totalImported: (source.totalImported ?? 0) + stats.added,
+      isScanning: !initialComplete && step < ELEMAN_CITIES_PER_INITIAL_CYCLE - 1,
+      lastError: initialComplete
+        ? null
+        : `Eleman.net ilk tarama… %${progress} → sonra 5dk tüm şehirler`,
+    });
+
+    if (initialComplete) {
+      logger.info({ added: stats.added, cities: totalCities }, "scraper: Eleman ilk tarama bitti → otomatik 5dk");
+      await patchSourceProgress(source.id, { isScanning: false, lastError: null });
+      return stats;
+    }
+  }
+
+  await patchSourceProgress(source.id, { isScanning: false });
+  return stats;
+}
+
 async function scanElemanSources(
   elemanSources: Array<typeof sourcesTable.$inferSelect>,
   force: boolean,
 ): Promise<void> {
   const now = Date.now();
   for (const source of elemanSources) {
-    const intervalMs = (source.checkInterval ?? 30) * 60_000;
+    const intervalMin = Math.min(
+      Math.max(source.checkInterval ?? ELEMAN_LISTEN_INTERVAL_MIN, 1),
+      30,
+    );
+    // Otomatik modda en fazla 5 dk; ilk taramada hemen devam
+    const intervalMs = source.initialScanDone
+      ? Math.min(intervalMin, ELEMAN_LISTEN_INTERVAL_MIN) * 60_000
+      : 0;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
     if (!force && source.initialScanDone && now - lastChecked < intervalMs) continue;
     if (source.isScanning || !(await acquireSourceScanLock(source.id))) continue;
@@ -1704,7 +1798,7 @@ async function scanElemanSources(
       if (fresh && !fresh.initialScanDone) {
         setTimeout(() => {
           void runScraperCycle(true).catch((e) => logger.error(e, "scraper: eleman chain error"));
-        }, 8_000);
+        }, 3_000);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2227,7 +2321,7 @@ export async function triggerElemanScan(): Promise<{ sourceId: number; created: 
       status: "active",
       autoPublish: true,
       requireApproval: false,
-      checkInterval: 30,
+      checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
       initialScanDone: false,
       initialScanProgress: 0,
     }).returning();
@@ -2252,7 +2346,7 @@ export async function resetAllElemanSources(opts?: { deferRescan?: boolean }): P
       status: "active",
       autoPublish: true,
       requireApproval: false,
-      checkInterval: 30,
+      checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
       initialScanDone: false,
       initialScanProgress: 1,
       initialScanOffsetId: formatElemanCursor(0, 1),
@@ -2296,7 +2390,7 @@ export async function resetAllElemanSources(opts?: { deferRescan?: boolean }): P
       lastError: null,
       active: true,
       status: "active",
-      checkInterval: 30,
+      checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
       autoPublish: true,
       requireApproval: false,
     }).where(eq(sourcesTable.platform, "eleman"));
@@ -2362,6 +2456,15 @@ export function startScraperWorker(): void {
         lastId: s.lastTelegramMessageId,
       }, "scraper: kaynak kaldığı yerden devam edecek");
     }
+
+    // Eleman: mevcut kaynakları 5dk / tüm şehir otomatik moda hizala
+    if (botPlatformEnabled("eleman")) {
+      await db.update(sourcesTable).set({
+        checkInterval: ELEMAN_LISTEN_INTERVAL_MIN,
+        active: true,
+        status: "active",
+      }).where(eq(sourcesTable.platform, "eleman"));
+    }
   });
   if (botPlatformEnabled("telegram")) {
     void ensureTelegramConnected(8).then((ok) => {
@@ -2375,7 +2478,7 @@ export function startScraperWorker(): void {
     : isBotTokenSet()
       ? "Bot API (GramJS bekleniyor)"
       : "GramJS bekleniyor";
-  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tamamlanınca gruplar 1dk arayla)`);
+  logger.info(`scraper: Telegram bot başlatıldı (${mode}, ${INITIAL_SCAN_DAYS}g ilk tarama, tamamlanınca 5dk artımlı)`);
 
   void refreshScraperInterval();
 
@@ -2393,6 +2496,22 @@ export function startScraperWorker(): void {
         }
       })();
     }, URL_POOL_LISTEN_INTERVAL_MIN * 60_000));
+  }
+
+  // Eleman.net: 5 dk'da bir tüm şehirler (otomatik mod)
+  if (botPlatformEnabled("eleman")) {
+    workerTimerHandles.add(setInterval(() => {
+      if (workerStopping) return;
+      void (async () => {
+        try {
+          const rows = await db.select().from(sourcesTable)
+            .where(and(eq(sourcesTable.platform, "eleman"), eq(sourcesTable.active, true)));
+          if (rows.length) await scanElemanSources(rows, false);
+        } catch (err) {
+          logger.warn({ err }, "scraper: eleman dinleme döngüsü hatası");
+        }
+      })();
+    }, ELEMAN_LISTEN_INTERVAL_MIN * 60_000));
   }
 
   workerTimerHandles.add(setInterval(() => {

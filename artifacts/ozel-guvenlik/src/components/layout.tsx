@@ -276,6 +276,11 @@ export function Layout({
         transports: ["websocket", "polling"],
         secure: window.location.protocol === "https:",
         withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 8000,
+        timeout: 25000,
       });
       const emitPresence = () => {
         if (!user?.id || !socket?.connected) return;
