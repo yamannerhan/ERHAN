@@ -235,15 +235,70 @@ function extractPostContent(html: string, ld?: Record<string, unknown> | null): 
   return "";
 }
 
+function parseHomepageLinks(html: string, baseUrl: string): NewsListItem[] {
+  const base = baseUrl.replace(/\/$/, "");
+  const out: string[] = [];
+  for (const m of html.matchAll(/href=["'](https?:\/\/(?:www\.)?guvenlikakademi\.com\/[^"'#?]+)["']/gi)) {
+    out.push(m[1]!);
+  }
+  for (const m of html.matchAll(/href=["'](\/[a-z0-9][^"'#?]*)["']/gi)) {
+    out.push(`${base}${m[1]}`);
+  }
+  const skip = /\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurs|firma|haber-ihbar|sponsor|wp-|feed|sitemap)\b/i;
+  const uniq = new Set<string>();
+  const items: NewsListItem[] = [];
+  for (const raw of out) {
+    try {
+      const u = new URL(raw);
+      u.hash = "";
+      u.search = "";
+      if (u.hostname.replace(/^www\./, "") !== "guvenlikakademi.com") continue;
+      const path = u.pathname.replace(/\/$/, "") || "/";
+      if (path === "/" || path.split("/").filter(Boolean).length !== 1) continue;
+      if (skip.test(path)) continue;
+      const href = u.href.replace(/\/$/, "");
+      if (uniq.has(href)) continue;
+      uniq.add(href);
+      items.push({ sourceUrl: href, lastmod: null });
+    } catch { /* ignore */ }
+  }
+  return items;
+}
+
 export const guvenlikAkademiProvider: NewsProvider = {
   key: "guvenlik_akademi",
 
   async getArticleList(opts) {
-    const base = opts.baseUrl.replace(/\/$/, "");
+    const base = opts.baseUrl.replace(/\/$/, "") || "https://guvenlikakademi.com";
     const listing = opts.listingUrl?.trim() || `${base}/sitemap.xml`;
-    const res = await fetchText(listing);
-    if (!res.ok) throw new Error(`Sitemap HTTP ${res.status}`);
-    return parseSitemap(res.text, base);
+    const byUrl = new Map<string, NewsListItem>();
+
+    // Ana sayfa haber kartları (en yeni)
+    try {
+      const home = await fetchText(`${base}/`);
+      if (home.ok) {
+        for (const item of parseHomepageLinks(home.text, base)) {
+          byUrl.set(item.sourceUrl, item);
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Sitemap — tam envanter
+    try {
+      const res = await fetchText(listing.includes("sitemap") ? listing : `${base}/sitemap.xml`);
+      if (res.ok) {
+        for (const item of parseSitemap(res.text, base)) {
+          const prev = byUrl.get(item.sourceUrl);
+          byUrl.set(item.sourceUrl, {
+            sourceUrl: item.sourceUrl,
+            lastmod: item.lastmod || prev?.lastmod || null,
+          });
+        }
+      }
+    } catch { /* ignore */ }
+
+    if (!byUrl.size) throw new Error("Güvenlik Akademi listesi boş / erişilemedi");
+    return [...byUrl.values()];
   },
 
   async getArticleDetail(url, hint) {

@@ -116,7 +116,7 @@ export function NewsAdminSection() {
     setScanning(true);
     try {
       await api("/admin/news/scan-now", "POST");
-      toast({ title: "Tarama başlatıldı", description: "4 kaynak sırayla taranıyor." });
+      toast({ title: "Tarama başlatıldı", description: "Güvenlik Akademi taranıyor." });
       setTimeout(() => { void load(); }, 5000);
     } catch (e) {
       toast({ title: "Tarama başlatılamadı", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
@@ -140,7 +140,7 @@ export function NewsAdminSection() {
 
   const resetNow = async () => {
     const ok = window.confirm(
-      "Tüm otomatik haberler silinecek ve 6 kaynaktan (son 10 gün) yeniden yüklenecek.\nManuel haberler kalır.\nDevam?",
+      "Tüm otomatik haberler silinecek ve yalnızca guvenlikakademi.com yeniden yüklenecek.\nDaha önce sildiğiniz haberler geri gelmez.\nManuel haberler kalır.\nDevam?",
     );
     if (!ok) return;
     setScanning(true);
@@ -262,7 +262,7 @@ export function NewsAdminSection() {
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
           <p className="text-xs text-slate-400 mt-1">
-            6 kaynak · Güncel liste detay tarama · kapak+özet zorunlu · 5 dk dinleme · ana sayfada en yeni 3
+            Tek kaynak: guvenlikakademi.com · detaylı içerik · kapak+özet · 5 dk dinleme · silinenler geri gelmez
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

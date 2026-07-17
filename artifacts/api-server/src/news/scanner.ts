@@ -1,15 +1,12 @@
 import { db, newsArticlesTable, newsImportLogsTable, newsSourcesTable, pool } from "@workspace/db";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, notInArray, or, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { ensureNewsSchema } from "./ensure";
 import { announceNewNews } from "../lib/news-announcements";
 import { findDuplicateArticle, sourceHash } from "./dedup";
 import { getProvider, providerKeyFromUrl } from "./providers";
-import { DEFAULT_BASE, DEFAULT_LISTING } from "./providers/ozel-guvenlik-ajans";
-import { DEFAULT_OGG_BASE, DEFAULT_OGG_LISTING } from "./providers/ogghaber";
-import { EGM_DUYURULAR_LISTING, EGM_HABERLER_LISTING } from "./providers/egm";
-import { DEFAULT_EGITIM_BASE, DEFAULT_EGITIM_LISTING } from "./providers/guvenlik-egitimi";
 import { cleanNewsTitle, mapPool, resolveNewsImageUrl, sleep, slugifyTr } from "./utils";
+import { isNewsUrlBlocked } from "./deleted-urls";
 
 const LOCK_KEY = "ozelguvenlik:news:scan";
 const LOCK_KEY_LIFECYCLE = "ozelguvenlik:news:lifecycle";
@@ -109,46 +106,18 @@ type SourceSeed = {
 
 const SOURCE_SEEDS: SourceSeed[] = [
   {
-    providerKey: "ozel_guvenlik_ajans",
-    name: "Özel Güvenlik Ajans",
-    baseUrl: DEFAULT_BASE,
-    listingUrl: DEFAULT_LISTING,
-  },
-  {
-    providerKey: "ogghaber",
-    name: "OGG Haber",
-    baseUrl: DEFAULT_OGG_BASE,
-    listingUrl: DEFAULT_OGG_LISTING,
-  },
-  {
     providerKey: "guvenlik_akademi",
     name: "Güvenlik Akademi",
     baseUrl: "https://guvenlikakademi.com",
     listingUrl: "https://guvenlikakademi.com/sitemap.xml",
   },
-  {
-    providerKey: "guvenlik_egitimi",
-    name: "Akademi Güvenlik Eğitimi",
-    baseUrl: DEFAULT_EGITIM_BASE,
-    listingUrl: DEFAULT_EGITIM_LISTING,
-  },
-  {
-    providerKey: "egm_haberler",
-    name: "EGM Özel Güvenlik Haberler",
-    baseUrl: "https://www.egm.gov.tr",
-    listingUrl: EGM_HABERLER_LISTING,
-  },
-  {
-    providerKey: "egm_duyurular",
-    name: "EGM Özel Güvenlik Duyurular",
-    baseUrl: "https://www.egm.gov.tr",
-    listingUrl: EGM_DUYURULAR_LISTING,
-  },
 ];
 
-/** 6 aktif kaynak · lookback 10 gün · sürekli arka plan tarama */
+/** Tek kaynak: guvenlikakademi.com · lookback 10 gün · sürekli dinleme */
 export async function ensureDefaultNewsSource(): Promise<void> {
   await ensureNewsSchema();
+
+  const seedKeys = SOURCE_SEEDS.map((s) => s.providerKey);
 
   for (const seed of SOURCE_SEEDS) {
     const [row] = await db.select()
@@ -167,7 +136,7 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         initialLookbackDays: NEWS_LOOKBACK_DAYS,
         importMode: "full",
         downloadImages: false,
-        showSource: true,
+        showSource: false,
         showSourceLink: false,
         publishMode: "auto",
         initialScanDone: false,
@@ -185,16 +154,22 @@ export async function ensureDefaultNewsSource(): Promise<void> {
         initialLookbackDays: NEWS_LOOKBACK_DAYS,
         importMode: "full",
         publishMode: "auto",
-        showSource: true,
+        showSource: false,
         showSourceLink: false,
         scanIntervalMinutes: 5,
-        // Lookback / liste URL değişti veya kaynak yeniden açıldıysa hemen tara
         ...((lookbackGrew || reactivated || listingChanged)
           ? { lastScanAt: null as Date | null, initialScanDone: false }
           : {}),
         updatedAt: new Date(),
       }).where(eq(newsSourcesTable.id, row.id));
     }
+  }
+
+  // Diğer tüm kaynakları kapat — yalnızca Akademi
+  if (seedKeys.length) {
+    await db.update(newsSourcesTable)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(notInArray(newsSourcesTable.providerKey, seedKeys));
   }
 
   // Kapak veya özeti olmayan otomatik haberleri yayından kaldır
@@ -272,9 +247,17 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
       if (Date.now() - started > MAX_SCAN_MS) return;
       try {
         await sleep(220);
+        if (await isNewsUrlBlocked(item.sourceUrl)) {
+          stats.skipped += 1;
+          return;
+        }
         const article = await provider.getArticleDetail(item.sourceUrl, { lastmod: item.lastmod });
         if (!article) {
           stats.failed += 1;
+          return;
+        }
+        if (await isNewsUrlBlocked(article.sourceUrl, article.canonicalUrl)) {
+          stats.skipped += 1;
           return;
         }
         // Özet yoksa içerikten üret; tamamen boşsa atla
@@ -350,7 +333,7 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
           category: article.category,
           authorName: article.authorName,
           sourceId: source.id,
-          sourceName: source.name,
+          sourceName: null,
           sourceUrl: article.sourceUrl,
           canonicalUrl: article.canonicalUrl,
           sourceExternalId: article.sourceUrl.split("/").filter(Boolean).pop() || null,
@@ -486,6 +469,7 @@ export async function repairNewsArticles(limit = 80): Promise<{ repaired: number
     if (!needs && !stale) continue;
 
     try {
+      if (await isNewsUrlBlocked(sourceUrl)) { failed += 1; continue; }
       const provider = getProvider(providerKeyFromUrl(sourceUrl));
       if (!provider) { failed += 1; continue; }
       await sleep(300);
@@ -592,7 +576,7 @@ export function startNewsWorker(): void {
   lifecycleHandle = setInterval(() => {
     void maybeRunLifecycleAt3am().catch((err) => logger.warn({ err }, "news: lifecycle tick failed"));
   }, 15 * 60_000);
-  logger.info("news: worker started (6 kaynak, 10g lookback, 5dk dinleme, 20g arşiv+7g silme)");
+  logger.info("news: worker started (guvenlikakademi.com, 10g lookback, 5dk dinleme, 20g arşiv+7g silme)");
 }
 
 export function stopNewsWorker(): void {

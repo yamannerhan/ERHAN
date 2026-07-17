@@ -92,6 +92,21 @@ export async function ensureNewsSchema(): Promise<void> {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_articles_archived_idx ON news_articles (status, archived_at)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS news_sources_active_idx ON news_sources (is_active)`);
     await db.execute(sql`ALTER TABLE news_sources ALTER COLUMN initial_lookback_days SET DEFAULT 10`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS news_deleted_urls (
+        id SERIAL PRIMARY KEY,
+        source_url TEXT NOT NULL,
+        canonical_url TEXT,
+        source_hash TEXT,
+        deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        deleted_by INTEGER,
+        reason TEXT
+      )
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS news_deleted_urls_source_url_uidx
+      ON news_deleted_urls (source_url)
+    `);
     ready = true;
   } catch (e) {
     logger.warn({ err: e }, "news: schema ensure failed");

@@ -98,7 +98,6 @@ export default function HaberDetayPage() {
               {(article.publishedAt || article.sourcePublishedAt)
                 ? new Date(article.publishedAt || article.sourcePublishedAt || "").toLocaleString("tr-TR")
                 : ""}
-              {article.sourceName ? ` · ${article.sourceName}` : ""}
             </p>
             {article.coverImage && (
               <img

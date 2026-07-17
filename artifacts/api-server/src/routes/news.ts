@@ -73,7 +73,7 @@ function publicArticle(row: typeof newsArticlesTable.$inferSelect) {
     isFeatured: row.isFeatured,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
-    sourceName: row.sourceName,
+    sourceName: row.isManual ? row.sourceName : null,
     sourceUrl: row.isManual && row.sourceUrl && !row.sourceUrl.startsWith("manual://")
       ? row.sourceUrl
       : null,
@@ -259,7 +259,7 @@ router.get("/news/:slug", async (req, res) => {
     res.json({
       article: {
         ...publicArticle(row),
-        showSource: true,
+        showSource: false,
         showSourceLink: false,
       },
     });
@@ -350,6 +350,17 @@ router.patch("/admin/news/:id", authMiddleware, requireAdmin, async (req, res) =
 router.delete("/admin/news/:id", authMiddleware, requireAdmin, async (req, res) => {
   await ensureNewsSchema();
   const id = Number(req.params.id);
+  const [row] = await db.select().from(newsArticlesTable).where(eq(newsArticlesTable.id, id)).limit(1);
+  if (row) {
+    const { rememberDeletedNewsUrl } = await import("../news/deleted-urls");
+    await rememberDeletedNewsUrl({
+      sourceUrl: row.sourceUrl,
+      canonicalUrl: row.canonicalUrl,
+      sourceHash: row.sourceHash,
+      deletedBy: req.user?.id ?? null,
+      reason: "admin_delete",
+    });
+  }
   await db.delete(newsArticlesTable).where(eq(newsArticlesTable.id, id));
   res.json({ success: true });
 });
@@ -460,7 +471,7 @@ router.post("/admin/news/reset", authMiddleware, requireAdmin, async (_req, res)
     res.json({
       success: true,
       deleted,
-      message: `${deleted} otomatik haber silindi; yeniden tarama başladı`,
+      message: `${deleted} otomatik haber silindi; yalnızca Güvenlik Akademi yeniden taranıyor (silinenler geri gelmez)`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : "Sıfırlama başarısız" });

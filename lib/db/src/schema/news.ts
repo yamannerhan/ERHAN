@@ -100,6 +100,24 @@ export const newsImportLogsTable = pgTable(
   ],
 );
 
+/** Admin silinen haberler — reset/tarama sonrası geri yüklenmez */
+export const newsDeletedUrlsTable = pgTable(
+  "news_deleted_urls",
+  {
+    id: serial("id").primaryKey(),
+    sourceUrl: text("source_url").notNull(),
+    canonicalUrl: text("canonical_url"),
+    sourceHash: text("source_hash"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedBy: integer("deleted_by"),
+    reason: text("reason"),
+  },
+  (t) => [
+    uniqueIndex("news_deleted_urls_source_url_uidx").on(t.sourceUrl),
+  ],
+);
+
 export type NewsSource = typeof newsSourcesTable.$inferSelect;
 export type NewsArticle = typeof newsArticlesTable.$inferSelect;
 export type NewsImportLog = typeof newsImportLogsTable.$inferSelect;
+export type NewsDeletedUrl = typeof newsDeletedUrlsTable.$inferSelect;
