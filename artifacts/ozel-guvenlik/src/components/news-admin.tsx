@@ -140,7 +140,7 @@ export function NewsAdminSection() {
 
   const resetNow = async () => {
     const ok = window.confirm(
-      "Tüm otomatik haberler silinecek ve yalnızca guvenlikakademi.com yeniden yüklenecek.\nDaha önce sildiğiniz haberler geri gelmez.\nManuel haberler kalır.\nDevam?",
+      "Tüm otomatik haberler silinecek ve yalnızca guvenlikakademi.com (son 2 ay) yeniden yüklenecek.\nDaha önce sildiğiniz haberler geri gelmez.\nManuel haberler kalır.\nDevam?",
     );
     if (!ok) return;
     setScanning(true);
@@ -262,7 +262,7 @@ export function NewsAdminSection() {
         <div>
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2"><Newspaper className="w-5 h-5" /> Haber Yönetimi</h3>
           <p className="text-xs text-slate-400 mt-1">
-            Tek kaynak: guvenlikakademi.com · detaylı içerik · kapak+özet · 5 dk dinleme · silinenler geri gelmez
+            Tek kaynak: guvenlikakademi.com · son 2 ay · detaylı içerik · kapak tekil · 2 ayı dolan silinir
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

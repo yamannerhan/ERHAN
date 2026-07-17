@@ -471,7 +471,7 @@ router.post("/admin/news/reset", authMiddleware, requireAdmin, async (_req, res)
     res.json({
       success: true,
       deleted,
-      message: `${deleted} otomatik haber silindi; yalnızca Güvenlik Akademi yeniden taranıyor (silinenler geri gelmez)`,
+      message: `${deleted} otomatik haber silindi; yalnızca Güvenlik Akademi (son 2 ay) yeniden taranıyor (silinenler geri gelmez)`,
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : "Sıfırlama başarısız" });

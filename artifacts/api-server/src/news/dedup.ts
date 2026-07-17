@@ -85,7 +85,7 @@ export async function findDuplicateArticle(input: {
       return { id: row.id, reason: "title" };
     }
     const simTitle = textSimilarity(input.title, row.title);
-    if (simTitle >= 0.88) {
+    if (simTitle >= 0.92) {
       return { id: row.id, reason: "title_similarity" };
     }
     const otherFp = contentFingerprint(row.content || row.excerpt || row.title);
@@ -96,7 +96,7 @@ export async function findDuplicateArticle(input: {
       stripHtml(input.contentHtml || input.excerpt || "").slice(0, 800),
       stripHtml(row.content || row.excerpt || "").slice(0, 800),
     );
-    if (simBody >= 0.82 && simTitle >= 0.55) {
+    if (simBody >= 0.9 && simTitle >= 0.7) {
       return { id: row.id, reason: "content_similarity" };
     }
   }

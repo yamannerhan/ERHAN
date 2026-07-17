@@ -11,12 +11,12 @@ import { isNewsUrlBlocked } from "./deleted-urls";
 const LOCK_KEY = "ozelguvenlik:news:scan";
 const LOCK_KEY_LIFECYCLE = "ozelguvenlik:news:lifecycle";
 const MAX_SCAN_MS = 18 * 60_000;
-/** Yayın süresi: 20 gün sonra arşiv */
-export const NEWS_PUBLISH_DAYS = 20;
-/** Arşivde ek 7 gün, sonra sil */
-export const NEWS_ARCHIVE_DAYS = 7;
-/** İlk / varsayılan geriye bakış */
-export const NEWS_LOOKBACK_DAYS = 10;
+/** Yayın / saklama: 2 ay sonra sil */
+export const NEWS_PUBLISH_DAYS = 60;
+/** Arşivde kısa bekleyiş sonra sil */
+export const NEWS_ARCHIVE_DAYS = 1;
+/** Geriye bakış: 2 ay */
+export const NEWS_LOOKBACK_DAYS = 60;
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let lifecycleHandle: ReturnType<typeof setInterval> | null = null;
@@ -48,12 +48,12 @@ async function uniqueSlug(base: string): Promise<string> {
   return `${slug}-${Date.now()}`;
 }
 
-/** 20g → archived, arşivde +7g → sil. Manuel haberler dokunulmaz. */
+/** 2 ayı dolan otomatik haberleri sil. Manuel haberler dokunulmaz. */
 export async function runNewsLifecycle(): Promise<{ archived: number; deleted: number }> {
   await ensureNewsSchema();
-  const publishCutoff = new Date(Date.now() - NEWS_PUBLISH_DAYS * 24 * 60 * 60 * 1000);
-  const deleteCutoff = new Date(Date.now() - NEWS_ARCHIVE_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - NEWS_PUBLISH_DAYS * 24 * 60 * 60 * 1000);
 
+  // Önce işaretle (opsiyonel arşiv)
   const archivedRows = await db.update(newsArticlesTable).set({
     status: "archived",
     archivedAt: new Date(),
@@ -64,28 +64,37 @@ export async function runNewsLifecycle(): Promise<{ archived: number; deleted: n
     or(
       and(
         sql`${newsArticlesTable.sourcePublishedAt} IS NOT NULL`,
-        lt(newsArticlesTable.sourcePublishedAt, publishCutoff),
+        lt(newsArticlesTable.sourcePublishedAt, cutoff),
       ),
       and(
         sql`${newsArticlesTable.sourcePublishedAt} IS NULL`,
-        lt(newsArticlesTable.importedAt, publishCutoff),
+        lt(newsArticlesTable.importedAt, cutoff),
       ),
     )!,
   )).returning({ id: newsArticlesTable.id });
 
+  // 2 ayı dolanları (ve arşivdekileri) sil
   const deletedRows = await db.delete(newsArticlesTable)
     .where(and(
       eq(newsArticlesTable.isManual, false),
-      eq(newsArticlesTable.status, "archived"),
-      sql`${newsArticlesTable.archivedAt} IS NOT NULL`,
-      lt(newsArticlesTable.archivedAt, deleteCutoff),
+      or(
+        eq(newsArticlesTable.status, "archived"),
+        and(
+          sql`${newsArticlesTable.sourcePublishedAt} IS NOT NULL`,
+          lt(newsArticlesTable.sourcePublishedAt, cutoff),
+        ),
+        and(
+          sql`${newsArticlesTable.sourcePublishedAt} IS NULL`,
+          lt(newsArticlesTable.importedAt, cutoff),
+        ),
+      )!,
     ))
     .returning({ id: newsArticlesTable.id });
 
   if (archivedRows.length || deletedRows.length) {
     logger.info(
-      { archived: archivedRows.length, deleted: deletedRows.length },
-      "news: lifecycle archive/delete",
+      { archived: archivedRows.length, deleted: deletedRows.length, days: NEWS_PUBLISH_DAYS },
+      "news: lifecycle 2ay silme",
     );
   }
   return { archived: archivedRows.length, deleted: deletedRows.length };
@@ -238,7 +247,7 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
         return item.lastmod.getTime() >= cutoff.getTime();
       })
       .sort((a, b) => (b.lastmod?.getTime() ?? 0) - (a.lastmod?.getTime() ?? 0))
-      .slice(0, source.initialScanDone ? 160 : 220);
+      .slice(0, source.initialScanDone ? 280 : 450);
 
     stats.discovered = candidates.length;
 
@@ -576,7 +585,7 @@ export function startNewsWorker(): void {
   lifecycleHandle = setInterval(() => {
     void maybeRunLifecycleAt3am().catch((err) => logger.warn({ err }, "news: lifecycle tick failed"));
   }, 15 * 60_000);
-  logger.info("news: worker started (guvenlikakademi.com, 10g lookback, 5dk dinleme, 20g arşiv+7g silme)");
+  logger.info("news: worker started (guvenlikakademi.com, 60g lookback, 5dk dinleme, 60g sonra silme)");
 }
 
 export function stopNewsWorker(): void {

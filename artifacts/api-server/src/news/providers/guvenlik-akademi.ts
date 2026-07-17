@@ -11,19 +11,51 @@ import {
 } from "../utils";
 import type { NewsListItem, NewsProvider, NormalizedArticle } from "./types";
 
+const HOST = "guvenlikakademi.com";
+
+/** Tek biçim URL — çift kayıt / www farkı olmasın */
+export function normalizeAkademiUrl(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    u.hash = "";
+    u.search = "";
+    u.hostname = HOST;
+    u.protocol = "https:";
+    return u.href.replace(/\/$/, "");
+  } catch {
+    return raw.trim().replace(/\/$/, "");
+  }
+}
+
+function isArticlePath(pathname: string): boolean {
+  const path = pathname.replace(/\/$/, "") || "/";
+  if (path === "/") return false;
+  if (path.split("/").filter(Boolean).length !== 1) return false;
+  return !/\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurs|firma|haber-ihbar|sponsor|wp-|feed|sitemap)\b/i.test(path);
+}
+
 function parseSitemap(xml: string, baseUrl: string): NewsListItem[] {
   const out: NewsListItem[] = [];
+  const seen = new Set<string>();
   const blocks = xml.match(/<url>[\s\S]*?<\/url>/gi) || [];
   for (const block of blocks) {
     const loc = (block.match(/<loc>([^<]+)<\/loc>/i) || [])[1]?.trim();
     if (!loc) continue;
-    if (!loc.startsWith(baseUrl.replace(/\/$/, ""))) continue;
-    if (loc.replace(/\/$/, "") === baseUrl.replace(/\/$/, "")) continue;
-    if (/\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim)\b/i.test(loc)) continue;
+    let href: string;
+    try {
+      const u = new URL(loc);
+      if (u.hostname.replace(/^www\./, "") !== HOST) continue;
+      if (!isArticlePath(u.pathname)) continue;
+      href = normalizeAkademiUrl(loc);
+    } catch {
+      continue;
+    }
+    if (seen.has(href)) continue;
+    seen.add(href);
     const lastmodRaw = (block.match(/<lastmod>([^<]+)<\/lastmod>/i) || [])[1]?.trim();
     const lastmod = lastmodRaw ? new Date(lastmodRaw) : null;
     out.push({
-      sourceUrl: loc,
+      sourceUrl: href,
       lastmod: lastmod && !Number.isNaN(lastmod.getTime()) ? lastmod : null,
     });
   }
@@ -67,14 +99,13 @@ function mapCategory(raw: string | null | undefined): string {
   if (/mevzuat/.test(t)) return "Mevzuat";
   if (/eğitim|egitim|sınav|sinav/.test(t)) return "Eğitim ve Sınav";
   if (/maaş|maas|hak/.test(t)) return "Maaş ve Haklar";
-  if (/teknoloji|kamera|cctv/.test(t)) return "Teknoloji";
+  if (/teknoloji|kamera|cctv|x-ray|dedektör|dedektor/.test(t)) return "Teknoloji";
   if (/rehber/.test(t)) return "Rehberler";
   if (/firma|kurum/.test(t)) return "Firma ve Kurumlar";
   if (/sektör|sektor|haber/.test(t)) return "Sektör Haberleri";
   return "Genel Haberler";
 }
 
-/** Sayfadaki kategori linkinden oku (ör. Sektör Haberleri) */
 function extractPageCategory(html: string): string | null {
   const m = html.match(/bi-folder[\s\S]{0,240}<a[^>]*>\s*([^<]+?)\s*<\/a>/i)
     || html.match(/class=["'][^"']*badge[^"']*["'][^>]*>\s*([^<]+?)\s*</i);
@@ -92,7 +123,7 @@ function parseTrDate(html: string): Date | null {
 
 function isBadCover(url: string): boolean {
   const u = url.toLowerCase();
-  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes|default-user|emoji/.test(u);
+  return /\/logo\/|favicon|sprite|\/icon|avatar|placeholder|1x1|pixel|banner-ad|adservice|gravatar|wp-includes|default-user|emoji|sponsor/.test(u);
 }
 
 function extractLdImage(ld: Record<string, unknown> | null): string | null {
@@ -120,7 +151,6 @@ function extractLdArticleBody(ld: Record<string, unknown> | null): string {
   if (typeof body !== "string" || body.trim().length < 40) return "";
   const plain = stripHtml(body);
   if (plain.length < 40) return "";
-  // JSON-LD gövdesi düz metin olabilir
   if (/<[a-z][\s\S]*>/i.test(body)) return body;
   return plain
     .split(/\n{2,}/)
@@ -130,7 +160,6 @@ function extractLdArticleBody(ld: Record<string, unknown> | null): string {
     .join("\n");
 }
 
-/** class="post-content ..." bloğunu div derinliğiyle güvenli çıkar (sidebar/ilgili haber karışmasın) */
 function extractBalancedByClass(html: string, className: string): string {
   const re = new RegExp(`<div[^>]*class=["'][^"']*\\b${className}\\b[^"']*["'][^>]*>`, "i");
   const open = html.match(re);
@@ -147,9 +176,7 @@ function extractBalancedByClass(html: string, className: string): string {
       i = nextOpen + 4;
     } else {
       depth -= 1;
-      if (depth === 0) {
-        return html.slice(startContent, nextClose);
-      }
+      if (depth === 0) return html.slice(startContent, nextClose);
       i = nextClose + 6;
     }
   }
@@ -158,57 +185,55 @@ function extractBalancedByClass(html: string, className: string): string {
 
 function stripJunkBlocks(html: string): string {
   let out = html;
-  // Paylaş / ilgili / benzer / yorum bloklarını at
-  out = out.replace(/<(?:div|section|aside)[^>]*(?:share|paylas|related|ilgili|benzer|comment|yorum|sidebar|widget)[^>]*>[\s\S]*?<\/(?:div|section|aside)>/gi, "");
+  out = out.replace(/<(?:div|section|aside)[^>]*(?:share|paylas|related|ilgili|benzer|comment|yorum|sidebar|widget|popular|populer|rastgele)[^>]*>[\s\S]*?<\/(?:div|section|aside)>/gi, "");
   out = out.replace(/<a[^>]*(?:facebook|twitter|whatsapp|telegram|sharer)[^>]*>[\s\S]*?<\/a>/gi, "");
   return out;
 }
 
-function pickCoverImage(html: string, pageUrl: string, ld?: Record<string, unknown> | null): string | null {
-  const slug = (pageUrl.split("/").filter(Boolean).pop() || "").toLowerCase();
-  const candidates: string[] = [];
-
-  const push = (raw: string | null | undefined) => {
+/**
+ * Kapak: yalnızca bu haberin og/json-ld/içerik görseli.
+ * Sayfadaki “ilgili / rastgele” görselleri ASLA alınmaz (aynı resmi farklı habere yapıştırma).
+ */
+function pickCoverImage(
+  html: string,
+  pageUrl: string,
+  ld?: Record<string, unknown> | null,
+  contentHtml?: string,
+): string | null {
+  const pushOk = (raw: string | null | undefined): string | null => {
     const v = resolveNewsImageUrl(raw ? decodeHtmlEntities(raw) : null, pageUrl);
-    if (v && !isBadCover(v)) candidates.push(v);
+    if (!v || isBadCover(v)) return null;
+    return v;
   };
 
-  // 0) JSON-LD image
-  push(extractLdImage(ld ?? null));
+  const og = pushOk(metaContent(html, "og:image"))
+    || pushOk(metaContent(html, "og:image:secure_url"));
+  if (og) return og;
 
-  // 1) og / twitter
-  for (const prop of ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]) {
-    push(metaContent(html, prop));
-  }
+  const tw = pushOk(metaContent(html, "twitter:image"))
+    || pushOk(metaContent(html, "twitter:image:src"));
+  if (tw) return tw;
 
-  // 2) h1 öncesi featured img (src / data-src)
-  const h1idx = html.search(/<h1[\s>]/i);
-  if (h1idx > 0) {
-    const before = html.slice(Math.max(0, h1idx - 4500), h1idx);
-    for (const m of before.matchAll(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/gi)) {
-      push(m[1]);
+  const ldImg = pushOk(extractLdImage(ld ?? null));
+  if (ldImg) return ldImg;
+
+  if (contentHtml) {
+    for (const m of contentHtml.matchAll(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/gi)) {
+      const hit = pushOk(m[1]);
+      if (hit) return hit;
     }
   }
 
-  // 3) tüm /uploads/posts/ görselleri
-  for (const m of html.matchAll(/(?:src|content|data-src)=["']([^"']*\/uploads\/posts\/[^"']+)["']/gi)) {
-    push(m[1]);
+  // h1 öncesi featured — yalnızca ilk img
+  const h1idx = html.search(/<h1[\s>]/i);
+  if (h1idx > 0) {
+    const before = html.slice(Math.max(0, h1idx - 3500), h1idx);
+    const m = before.match(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/i);
+    const hit = pushOk(m?.[1]);
+    if (hit) return hit;
   }
 
-  // 4) wp-content/uploads genel
-  for (const m of html.matchAll(/(?:src|content)=["']([^"']*\/wp-content\/uploads\/[^"']+\.(?:jpe?g|png|webp|gif))["']/gi)) {
-    push(m[1]);
-  }
-
-  const uniq = [...new Set(candidates)];
-  if (!uniq.length) return null;
-
-  const slugKey = slug.replace(/[^a-z0-9-]/g, "").slice(0, 32);
-  const matched = uniq.find((u) => slugKey.length > 8 && u.toLowerCase().includes(slugKey.slice(0, 20)));
-  if (matched) return matched;
-
-  const post = uniq.find((u) => /\/uploads\/posts\//i.test(u) || /\/wp-content\/uploads\//i.test(u));
-  return post || uniq[0]!;
+  return null;
 }
 
 function extractPostContent(html: string, ld?: Record<string, unknown> | null): string {
@@ -228,63 +253,85 @@ function extractPostContent(html: string, ld?: Record<string, unknown> | null): 
   const ldBody = extractLdArticleBody(ld ?? null);
   if (ldBody) return ldBody;
 
-  // Son çare: yalnızca ilk birkaç <p>
   const ps = [...html.matchAll(/<p\b[^>]*>[\s\S]*?<\/p>/gi)].map((m) => m[0]);
   const joined = ps.slice(0, 16).join("\n");
   if (stripHtml(joined).length > 80) return joined;
   return "";
 }
 
-function parseHomepageLinks(html: string, baseUrl: string): NewsListItem[] {
-  const base = baseUrl.replace(/\/$/, "");
-  const out: string[] = [];
+function parseListingPageLinks(html: string): NewsListItem[] {
+  const seen = new Set<string>();
+  const items: NewsListItem[] = [];
   for (const m of html.matchAll(/href=["'](https?:\/\/(?:www\.)?guvenlikakademi\.com\/[^"'#?]+)["']/gi)) {
-    out.push(m[1]!);
+    try {
+      const href = normalizeAkademiUrl(m[1]!);
+      const path = new URL(href).pathname;
+      if (!isArticlePath(path)) continue;
+      if (seen.has(href)) continue;
+      seen.add(href);
+      items.push({ sourceUrl: href, lastmod: null });
+    } catch { /* ignore */ }
   }
   for (const m of html.matchAll(/href=["'](\/[a-z0-9][^"'#?]*)["']/gi)) {
-    out.push(`${base}${m[1]}`);
-  }
-  const skip = /\/(kategori|category|tag|sayfa|page|giris|uye|admin|sinavlar|iletisim|hakkimizda|gizlilik|kurs|firma|haber-ihbar|sponsor|wp-|feed|sitemap)\b/i;
-  const uniq = new Set<string>();
-  const items: NewsListItem[] = [];
-  for (const raw of out) {
     try {
-      const u = new URL(raw);
-      u.hash = "";
-      u.search = "";
-      if (u.hostname.replace(/^www\./, "") !== "guvenlikakademi.com") continue;
-      const path = u.pathname.replace(/\/$/, "") || "/";
-      if (path === "/" || path.split("/").filter(Boolean).length !== 1) continue;
-      if (skip.test(path)) continue;
-      const href = u.href.replace(/\/$/, "");
-      if (uniq.has(href)) continue;
-      uniq.add(href);
+      const href = normalizeAkademiUrl(`https://${HOST}${m[1]}`);
+      const path = new URL(href).pathname;
+      if (!isArticlePath(path)) continue;
+      if (seen.has(href)) continue;
+      seen.add(href);
       items.push({ sourceUrl: href, lastmod: null });
     } catch { /* ignore */ }
   }
   return items;
 }
 
+/** Kart tarihini liste HTML’inden yakala (DD.MM.YYYY) */
+function attachDatesFromListing(html: string, items: NewsListItem[]): void {
+  for (const item of items) {
+    if (item.lastmod) continue;
+    const slug = item.sourceUrl.split("/").pop() || "";
+    if (slug.length < 8) continue;
+    const idx = html.indexOf(slug);
+    if (idx < 0) continue;
+    const window = html.slice(Math.max(0, idx - 200), idx + slug.length + 400);
+    const dm = window.match(/(\d{2})[./](\d{2})[./](\d{4})/);
+    if (!dm) continue;
+    const d = new Date(`${dm[3]}-${dm[2]}-${dm[1]}T12:00:00+03:00`);
+    if (!Number.isNaN(d.getTime())) item.lastmod = d;
+  }
+}
+
 export const guvenlikAkademiProvider: NewsProvider = {
   key: "guvenlik_akademi",
 
   async getArticleList(opts) {
-    const base = opts.baseUrl.replace(/\/$/, "") || "https://guvenlikakademi.com";
-    const listing = opts.listingUrl?.trim() || `${base}/sitemap.xml`;
+    const base = (opts.baseUrl || `https://${HOST}`).replace(/\/$/, "");
     const byUrl = new Map<string, NewsListItem>();
 
-    // Ana sayfa haber kartları (en yeni)
-    try {
-      const home = await fetchText(`${base}/`);
-      if (home.ok) {
-        for (const item of parseHomepageLinks(home.text, base)) {
-          byUrl.set(item.sourceUrl, item);
+    // Ana sayfa + sayfalar (1..8) — screenshot’taki pagination
+    for (let page = 1; page <= 8; page++) {
+      const pageUrl = page === 1 ? `${base}/` : `${base}/page/${page}/`;
+      try {
+        const res = await fetchText(pageUrl);
+        if (!res.ok) break;
+        const items = parseListingPageLinks(res.text);
+        if (!items.length && page > 1) break;
+        attachDatesFromListing(res.text, items);
+        for (const item of items) {
+          const prev = byUrl.get(item.sourceUrl);
+          byUrl.set(item.sourceUrl, {
+            sourceUrl: item.sourceUrl,
+            lastmod: item.lastmod || prev?.lastmod || null,
+          });
         }
+      } catch {
+        if (page > 1) break;
       }
-    } catch { /* ignore */ }
+    }
 
-    // Sitemap — tam envanter
+    // Sitemap tamamlayıcı
     try {
+      const listing = opts.listingUrl?.trim() || `${base}/sitemap.xml`;
       const res = await fetchText(listing.includes("sitemap") ? listing : `${base}/sitemap.xml`);
       if (res.ok) {
         for (const item of parseSitemap(res.text, base)) {
@@ -302,7 +349,8 @@ export const guvenlikAkademiProvider: NewsProvider = {
   },
 
   async getArticleDetail(url, hint) {
-    const res = await fetchText(url);
+    const pageUrl = normalizeAkademiUrl(url);
+    const res = await fetchText(pageUrl);
     if (!res.ok) return null;
     const html = res.text;
     const ld = extractJsonLd(html);
@@ -318,21 +366,17 @@ export const guvenlikAkademiProvider: NewsProvider = {
 
     const rawContent = extractPostContent(html, ld);
     let contentHtml = sanitizeNewsHtml(rawContent);
-    contentHtml = absolutizeContentImages(contentHtml, url);
+    contentHtml = absolutizeContentImages(contentHtml, pageUrl);
     contentHtml = decodeHtmlEntities(contentHtml);
     const plain = stripHtml(contentHtml);
     if (plain.length < 40) return null;
 
-    const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title));
-    const coverImage = pickCoverImage(html, url, ld);
-    const category = extractPageCategory(html) || mapCategory(title + " " + excerpt);
+    const excerpt = makeExcerpt(String(ld?.description || ogDesc || plain || title), 280);
+    const coverImage = pickCoverImage(html, pageUrl, ld, contentHtml);
+    if (!coverImage) return null;
+    if (!excerpt || excerpt.length < 8) return null;
 
-    // Kapak yoksa içerikten ilk uygun görseli dene
-    const coverFinal = coverImage
-      || resolveNewsImageUrl(
-        (contentHtml.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i) || [])[1],
-        url,
-      );
+    const category = extractPageCategory(html) || mapCategory(title + " " + excerpt);
 
     let sourcePublishedAt: Date | null = null;
     let sourcePublishedMissing = false;
@@ -354,15 +398,17 @@ export const guvenlikAkademiProvider: NewsProvider = {
         : String((ld.author as { name?: string }).name || "") || null
       : null;
 
+    const canonicalNorm = normalizeAkademiUrl(absolutizeUrl(pageUrl, canonical) || pageUrl);
+
     return {
       title,
       excerpt,
       contentHtml: contentHtml || `<p>${excerpt}</p>`,
-      coverImage: coverFinal,
+      coverImage,
       category,
       authorName,
-      sourceUrl: url,
-      canonicalUrl: absolutizeUrl(url, canonical),
+      sourceUrl: pageUrl,
+      canonicalUrl: canonicalNorm,
       sourcePublishedAt,
       sourcePublishedMissing,
       tags: [],
