@@ -3161,7 +3161,7 @@ html:not(.dark) .og-pt-row {
 }
 .cmc-reply__user { font-weight: 700; color: #fcd34d; }
 .cmc-reply__text {
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.88);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3174,7 +3174,7 @@ html:not(.dark) .og-pt-row {
   border-radius: 10px 10px 10px 3px;
   background: #161d2c;
   border: 1px solid rgba(255, 255, 255, 0.07);
-  color: #e8eef7;
+  color: #f8fafc;
   word-break: normal;
   overflow-wrap: break-word;
   hyphens: none;
@@ -3208,7 +3208,13 @@ html:not(.dark) .og-pt-row {
   opacity: 0.15;
   animation-duration: 8s;
 }
-.cmc-text { margin: 0; white-space: pre-wrap; }
+.cmc-text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #f8fafc;
+  opacity: 1;
+  -webkit-font-smoothing: antialiased;
+}
 .cmc-reactions {
   display: flex;
   flex-wrap: wrap;

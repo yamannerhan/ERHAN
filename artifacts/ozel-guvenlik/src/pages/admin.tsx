@@ -3464,7 +3464,8 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
             <div className="grid gap-2 text-xs text-slate-400">
               <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj Havuzu</strong> linkinden çeker</div>
               <div>• Örnek: <span className="text-sky-300 break-all">https://wpbot-production-cf99.up.railway.app</span></div>
-              <div>• URL kaydedince otomatik tarar; sonra her <strong className="text-slate-200">10 dk</strong> yeni mesajları alır</div>
+              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">15 gün</strong>; bitince her <strong className="text-slate-200">1 dk</strong> dinler, yeni ilanı hemen yayınlar</div>
+              <div>• Sadece özel güvenlik iş ilanları; çift = metin %100 aynı olanlar</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

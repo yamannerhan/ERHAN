@@ -133,8 +133,8 @@ export async function fetchAllPoolMessages(
 }
 
 export function poolMessageExternalId(m: UrlPoolMessage): string {
-  const mid = String(m.messageId || m.id).trim();
-  return `pool_${mid}`;
+  // Stabil havuz satır id — aynı WhatsApp messageId farklı gruplarda çakışmasın
+  return `pool_${Number(m.id) || 0}`;
 }
 
 export function poolMessageSourceUrl(baseUrl: string, m: UrlPoolMessage): string {

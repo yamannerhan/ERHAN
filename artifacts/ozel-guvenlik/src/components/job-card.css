@@ -6,7 +6,7 @@
   --og-job-gold-soft: #25a8ff;
   --og-job-text: #f8fafc;
   --og-job-muted: #cbd5e1;
-  --og-job-border: rgba(100, 116, 139, 0.35);
+  --og-job-border: #000000;
   --og-job-radius: 16px;
   --og-job-gap: 14px;
 }
@@ -20,7 +20,7 @@
   overflow: hidden;
   border-radius: var(--og-job-radius);
   background: linear-gradient(160deg, var(--og-job-bg-2) 0%, var(--og-job-bg) 100%);
-  border: 1px solid var(--og-job-border);
+  border: 2px solid var(--og-job-border);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.28),
     0 0 0 1px rgba(8, 120, 232, 0.06);
@@ -43,7 +43,7 @@
 }
 
 .og-job:hover {
-  border-color: rgba(8, 120, 232, 0.35);
+  border-color: #000000;
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.32),
     0 0 0 1px rgba(8, 120, 232, 0.1);

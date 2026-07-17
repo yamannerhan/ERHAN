@@ -90,6 +90,7 @@ export function NewsAdminSection() {
   const [scanning, setScanning] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [newSource, setNewSource] = useState({ name: "", baseUrl: "", listingUrl: "" });
 
   const load = async () => {
     setLoading(true);
@@ -163,6 +164,36 @@ export function NewsAdminSection() {
       await load();
     } catch (e) {
       toast({ title: "Kayıt başarısız", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  const addSource = async () => {
+    if (!newSource.name.trim() || !newSource.baseUrl.trim()) {
+      toast({ title: "Ad ve site URL gerekli", variant: "destructive" });
+      return;
+    }
+    try {
+      await api("/admin/news-sources", "POST", {
+        name: newSource.name.trim(),
+        baseUrl: newSource.baseUrl.trim(),
+        listingUrl: newSource.listingUrl.trim() || newSource.baseUrl.trim(),
+      });
+      toast({ title: "Kaynak eklendi" });
+      setNewSource({ name: "", baseUrl: "", listingUrl: "" });
+      await load();
+    } catch (e) {
+      toast({ title: "Eklenemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
+  const removeSource = async (id: number) => {
+    if (!window.confirm("Bu haber kaynağı silinsin mi? (Yayınlanmış haberler kalır)")) return;
+    try {
+      await api(`/admin/news-sources/${id}`, "DELETE");
+      toast({ title: "Kaynak silindi" });
+      await load();
+    } catch (e) {
+      toast({ title: "Silinemedi", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
     }
   };
 
@@ -300,7 +331,13 @@ export function NewsAdminSection() {
                 {a.status === "published" && (
                   <button type="button" className="text-[10px] px-2 py-1 rounded bg-slate-500/20 text-slate-300" onClick={() => void setStatus(a.id, "hidden")}>Gizle</button>
                 )}
-                <button type="button" className="text-[10px] px-2 py-1 rounded bg-rose-500/20 text-rose-300" onClick={() => void deleteArticle(a.id)}>Sil</button>
+                <button
+                  type="button"
+                  className="text-[10px] px-2 py-1 rounded bg-rose-600/30 text-rose-200 font-bold border border-rose-400/40"
+                  onClick={() => void deleteArticle(a.id)}
+                >
+                  {a.status === "published" ? "Haberi Sil" : "Sil"}
+                </button>
                 <a href={`/haberler/${a.slug}`} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 rounded bg-sky-500/20 text-sky-300">Aç</a>
               </div>
             </div>
@@ -353,6 +390,28 @@ export function NewsAdminSection() {
 
       {tab === "sources" && (
         <div className="space-y-3">
+          <div className="rounded-xl border border-sky-500/30 bg-[#131831]/80 p-4 space-y-2">
+            <div className="text-sm font-bold text-white">Yeni haber kaynağı</div>
+            <Input
+              placeholder="Kaynak adı (örn. Güvenlik Akademi)"
+              value={newSource.name}
+              onChange={(e) => setNewSource((s) => ({ ...s, name: e.target.value }))}
+              className="bg-white/5 border-white/10"
+            />
+            <Input
+              placeholder="Site URL (örn. https://guvenlikakademi.com/)"
+              value={newSource.baseUrl}
+              onChange={(e) => setNewSource((s) => ({ ...s, baseUrl: e.target.value }))}
+              className="bg-white/5 border-white/10"
+            />
+            <Input
+              placeholder="Liste / sitemap URL (isteğe bağlı)"
+              value={newSource.listingUrl}
+              onChange={(e) => setNewSource((s) => ({ ...s, listingUrl: e.target.value }))}
+              className="bg-white/5 border-white/10"
+            />
+            <Button size="sm" onClick={() => void addSource()}>Kaynak Ekle</Button>
+          </div>
           {sources.map((s) => (
             <div key={s.id} className="rounded-xl border border-white/10 bg-[#131831]/80 p-4 space-y-3 text-sm text-slate-200">
               <div className="font-bold text-white flex justify-between gap-2">
@@ -378,12 +437,17 @@ export function NewsAdminSection() {
                 Son tarama: {s.lastScanAt ? new Date(s.lastScanAt).toLocaleString("tr-TR") : "—"}
                 {s.lastError ? ` · Hata: ${s.lastError}` : " · Hata yok"}
               </div>
-              <Button size="sm" onClick={() => void api(`/admin/news-sources/${s.id}/scan-now`, "POST").then(() => toast({ title: "Kaynak taraması başladı" }))}>
-                Bu kaynağı tara
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void api(`/admin/news-sources/${s.id}/scan-now`, "POST").then(() => toast({ title: "Kaynak taraması başladı" }))}>
+                  Bu kaynağı tara
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => void removeSource(s.id)}>
+                  Kaynağı Sil
+                </Button>
+              </div>
             </div>
           ))}
-          {!sources.length && <p className="text-xs text-slate-500">Kaynak yok — sunucu açılışında otomatik eklenir.</p>}
+          {!sources.length && <p className="text-xs text-slate-500">Kaynak yok — sunucu açılışında otomatik eklenir veya yukarıdan ekleyin.</p>}
         </div>
       )}
 

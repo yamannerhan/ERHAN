@@ -277,6 +277,11 @@ export async function scanNewsSource(sourceId: number, opts?: { force?: boolean 
 
         const title = cleanNewsTitle(article.title);
         const coverImage = resolveNewsImageUrl(article.coverImage, article.sourceUrl);
+        // Açıklama + kapak yoksa alma (sıfırla / tarama)
+        if (!coverImage) {
+          stats.skipped += 1;
+          return;
+        }
 
         const dup = await findDuplicateArticle({
           sourceUrl: article.sourceUrl,

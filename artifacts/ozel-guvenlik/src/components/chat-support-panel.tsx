@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Headphones, Plus, Send, ChevronLeft, Lock, CheckCircle2 } from "lucide-react";
+import { Headphones, Plus, Send, ChevronLeft, Lock, CheckCircle2, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { io, type Socket } from "socket.io-client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -287,6 +287,33 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
     setConfirmResolve(true);
   };
 
+  const deleteTicket = async (id: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!isStaff) return;
+    if (!window.confirm("Bu destek talebi silinsin mi?")) return;
+    setSending(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/support/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!r.ok && r.status !== 204) {
+        const data = await r.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Silinemedi");
+      }
+      if (active?.id === id) {
+        setActive(null);
+        setMode("list");
+      }
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Hata");
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (!user) {
     return (
       <div className="og-cs-empty">
@@ -471,13 +498,24 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
               <>
                 <div className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-wide mb-1.5 mt-3">Çözülenler</div>
                 {resolvedTickets.map((t) => (
-                  <button key={t.id} type="button" className="og-cs-ticket-row" onClick={() => void openThread(t.id)}>
-                    <span className="min-w-0 truncate">
+                  <div key={t.id} className="og-cs-ticket-row flex items-center gap-2">
+                    <button type="button" className="min-w-0 flex-1 text-left truncate" onClick={() => void openThread(t.id)}>
                       <span className="text-white/90">{t.subject}</span>
                       {t.username ? <span className="text-white/35"> · @{t.username}</span> : null}
+                    </button>
+                    <span className="shrink-0 text-[10px]" style={{ color: STATUS_COLOR[t.status] }}>
+                      {STATUS_LABEL[t.status] ?? t.status}
                     </span>
-                    <span style={{ color: STATUS_COLOR[t.status] }}>{STATUS_LABEL[t.status] ?? t.status}</span>
-                  </button>
+                    <button
+                      type="button"
+                      className="shrink-0 p-1.5 rounded-md text-rose-300 hover:bg-rose-500/15"
+                      title="Talebi sil"
+                      disabled={sending}
+                      onClick={(e) => void deleteTicket(t.id, e)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 ))}
               </>
             )}

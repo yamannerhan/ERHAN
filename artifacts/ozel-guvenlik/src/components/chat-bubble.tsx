@@ -10,8 +10,6 @@ import type { ChatMessage } from "@workspace/api-client-react";
 import { playChatMessageSound } from "@/lib/notif-prefs";
 import { NotifPrefsPanel } from "@/components/notif-prefs-panel";
 import { ChatMessageItem } from "@/components/chat-message-item";
-import { SwipeableMessage } from "@/components/swipeable-message";
-import { FramedAvatar } from "@/components/framed-avatar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useGpuSafeMode } from "@/hooks/use-gpu-safe-mode";
 import { useStaffChatPerms } from "@/hooks/use-staff-chat-perms";
@@ -96,8 +94,6 @@ function mergePreserveMessages(prev: AnyMsg[], incoming: ExtMsg[]): AnyMsg[] {
   saveCachedHumans(kept.filter(isRealHuman));
   return kept;
 }
-
-const STICKY_SKIP_KEY = "chat_skipped_sticky_id";
 
 function renderMessageContent(content: string) {
   const parts = content.split(/(\*\*[^*]+\*\*|@\w+|\/ilan\/\d+)/g);
@@ -422,61 +418,6 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
     }
   }, [open, scrollToBottom]);
 
-  // Son gerçek insan mesajı — altına bot yağsa bile sticky kalır
-  const [skippedStickyId, setSkippedStickyId] = useState<number | null>(() => {
-    try {
-      const raw = localStorage.getItem(STICKY_SKIP_KEY);
-      if (!raw) return null;
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const skipSticky = useCallback((id: number) => {
-    setSkippedStickyId(id);
-    try { localStorage.setItem(STICKY_SKIP_KEY, String(id)); } catch { /* ignore */ }
-  }, []);
-
-  const clearStickySkip = useCallback(() => {
-    setSkippedStickyId(null);
-    try { localStorage.removeItem(STICKY_SKIP_KEY); } catch { /* ignore */ }
-  }, []);
-
-  const stickyHuman = useMemo(() => {
-    const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
-    let lastHuman: ExtMsg | null = null;
-    for (let i = chatMsgs.length - 1; i >= 0; i--) {
-      if (isRealHuman(chatMsgs[i]!)) {
-        lastHuman = chatMsgs[i]!;
-        break;
-      }
-    }
-    if (!lastHuman) return null;
-    if (skippedStickyId != null && lastHuman.id === skippedStickyId) return null;
-    const after = chatMsgs.filter(m => m.id > lastHuman!.id);
-    const hasHumanAfter = after.some(isRealHuman);
-    if (hasHumanAfter) return null;
-    // Altında yalnızca bot/sahte varsa sticky göster
-    if (after.length === 0) return null; // zaten en altta
-    if (after.every(isBotOrFake)) return lastHuman;
-    return null;
-  }, [messages, skippedStickyId]);
-
-  // Yeni üye mesajı gelince “geç” sıfırlanır (eski id artık geçerli değil)
-  useEffect(() => {
-    const chatMsgs = messages.filter((m): m is ExtMsg => !isSystem(m));
-    for (let i = chatMsgs.length - 1; i >= 0; i--) {
-      if (isRealHuman(chatMsgs[i]!)) {
-        if (skippedStickyId != null && chatMsgs[i]!.id !== skippedStickyId) {
-          clearStickySkip();
-        }
-        break;
-      }
-    }
-  }, [messages, skippedStickyId, clearStickySkip]);
-
   const visibleMessages = useMemo(() => {
     const isSelfReply = (msg: ExtMsg) => {
       if (!msg.replyToId || !msg.replyToUsername) return false;
@@ -494,7 +435,8 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
         return isRealHuman(msg) || isJoinAnnounce(msg) || isChatJoinNotice(text) || /ilan\s+paylaştı|yeni\s+ilan/i.test(text);
       }).slice(-200);
     }
-    return base;
+    // Çıkışta da geçmiş kalsın — son 200 mesaj (ilan + sohbet)
+    return base.slice(-200);
   }, [messages, feedMode]);
 
   const lastMsg = visibleMessages[visibleMessages.length - 1] as { id?: number | string; createdAt?: string } | undefined;
@@ -762,14 +704,6 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
         ))}
       />
     );
-
-    if (user && !isMe) {
-      return (
-        <SwipeableMessage key={chatMsg.id} onReply={() => startReply(chatMsg)}>
-          {row}
-        </SwipeableMessage>
-      );
-    }
 
     return <div key={chatMsg.id}>{row}</div>;
   };
@@ -1060,40 +994,6 @@ export function ChatBubble({ initialOpen = false }: { initialOpen?: boolean }) {
                     <div ref={messagesEndRef} />
                   </div>
                 </div>
-
-                {stickyHuman && feedMode === "all" && user && stickyHuman.userId !== user.id && (
-                  <div className="shrink-0 px-3 py-2" style={{ borderTop: "1px solid rgba(245,197,24,0.25)", background: "rgba(245,197,24,0.07)" }}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-[9px] font-bold text-amber-400 uppercase tracking-wide">Son üye mesajı · yanıt bekleniyor</div>
-                      <button
-                        type="button"
-                        onClick={() => skipSticky(stickyHuman.id)}
-                        className="text-[10px] font-bold text-white/50 hover:text-white/90 px-2 py-0.5 rounded-md hover:bg-white/10"
-                        title="Bu mesajı geç"
-                      >
-                        Geç
-                      </button>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <FramedAvatar
-                        src={stickyHuman.userAvatarUrl}
-                        name={stickyHuman.displayName || stickyHuman.username}
-                        role={stickyHuman.userRole ?? "user"}
-                        isVip={stickyHuman.isVip}
-                        frame="none"
-                        size={32}
-                        online
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] font-bold text-amber-300">{stickyHuman.displayName || stickyHuman.username}</div>
-                        <div className="text-[11px] text-white/80 line-clamp-2">{stickyHuman.content}</div>
-                      </div>
-                      <button onClick={() => startReply(stickyHuman)} className="text-[10px] font-bold text-amber-400 shrink-0">
-                        Yanıtla
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {user && pendingWelcome && canGreetUser(pendingWelcome.username, user.username) && (
                   <div className="og-chat-welcome-bar">

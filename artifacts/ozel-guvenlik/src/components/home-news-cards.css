@@ -61,7 +61,7 @@
   overflow: hidden;
   color: #10233f;
   background: #ffffff;
-  border: 1px solid rgba(25, 94, 165, 0.10);
+  border: 2px solid #000000;
   border-radius: clamp(12px, 2.5vw, 17px);
   box-shadow: 0 8px 22px rgba(25, 94, 165, 0.09);
   text-decoration: none;

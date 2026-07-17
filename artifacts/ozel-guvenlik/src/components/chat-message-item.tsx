@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  CornerUpLeft, Pin, PinOff, Trash2, Bot, MoreHorizontal, Ban,
+  CornerUpLeft, Pin, PinOff, Bot, MoreHorizontal, Ban,
 } from "lucide-react";
 import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
@@ -378,11 +378,6 @@ export function ChatMessageItem({
                   {canMuteTarget && (
                     <button type="button" onClick={() => { setMuteOpen(true); setMenuOpen(false); }}>
                       <Ban className="cmc-menu-ico" /> Sustur
-                    </button>
-                  )}
-                  {canModerate && (
-                    <button type="button" className="is-danger" disabled={busy} onClick={() => void deleteMessage()}>
-                      <Trash2 className="cmc-menu-ico" /> Sil
                     </button>
                   )}
                   {!bot && (

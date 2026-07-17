@@ -132,11 +132,10 @@ async function findDuplicateImported(hash: string, sourceId: number, externalId?
   return !!row;
 }
 
-async function findDuplicateActiveListing(text: string, hash: string): Promise<number | null> {
-  // Sadece TAM metin (hash) eşleşmesi — benzer ilanlar yayınlanır
+async function findDuplicateActiveListing(_text: string, hash: string): Promise<number | null> {
+  // Yalnızca ham metnin %100 aynı hash'i — formatlanmış açıklama / benzer metin çift sayılmaz
   const recent = await db.select({
     id: listingsTable.id,
-    description: listingsTable.description,
     rawText: listingsTable.rawText,
   })
     .from(listingsTable)
@@ -144,12 +143,13 @@ async function findDuplicateActiveListing(text: string, hash: string): Promise<n
       eq(listingsTable.status, "active"),
       eq(listingsTable.isActive, true),
       isNotNull(listingsTable.sourceTag),
+      isNotNull(listingsTable.rawText),
     ))
     .orderBy(desc(listingsTable.createdAt))
     .limit(1200);
 
   for (const row of recent) {
-    const content = row.rawText ?? row.description ?? "";
+    const content = (row.rawText ?? "").trim();
     if (!content) continue;
     if (createDuplicateHash(content) === hash) return row.id;
   }
@@ -172,10 +172,12 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
   return source.autoPublish || !source.requireApproval;
 }
 
-// Telegram ilk tarama: son 30 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
+// Telegram / havuz ilk tarama + sıfırla: son 15 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
-const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 30;
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
+/** İlan havuzu dinleme aralığı (dk) — yeni ilan düşünce hemen yakala */
+const URL_POOL_LISTEN_INTERVAL_MIN = 1;
 /** WhatsApp geçmişi — Chromium ne kadar verirse (üst sınır sadece cutoff hesabı) */
 const WA_INITIAL_SCAN_DAYS = 730;
 const WA_INITIAL_SCAN_MS = WA_INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
@@ -195,7 +197,7 @@ const INCREMENTAL_SCAN_INTERVAL_MIN = 1;
 const INCREMENTAL_SOURCE_GAP_MS = 60_000;
 const INITIAL_BACKFILL_INTERVAL_MIN = 1;
 const INITIAL_BACKFILL_INTERVAL_MS = 5_000;
-/** Her döngüde geriye kaç sayfa (×100 mesaj) — 30 güne daha hızlı ulaşmak için */
+/** Her döngüde geriye kaç sayfa (×100 mesaj) — 15 güne daha hızlı ulaşmak için */
 const BACKWARD_PAGES_PER_RUN = 8;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
@@ -363,7 +365,7 @@ function bumpScanBackoffOnRateLimit(): void {
 }
 
 /**
- * Bot ilanı sitede LISTING_TTL_DAYS (15) gün kalsın — tarama süresi (30g / WA geçmiş) ayrı.
+ * Bot ilanı sitede LISTING_TTL_DAYS (15) gün kalsın — tarama süresi (15g / WA geçmiş) ayrı.
  */
 function listingExpiryFrom(_postedAt?: Date): Date {
   return new Date(Date.now() + LISTING_TTL_MS);
@@ -548,9 +550,11 @@ async function processMessage(
     );
   if (!matchesSecurityJob) return "skipped";
 
-  // Havuz zaten seçili mesajlar tutuyor — yaş kesme yok. WA eski geçmişi 730g ile sınırlı.
-  if (isInitialScan && postedAt && source.platform !== "url_pool") {
-    const maxAgeMs = source.platform === "whatsapp" ? WA_INITIAL_SCAN_MS : INITIAL_SCAN_MS;
+  // İlk tarama / sıfırla: Telegram+havuz max 15g, WA 730g. Dinlemede yaş kesme yok.
+  if (isInitialScan && postedAt) {
+    const maxAgeMs = source.platform === "whatsapp"
+      ? WA_INITIAL_SCAN_MS
+      : INITIAL_SCAN_MS;
     if (Date.now() - postedAt.getTime() > maxAgeMs) return "skipped";
   }
 
@@ -1930,26 +1934,27 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
 
   await patchSourceProgress(source.id, { isScanning: true, lastError: null });
 
+  // Sunucu yeniden başlasa bile imleçten devam; ilk tarama / sıfırlada baştan (15g kesit).
   const cursorId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
   const fresh = await fetchAllPoolMessages(base, {
     pageSize: 100,
-    // Dinlemede daha fazla yeni mesaj yakala; ilk taramada geniş tara
-    maxPages: source.initialScanDone ? 25 : 80,
+    // Dinlemede sık ve geniş; ilk taramada 15 güne yetecek kadar sayfa
+    maxPages: source.initialScanDone ? 40 : 100,
     minIdExclusive: source.initialScanDone ? cursorId : 0,
   });
 
-  // Dinlemede son sayfaları da tekrar dene — eskiden sıkı filtreyle atlananlar yayınlansın
+  // Dinlemede en yeni sayfaları da tara — filtre/kaçırma sonrası hemen yayınlansın
   let messages = fresh;
   if (source.initialScanDone) {
     const catchUp = await fetchAllPoolMessages(base, {
       pageSize: 100,
-      maxPages: 3,
+      maxPages: 5,
       minIdExclusive: 0,
     });
     const seen = new Set(fresh.map((m) => Number(m.id) || 0));
     for (const m of catchUp) {
       const id = Number(m.id) || 0;
-      if (!seen.has(id)) {
+      if (!seen.has(id) && id > Math.max(0, cursorId - 500)) {
         seen.add(id);
         messages.push(m);
       }
@@ -1983,7 +1988,7 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     }
   }
 
-  // İlk tarama bu turda bittiyse completedAt'i şimdi işaretle → 10 dk grace başlar
+  // İlk tarama bitti → dinleme modu (grace yok; yeni ilan hemen duyurulur)
   const finishingInitial = !source.initialScanDone;
   const completedAt = source.initialScanCompletedAt
     ?? (finishingInitial ? new Date() : null);
@@ -2002,6 +2007,7 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     totalImported: (source.totalImported ?? 0) + stats.published,
     initialScanDone: true,
     initialScanProgress: 100,
+    checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
     ...(completedAt ? { initialScanCompletedAt: completedAt } : {}),
   });
 
@@ -2022,7 +2028,12 @@ async function scanUrlPoolSources(
 ): Promise<void> {
   const now = Date.now();
   for (const source of poolSources) {
-    const intervalMs = Math.max(5, source.checkInterval ?? 10) * 60_000;
+    // Dinleme: en az 1 dk (eski 5/10 dk minimumi yeni ilanı geciktiriyordu)
+    const intervalMin = Math.max(
+      URL_POOL_LISTEN_INTERVAL_MIN,
+      source.checkInterval ?? URL_POOL_LISTEN_INTERVAL_MIN,
+    );
+    const intervalMs = intervalMin * 60_000;
     const lastChecked = source.lastCheckedAt?.getTime() ?? 0;
     if (!force && source.initialScanDone && now - lastChecked < intervalMs) continue;
     if (source.isScanning || !(await acquireSourceScanLock(source.id))) continue;
@@ -2078,7 +2089,7 @@ export async function saveUrlPoolSource(poolUrl: string): Promise<{
       status: "active",
       autoPublish: true,
       requireApproval: false,
-      checkInterval: 10,
+      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
       initialScanDone: false,
       initialScanProgress: 1,
     }).returning();
@@ -2091,9 +2102,16 @@ export async function saveUrlPoolSource(poolUrl: string): Promise<{
       status: "active",
       autoPublish: true,
       requireApproval: false,
+      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
       lastError: null,
     }).where(eq(sourcesTable.id, source.id));
-    source = { ...source, url: base, autoPublish: true, requireApproval: false };
+    source = {
+      ...source,
+      url: base,
+      autoPublish: true,
+      requireApproval: false,
+      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
+    };
   }
 
   if (!source) throw new Error("Havuz kaynağı oluşturulamadı");
@@ -2180,6 +2198,7 @@ export async function resetUrlPoolSource(): Promise<{ deletedListings: number }>
     initialScanCompletedAt: null,
     isScanning: false,
     lastError: null,
+    checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
     lastScanMessagesRead: 0,
     lastScanFound: 0,
     lastScanAdded: 0,
@@ -2359,6 +2378,22 @@ export function startScraperWorker(): void {
 
   void refreshScraperInterval();
 
+  // İlan havuzu: ana döngüden bağımsız 1 dk dinleme (kaçırma / gecikme olmasın)
+  if (botPlatformEnabled("url_pool")) {
+    workerTimerHandles.add(setInterval(() => {
+      if (workerStopping) return;
+      void (async () => {
+        try {
+          const poolSources = await db.select().from(sourcesTable)
+            .where(and(eq(sourcesTable.platform, "url_pool"), eq(sourcesTable.active, true)));
+          if (poolSources.length) await scanUrlPoolSources(poolSources, false);
+        } catch (err) {
+          logger.warn({ err }, "scraper: url_pool dinleme döngüsü hatası");
+        }
+      })();
+    }, URL_POOL_LISTEN_INTERVAL_MIN * 60_000));
+  }
+
   workerTimerHandles.add(setInterval(() => {
     if (botPlatformEnabled("telegram") && !isClientConnected()) void ensureTelegramConnected(5).catch(() => {});
     if (botPlatformEnabled("whatsapp")) ensureWhatsAppAutoConnect();
@@ -2490,7 +2525,7 @@ export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
   const days = LISTING_TTL_DAYS;
 
-  // Bot ilanları 15 gün sitede kalır (tarama 30g / WA geçmişinden bağımsız)
+  // Bot ilanları 15 gün sitede kalır (tarama 15g / WA geçmişinden bağımsız)
   try {
     await db.execute(sql.raw(`
       UPDATE listings
@@ -2567,7 +2602,7 @@ export async function expireImportedListings(): Promise<number> {
   return purgeExpiredListings();
 }
 
-/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 30 gün yeniden tara. */
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara. */
 export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
@@ -2671,7 +2706,7 @@ export async function resetAllBotsAndRescan(): Promise<{
   };
 }
 
-/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 30 günü yeniden tara. */
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 15 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
@@ -2732,7 +2767,7 @@ export async function triggerDeepRescan30Days(): Promise<void> {
     isScanning: false,
     lastError: null,
   }).where(eq(sourcesTable.platform, "telegram"));
-  logger.info({ sources: ids.length }, "scraper: 30 gün derin tarama başlatıldı");
+  logger.info({ sources: ids.length, days: INITIAL_SCAN_DAYS }, "scraper: derin tarama başlatıldı");
   await triggerRescan();
 }
 

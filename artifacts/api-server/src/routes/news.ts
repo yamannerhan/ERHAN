@@ -326,6 +326,36 @@ router.get("/admin/news-sources", authMiddleware, requireAdmin, async (_req, res
   res.json({ sources });
 });
 
+router.post("/admin/news-sources", authMiddleware, requireAdmin, async (req, res) => {
+  await ensureNewsSchema();
+  const body = req.body as Record<string, unknown>;
+  const name = String(body.name ?? "").trim();
+  const baseUrl = String(body.baseUrl ?? "").trim();
+  if (!name || !baseUrl) {
+    res.status(400).json({ error: "name ve baseUrl gerekli" });
+    return;
+  }
+  const listingUrl = String(body.listingUrl ?? baseUrl).trim() || baseUrl;
+  const { providerKeyFromUrl } = await import("../news/providers");
+  const providerKey = String(body.providerKey ?? "").trim() || providerKeyFromUrl(baseUrl);
+  try {
+    const [row] = await db.insert(newsSourcesTable).values({
+      name,
+      baseUrl,
+      listingUrl,
+      providerKey,
+      isActive: body.isActive !== false,
+      scanIntervalMinutes: Number(body.scanIntervalMinutes) || 30,
+      initialLookbackDays: Number(body.initialLookbackDays) || 10,
+      importMode: String(body.importMode ?? "full"),
+      publishMode: String(body.publishMode ?? "auto"),
+    }).returning();
+    res.json({ success: true, source: row });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "Kaynak eklenemedi" });
+  }
+});
+
 router.patch("/admin/news-sources/:id", authMiddleware, requireAdmin, async (req, res) => {
   await ensureNewsSchema();
   const id = Number(req.params.id);
@@ -339,6 +369,17 @@ router.patch("/admin/news-sources/:id", authMiddleware, requireAdmin, async (req
   }
   const [row] = await db.update(newsSourcesTable).set(patch).where(eq(newsSourcesTable.id, id)).returning();
   res.json({ success: true, source: row });
+});
+
+router.delete("/admin/news-sources/:id", authMiddleware, requireAdmin, async (req, res) => {
+  await ensureNewsSchema();
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    res.status(400).json({ error: "Geçersiz kaynak" });
+    return;
+  }
+  await db.delete(newsSourcesTable).where(eq(newsSourcesTable.id, id));
+  res.json({ success: true });
 });
 
 router.post("/admin/news-sources/:id/scan-now", authMiddleware, requireAdmin, async (req, res) => {
