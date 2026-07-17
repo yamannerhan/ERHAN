@@ -362,18 +362,20 @@ router.get("/admin/url-pool/status", authMiddleware, requireAdmin, async (_req, 
 router.post("/admin/url-pool/save", authMiddleware, requireAdmin, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
-    const url = String((req.body as { url?: string })?.url ?? "").trim();
+    const body = req.body as { url?: string; mediaUrl?: string } | undefined;
+    const url = String(body?.url ?? "").trim();
+    const mediaUrl = String(body?.mediaUrl ?? "").trim();
     if (!url) {
-      res.status(400).json({ success: false, error: "URL gerekli" });
+      res.status(400).json({ success: false, error: "Mesaj havuzu URL gerekli" });
       return;
     }
-    const result = await saveUrlPoolSource(url);
+    const result = await saveUrlPoolSource(url, mediaUrl || null);
     res.json({
       success: true,
       ...result,
       message: result.created
-        ? `Havuz kaydedildi (${result.poolTotal} mesaj). Otomatik tarama başladı.`
-        : `Havuz URL güncellendi (${result.poolTotal} mesaj). Tarama tetiklendi.`,
+        ? `Havuz kaydedildi (mesaj: ${result.poolTotal}, medya: ${result.mediaTotal}). Otomatik tarama başladı.`
+        : `Havuz URL güncellendi (mesaj: ${result.poolTotal}, medya: ${result.mediaTotal}). Tarama tetiklendi.`,
     });
   } catch (e) {
     res.status(400).json({ success: false, error: e instanceof Error ? e.message : String(e) });

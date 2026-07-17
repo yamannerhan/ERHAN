@@ -3399,12 +3399,15 @@ function sanitizeWaUserMessage(raw: string | null | undefined, code?: string | n
 
 function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: string, body?: unknown) => Promise<unknown>; toast: ReturnType<typeof useToast>["toast"] }) {
   const [url, setUrl] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [mediaBaseUrl, setMediaBaseUrl] = useState<string | null>(null);
   const [poolTotal, setPoolTotal] = useState<number | null>(null);
+  const [mediaTotal, setMediaTotal] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
   const [source, setSource] = useState<{
     id: number; name: string; active: boolean; checkInterval: number;
@@ -3414,22 +3417,30 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
     lastScanDuplicates: number; lastScanErrors: number;
     lastCheckedAt: string | null; lastError: string | null;
   } | null>(null);
+  const [mediaSource, setMediaSource] = useState<typeof source>(null);
 
   const refresh = async () => {
     try {
       const r = await apiCall("/admin/url-pool/status", "GET") as {
         configured?: boolean;
         baseUrl?: string | null;
+        mediaBaseUrl?: string | null;
         poolTotal?: number | null;
+        mediaTotal?: number | null;
         listening?: boolean;
         source?: typeof source;
+        mediaSource?: typeof source;
       };
       setConfigured(!!r.configured);
       setBaseUrl(r.baseUrl ?? null);
+      setMediaBaseUrl(r.mediaBaseUrl ?? null);
       setPoolTotal(r.poolTotal ?? null);
+      setMediaTotal(r.mediaTotal ?? null);
       setListening(!!r.listening);
       setSource(r.source ?? null);
+      setMediaSource(r.mediaSource ?? null);
       if (r.baseUrl && !url) setUrl(r.baseUrl);
+      if (r.mediaBaseUrl && !mediaUrl) setMediaUrl(`${r.mediaBaseUrl.replace(/\/$/, "")}/medya`);
     } catch { /* ignore */ }
   };
 
@@ -3442,14 +3453,18 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
   const saveUrl = async () => {
     const trimmed = url.trim();
     if (!trimmed) {
-      toast({ title: "URL gerekli", description: "İlan toplayıcı adresi girin.", variant: "destructive" });
+      toast({ title: "URL gerekli", description: "Mesaj havuzu adresi girin.", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const r = await apiCall("/admin/url-pool/save", "POST", { url: trimmed }) as { message?: string; baseUrl?: string };
-      toast({ title: "Havuz kaydedildi", description: r.message || "Otomatik tarama başladı." });
+      const r = await apiCall("/admin/url-pool/save", "POST", {
+        url: trimmed,
+        mediaUrl: mediaUrl.trim() || null,
+      }) as { message?: string; baseUrl?: string; mediaBaseUrl?: string | null };
+      toast({ title: "Havuz kaydedildi", description: r.message || "Mesaj + medya tarama başladı." });
       if (r.baseUrl) setUrl(r.baseUrl);
+      if (r.mediaBaseUrl) setMediaUrl(`${r.mediaBaseUrl.replace(/\/$/, "")}/medya`);
       await refresh();
     } catch (error) {
       toast({ title: "Kaydedilemedi", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
@@ -3486,6 +3501,9 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
   };
 
   const busy = saving || scanning || resetting;
+  const listingCount = (source?.listingCount ?? 0) + (mediaSource?.listingCount ?? 0);
+  const totalImported = (source?.totalImported ?? 0) + (mediaSource?.totalImported ?? 0);
+  const isScanning = !!(source?.isScanning || mediaSource?.isScanning);
 
   return (
     <div className="space-y-4">
@@ -3494,10 +3512,11 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
           <div className="space-y-2">
             <h3 className="text-lg font-extrabold text-white">İlan Havuzu (URL)</h3>
             <div className="grid gap-2 text-xs text-slate-400">
-              <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj Havuzu</strong> linkinden çeker</div>
-              <div>• Örnek: <span className="text-sky-300 break-all">https://wpbot-production-cf99.up.railway.app</span></div>
-              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">20 gün</strong>; bitince her <strong className="text-slate-200">5 dk</strong> dinler (ilk tarama bitene kadar kullanıcıya bildirim yok)</div>
-              <div>• Sadece özel güvenlik iş ilanları; çift = metin %100 aynı olanlar</div>
+              <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj + Medya Havuzu</strong> linklerinden çeker</div>
+              <div>• Mesaj: <span className="text-sky-300 break-all">…/api/whatsapp/messages</span></div>
+              <div>• Medya OCR: <span className="text-sky-300 break-all">…/api/whatsapp/media</span> (ör. <span className="text-sky-300">…/medya</span>)</div>
+              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">20 gün</strong>; bitince her <strong className="text-slate-200">5 dk</strong> dinler</div>
+              <div>• Sadece özel güvenlik iş ilanları</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -3513,67 +3532,94 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
           </div>
         </div>
 
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://wpbot-production-cf99.up.railway.app"
-            className="h-10 flex-1 text-sm bg-white/5 border-white/10"
-            disabled={busy}
-          />
-          <button
-            onClick={() => void saveUrl()}
-            disabled={busy || !url.trim()}
-            className="rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-black hover:bg-emerald-400 disabled:opacity-50 whitespace-nowrap"
-          >
-            {saving ? "Kaydediliyor…" : configured ? "URL Güncelle" : "URL Kaydet ve Başlat"}
-          </button>
+        <div className="mt-5 grid gap-3">
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+            <label className="w-28 shrink-0 text-[11px] font-bold uppercase tracking-wide text-slate-400">Mesaj URL</label>
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://wpbot-production-cf99.up.railway.app"
+              className="h-10 flex-1 text-sm bg-white/5 border-white/10"
+              disabled={busy}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+            <label className="w-28 shrink-0 text-[11px] font-bold uppercase tracking-wide text-emerald-300/90">Medya URL</label>
+            <Input
+              value={mediaUrl}
+              onChange={(e) => setMediaUrl(e.target.value)}
+              placeholder="https://wpbot-production-cf99.up.railway.app/medya"
+              className="h-10 flex-1 text-sm bg-white/5 border-emerald-500/20"
+              disabled={busy}
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => void saveUrl()}
+              disabled={busy || !url.trim()}
+              className="rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-black hover:bg-emerald-400 disabled:opacity-50 whitespace-nowrap"
+            >
+              {saving ? "Kaydediliyor…" : configured ? "URL'leri Güncelle" : "Kaydet ve Başlat"}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
-          <div className="text-[10px] text-slate-400 uppercase">Havuz Mesaj</div>
+          <div className="text-[10px] text-slate-400 uppercase">Mesaj Havuz</div>
           <div className="text-2xl font-black text-sky-400 mt-1">{poolTotal ?? "—"}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
+          <div className="text-[10px] text-slate-400 uppercase">Medya Yazısı</div>
+          <div className="text-2xl font-black text-violet-300 mt-1">{mediaTotal ?? "—"}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
           <div className="text-[10px] text-slate-400 uppercase">Yayındaki İlan</div>
-          <div className="text-2xl font-black text-emerald-400 mt-1">{source?.listingCount ?? 0}</div>
+          <div className="text-2xl font-black text-emerald-400 mt-1">{listingCount}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
           <div className="text-[10px] text-slate-400 uppercase">Toplam Çekilen</div>
-          <div className="text-2xl font-black text-amber-400 mt-1">{source?.totalImported ?? 0}</div>
+          <div className="text-2xl font-black text-amber-400 mt-1">{totalImported}</div>
         </div>
         <div className="rounded-xl border border-white/10 bg-[#131831]/90 p-4">
           <div className="text-[10px] text-slate-400 uppercase">Durum</div>
           <div className="text-lg font-black text-white mt-1">
-            {!configured ? "URL yok" : source?.isScanning ? "Taranıyor" : listening ? "Aktif" : "Bağlı"}
+            {!configured ? "URL yok" : isScanning ? "Taranıyor" : listening ? "Aktif" : "Bağlı"}
           </div>
         </div>
       </div>
 
       <div className="rounded-2xl border border-white/[0.06] bg-[#131831]/90 p-5 md:p-6 space-y-3">
         <h4 className="text-base font-bold text-white">Tarama Durumu</h4>
-        {!configured || !source ? (
-          <p className="text-xs text-slate-500">Yukarıya havuz URL'sini yapıştırıp kaydedin. Mesajlar otomatik ilana dönüşür.</p>
+        {!configured || (!source && !mediaSource) ? (
+          <p className="text-xs text-slate-500">Yukarıya mesaj + medya URL'lerini yapıştırıp kaydedin. İkisi de otomatik ilana dönüşür.</p>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              {source.isScanning && <span className="font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
-              <span className={`font-bold px-2 py-0.5 rounded-full ${source.initialScanDone ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-                {source.initialScanDone ? `Dinleme (${source.checkInterval || 10} dk)` : "İlk tarama"}
+              {isScanning && <span className="font-bold text-amber-300 animate-pulse">Taranıyor…</span>}
+              <span className={`font-bold px-2 py-0.5 rounded-full ${(source?.initialScanDone && mediaSource?.initialScanDone) ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                {(source?.initialScanDone && (mediaSource?.initialScanDone ?? true))
+                  ? `Dinleme (${source?.checkInterval || mediaSource?.checkInterval || 5} dk)`
+                  : "İlk tarama"}
               </span>
-              {baseUrl && <span className="text-slate-500 break-all">{baseUrl}</span>}
+              {baseUrl && <span className="text-slate-500 break-all">Mesaj: {baseUrl}</span>}
+              {mediaBaseUrl && <span className="text-emerald-400/80 break-all">Medya: {mediaBaseUrl}/medya</span>}
             </div>
-            <div className="flex flex-wrap gap-3 text-[10px] text-slate-500">
-              <span>Okunan: {source.lastScanMessagesRead}</span>
-              <span>Bulunan: {source.lastScanFound}</span>
-              <span>Eklenen: {source.lastScanAdded}</span>
-              <span>Çift: {source.lastScanDuplicates}</span>
-              <span>Hata: {source.lastScanErrors}</span>
-              <span>Son: {source.lastCheckedAt ? new Date(source.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
-            </div>
-            {source.lastError && <div className="text-[11px] text-rose-300">{source.lastError}</div>}
+            {[source, mediaSource].filter(Boolean).map((s) => s && (
+              <div key={s.id} className="rounded-xl border border-white/5 bg-black/20 p-3 space-y-1">
+                <div className="text-[11px] font-bold text-white">{s.name}</div>
+                <div className="flex flex-wrap gap-3 text-[10px] text-slate-500">
+                  <span>Okunan: {s.lastScanMessagesRead}</span>
+                  <span>Bulunan: {s.lastScanFound}</span>
+                  <span>Eklenen: {s.lastScanAdded}</span>
+                  <span>Çift: {s.lastScanDuplicates}</span>
+                  <span>Hata: {s.lastScanErrors}</span>
+                  <span>Son: {s.lastCheckedAt ? new Date(s.lastCheckedAt).toLocaleString("tr-TR") : "—"}</span>
+                </div>
+                {s.lastError && <div className="text-[11px] text-rose-300">{s.lastError}</div>}
+              </div>
+            ))}
           </>
         )}
       </div>

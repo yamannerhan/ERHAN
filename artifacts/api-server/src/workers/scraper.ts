@@ -30,6 +30,8 @@ import {
   normalizePoolBaseUrl,
   poolMessageExternalId,
   poolMessageSourceUrl,
+  isUrlPoolPlatform,
+  poolKindFromPlatform,
 } from "../services/url-pool-client";
 import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, isUrlPoolJobPosting, isChannelNoisePost, formatPoolListingDescription } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
@@ -177,7 +179,7 @@ async function findListingBySourceMessage(sourceId: number, messageId: string): 
 }
 
 function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
-  if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "url_pool" || source.platform === "eleman") return true;
+  if (source.platform === "telegram" || source.platform === "whatsapp" || isUrlPoolPlatform(source.platform) || source.platform === "eleman") return true;
   return source.autoPublish || !source.requireApproval;
 }
 
@@ -568,7 +570,7 @@ async function processMessage(
   if ((source.platform === "telegram" || source.platform === "whatsapp") && isChannelNoisePost(text)) {
     return "skipped";
   }
-  const matchesSecurityJob = source.platform === "url_pool"
+  const matchesSecurityJob = isUrlPoolPlatform(source.platform)
     ? isUrlPoolJobPosting(text)
     : (
       isSecurityJobPosting(text)
@@ -588,12 +590,12 @@ async function processMessage(
 
   const explicitLocation = extractExplicitWorkLocation(text);
   // WhatsApp / havuz: esnek konum. Telegram/Eleman davranışı değişmez.
-  const location = (source.platform === "whatsapp" || source.platform === "url_pool")
+  const location = (source.platform === "whatsapp" || isUrlPoolPlatform(source.platform))
     ? extractLocation(text)
     : (explicitLocation ?? extractLocation(text));
   // Havuz: şehir hedefi zorunlu değil (otomatik yayın)
   if (
-    source.platform !== "url_pool"
+    !isUrlPoolPlatform(source.platform)
     && !matchesTargetCities(text, location, source.targetCities, source.publishOnlyTargetCities)
   ) {
     return "skipped";
@@ -622,7 +624,7 @@ async function processMessage(
   const hash = createDuplicateHash(text);
   // Havuz: aynı firma birden fazla ilan verebilir — yalnız aynı mesaj ID çift sayılır.
   // Telegram: aynı metin yeniden paylaşımı tek ilan olarak kalsın.
-  if (source.platform !== "url_pool") {
+  if (!isUrlPoolPlatform(source.platform)) {
     if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
 
     const duplicateListingId = await findDuplicateActiveListing(text, hash);
@@ -666,7 +668,7 @@ async function processMessage(
   const brand = (await matchKnownCompany(parsedCo)) || matchKnownCompanyInBlob(text);
   const companyName = brand?.name ?? (parsedCo !== "Belirtilmemiş" ? parsedCo : "Belirtilmemiş");
   const contactName = extractContactName(text);
-  const listingDescription = source.platform === "url_pool"
+  const listingDescription = isUrlPoolPlatform(source.platform)
     ? formatPoolListingDescription({
       text,
       city,
@@ -739,6 +741,7 @@ async function processMessage(
       sourceType: "bot_imported",
       sourceName: source.platform === "telegram" ? "Telegram"
         : source.platform === "whatsapp" ? "WhatsApp"
+        : source.platform === "url_pool_media" ? "Medya Havuzu"
         : source.platform === "url_pool" ? "İlan Havuzu"
         : source.platform === "eleman" ? "Eleman.net"
         : (source.platform || "Kaynak"),
@@ -1916,16 +1919,16 @@ async function runScraperCycleInner(force = false): Promise<void> {
     }
   }
 
-  // Harici mesaj havuzu (wpbot URL) — WhatsApp client gerekmez
+  // Harici mesaj + medya havuzu (wpbot URL) — WhatsApp client gerekmez
   if (botPlatformEnabled("url_pool")) {
-    const poolSources = sources.filter((s) => s.platform === "url_pool");
+    const poolSources = sources.filter((s) => isUrlPoolPlatform(s.platform));
     if (poolSources.length > 0) {
       await scanUrlPoolSources(poolSources, force);
     }
   }
 
   for (const source of sources) {
-    if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman" || source.platform === "url_pool") continue;
+    if (source.platform === "telegram" || source.platform === "whatsapp" || source.platform === "eleman" || isUrlPoolPlatform(source.platform)) continue;
 
     const intervalMin = source.checkInterval ?? 15;
     const intervalMs = intervalMin * 60 * 1000;
@@ -2057,7 +2060,7 @@ async function scanWhatsAppSources(
   }
 }
 
-/** Harici mesaj havuzu (wpbot) — URL üzerinden ilan çek. */
+/** Harici mesaj/medya havuzu (wpbot) — URL üzerinden ilan çek. */
 async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Promise<{
   messagesRead: number;
   published: number;
@@ -2068,25 +2071,25 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
   const stats = { messagesRead: 0, published: 0, duplicates: 0, skipped: 0, errors: 0 };
   const base = normalizePoolBaseUrl(source.url);
   if (!base) throw new Error("Geçersiz havuz URL");
+  const kind = poolKindFromPlatform(source.platform);
 
   await patchSourceProgress(source.id, { isScanning: true, lastError: null });
 
-  // Sunucu yeniden başlasa bile imleçten devam; ilk tarama / sıfırlada baştan (15g kesit).
   const cursorId = parseInt(source.lastTelegramMessageId ?? "0", 10) || 0;
   const fresh = await fetchAllPoolMessages(base, {
     pageSize: 100,
-    // Dinlemede sık ve geniş; ilk taramada 20 güne yetecek kadar sayfa
     maxPages: source.initialScanDone ? 40 : 100,
     minIdExclusive: source.initialScanDone ? cursorId : 0,
+    kind,
   });
 
-  // Dinlemede en yeni sayfaları da tara — filtre/kaçırma sonrası hemen yayınlansın
   let messages = fresh;
   if (source.initialScanDone) {
     const catchUp = await fetchAllPoolMessages(base, {
       pageSize: 100,
       maxPages: 5,
       minIdExclusive: 0,
+      kind,
     });
     const seen = new Set(fresh.map((m) => Number(m.id) || 0));
     for (const m of catchUp) {
@@ -2110,9 +2113,9 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     try {
       const result = await processMessage(
         source,
-        poolMessageExternalId(msg),
+        poolMessageExternalId(msg, kind),
         text,
-        poolMessageSourceUrl(base, msg),
+        poolMessageSourceUrl(base, msg, kind),
         postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : undefined,
         !source.initialScanDone,
       );
@@ -2121,11 +2124,10 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
       else stats.skipped += 1;
     } catch (err) {
       stats.errors += 1;
-      logger.warn({ err, sourceId: source.id, poolId: msg.id }, "scraper: url_pool message failed");
+      logger.warn({ err, sourceId: source.id, poolId: msg.id, kind }, "scraper: url_pool message failed");
     }
   }
 
-  // İlk tarama bitti → dinleme; sonraki yeni ilanlar kullanıcıya gider
   const finishingInitial = !source.initialScanDone;
   const completedAt = source.initialScanCompletedAt
     ?? (finishingInitial ? new Date() : null);
@@ -2135,7 +2137,6 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     lastError: null,
     lastTelegramMessageId: newestId > 0 ? String(newestId) : source.lastTelegramMessageId,
     lastScanMessagesRead: stats.messagesRead,
-    // Bulunan = yayınlanan + çift + filtreden geçenler (atlananlar dahil görünsün)
     lastScanFound: stats.published + stats.duplicates + stats.skipped,
     lastScanAdded: stats.published,
     lastScanDuplicates: stats.duplicates,
@@ -2151,6 +2152,7 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
   logger.info({
     sourceId: source.id,
     base,
+    kind,
     ...stats,
     newestId,
     operation: "url_pool_scan",
@@ -2191,79 +2193,129 @@ async function scanUrlPoolSources(
   }
 }
 
-/** Admin: havuz URL kaydet / güncelle ve taramayı başlat. */
-export async function saveUrlPoolSource(poolUrl: string): Promise<{
+/** Admin: mesaj + medya havuz URL kaydet / güncelle ve taramayı başlat. */
+export async function saveUrlPoolSource(
+  poolUrl: string,
+  mediaUrl?: string | null,
+): Promise<{
   sourceId: number;
+  mediaSourceId: number | null;
   created: boolean;
   baseUrl: string;
+  mediaBaseUrl: string | null;
   poolTotal: number;
+  mediaTotal: number;
 }> {
   const base = normalizePoolBaseUrl(poolUrl);
-  if (!base) throw new Error("Geçersiz URL. Örn: https://wpbot-production-cf99.up.railway.app");
+  if (!base) throw new Error("Geçersiz mesaj havuzu URL. Örn: https://wpbot-production-cf99.up.railway.app");
+
+  const mediaRaw = String(mediaUrl ?? "").trim();
+  // Medya URL boşsa aynı host'tan /api/whatsapp/media çekilir
+  const mediaBase = mediaRaw ? normalizePoolBaseUrl(mediaRaw) : base;
+  if (mediaRaw && !mediaBase) {
+    throw new Error("Geçersiz medya havuzu URL. Örn: https://wpbot-production-cf99.up.railway.app/medya");
+  }
 
   let poolTotal = 0;
+  let mediaTotal = 0;
   try {
     const st = await fetchPoolStats(base);
-    poolTotal = st.total;
+    poolTotal = st.textTotal || st.total;
+    mediaTotal = st.mediaTotal;
   } catch (err) {
     throw new Error(
       `Havuza ulaşılamadı: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
-  let [source] = await db.select().from(sourcesTable)
-    .where(eq(sourcesTable.platform, "url_pool"))
-    .orderBy(asc(sourcesTable.id))
-    .limit(1);
-  let created = false;
-
-  if (!source) {
-    [source] = await db.insert(sourcesTable).values({
-      name: "İlan Havuzu",
-      platform: "url_pool",
-      url: base,
-      active: true,
-      status: "active",
-      autoPublish: true,
-      requireApproval: false,
-      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
-      initialScanDone: false,
-      initialScanProgress: 1,
-    }).returning();
-    created = true;
-  } else {
-    await db.update(sourcesTable).set({
-      url: base,
-      name: "İlan Havuzu",
-      active: true,
-      status: "active",
-      autoPublish: true,
-      requireApproval: false,
-      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
-      lastError: null,
-    }).where(eq(sourcesTable.id, source.id));
-    source = {
-      ...source,
-      url: base,
-      autoPublish: true,
-      requireApproval: false,
-      checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
-    };
+  // Medya endpoint erişimini doğrula
+  try {
+    const page = await fetchAllPoolMessages(mediaBase!, { pageSize: 1, maxPages: 1, kind: "media" });
+    mediaTotal = Math.max(mediaTotal, page.length);
+  } catch (err) {
+    throw new Error(
+      `Medya havuzuna ulaşılamadı (/api/whatsapp/media): ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
-  if (!source) throw new Error("Havuz kaynağı oluşturulamadı");
+  async function upsertPoolSource(opts: {
+    platform: "url_pool" | "url_pool_media";
+    name: string;
+    url: string;
+  }) {
+    let [source] = await db.select().from(sourcesTable)
+      .where(eq(sourcesTable.platform, opts.platform))
+      .orderBy(asc(sourcesTable.id))
+      .limit(1);
+    let created = false;
+    if (!source) {
+      [source] = await db.insert(sourcesTable).values({
+        name: opts.name,
+        platform: opts.platform,
+        url: opts.url,
+        active: true,
+        status: "active",
+        autoPublish: true,
+        requireApproval: false,
+        checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
+        initialScanDone: false,
+        initialScanProgress: 1,
+      }).returning();
+      created = true;
+    } else {
+      await db.update(sourcesTable).set({
+        url: opts.url,
+        name: opts.name,
+        active: true,
+        status: "active",
+        autoPublish: true,
+        requireApproval: false,
+        checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
+        lastError: null,
+      }).where(eq(sourcesTable.id, source.id));
+      source = { ...source, url: opts.url };
+    }
+    if (!source) throw new Error(`${opts.name} kaynağı oluşturulamadı`);
+    return { source, created };
+  }
+
+  const main = await upsertPoolSource({
+    platform: "url_pool",
+    name: "İlan Havuzu",
+    url: base,
+  });
+
+  let mediaSourceId: number | null = null;
+  let mediaCreated = false;
+  {
+    const media = await upsertPoolSource({
+      platform: "url_pool_media",
+      name: "Medya Havuzu",
+      url: mediaBase!,
+    });
+    mediaSourceId = media.source.id;
+    mediaCreated = media.created;
+  }
+
   void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: url_pool manuel tarama hatası"));
-  return { sourceId: source.id, created, baseUrl: base, poolTotal };
+  return {
+    sourceId: main.source.id,
+    mediaSourceId,
+    created: main.created || mediaCreated,
+    baseUrl: base,
+    mediaBaseUrl: mediaBase,
+    poolTotal,
+    mediaTotal,
+  };
 }
 
 export async function triggerUrlPoolScan(): Promise<{ sourceId: number; ready: boolean }> {
-  const [source] = await db.select().from(sourcesTable)
-    .where(eq(sourcesTable.platform, "url_pool"))
-    .orderBy(asc(sourcesTable.id))
-    .limit(1);
-  if (!source) throw new Error("Önce havuz URL kaydedin");
+  const rows = await db.select().from(sourcesTable)
+    .where(inArray(sourcesTable.platform, ["url_pool", "url_pool_media"]))
+    .orderBy(asc(sourcesTable.id));
+  if (!rows.length) throw new Error("Önce havuz URL kaydedin");
   void runScraperCycle(true).catch((err) => logger.error({ err }, "scraper: url_pool scan-now hatası"));
-  return { sourceId: source.id, ready: true };
+  return { sourceId: rows[0]!.id, ready: true };
 }
 
 export async function getUrlPoolStatus() {
@@ -2271,81 +2323,101 @@ export async function getUrlPoolStatus() {
     .where(eq(sourcesTable.platform, "url_pool"))
     .orderBy(asc(sourcesTable.id))
     .limit(1);
-  if (!source) {
+  const [mediaSource] = await db.select().from(sourcesTable)
+    .where(eq(sourcesTable.platform, "url_pool_media"))
+    .orderBy(asc(sourcesTable.id))
+    .limit(1);
+
+  if (!source && !mediaSource) {
     return {
       configured: false,
       baseUrl: null as string | null,
+      mediaBaseUrl: null as string | null,
       poolTotal: null as number | null,
+      mediaTotal: null as number | null,
       listening: false,
       source: null as null,
+      mediaSource: null as null,
     };
   }
+
+  const primary = source ?? mediaSource!;
   let poolTotal: number | null = null;
+  let mediaTotal: number | null = null;
   let listening = false;
   try {
-    const st = await fetchPoolStats(source.url);
-    poolTotal = st.total;
+    const st = await fetchPoolStats(primary.url);
+    poolTotal = st.textTotal || st.total;
+    mediaTotal = st.mediaTotal;
     listening = st.listening;
   } catch { /* ignore remote errors in status */ }
 
-  const [countRow] = await db.select({ c: sql<number>`count(*)::int` })
-    .from(listingsTable)
-    .where(and(eq(listingsTable.sourceId, source.id), eq(listingsTable.status, "active")));
+  async function mapSource(row: typeof sourcesTable.$inferSelect) {
+    const [countRow] = await db.select({ c: sql<number>`count(*)::int` })
+      .from(listingsTable)
+      .where(and(eq(listingsTable.sourceId, row.id), eq(listingsTable.status, "active")));
+    return {
+      id: row.id,
+      name: row.name,
+      active: row.active,
+      checkInterval: row.checkInterval,
+      initialScanDone: row.initialScanDone,
+      isScanning: row.isScanning,
+      totalImported: row.totalImported,
+      listingCount: Number(countRow?.c ?? 0),
+      lastScanMessagesRead: row.lastScanMessagesRead,
+      lastScanFound: row.lastScanFound,
+      lastScanAdded: row.lastScanAdded,
+      lastScanDuplicates: row.lastScanDuplicates,
+      lastScanErrors: row.lastScanErrors,
+      lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
+      lastError: row.lastError,
+      cursorId: row.lastTelegramMessageId,
+    };
+  }
 
   return {
     configured: true,
-    baseUrl: source.url,
+    baseUrl: source?.url ?? null,
+    mediaBaseUrl: mediaSource?.url ?? (source ? source.url : null),
     poolTotal,
+    mediaTotal,
     listening,
-    source: {
-      id: source.id,
-      name: source.name,
-      active: source.active,
-      checkInterval: source.checkInterval,
-      initialScanDone: source.initialScanDone,
-      isScanning: source.isScanning,
-      totalImported: source.totalImported,
-      listingCount: Number(countRow?.c ?? 0),
-      lastScanMessagesRead: source.lastScanMessagesRead,
-      lastScanFound: source.lastScanFound,
-      lastScanAdded: source.lastScanAdded,
-      lastScanDuplicates: source.lastScanDuplicates,
-      lastScanErrors: source.lastScanErrors,
-      lastCheckedAt: source.lastCheckedAt?.toISOString() ?? null,
-      lastError: source.lastError,
-      cursorId: source.lastTelegramMessageId,
-    },
+    source: source ? await mapSource(source) : null,
+    mediaSource: mediaSource ? await mapSource(mediaSource) : null,
   };
 }
 
 export async function resetUrlPoolSource(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
-  const [source] = await db.select().from(sourcesTable)
-    .where(eq(sourcesTable.platform, "url_pool"))
-    .orderBy(asc(sourcesTable.id))
-    .limit(1);
-  if (!source) return { deletedListings: 0 };
-  const deletedListings = await deleteListingsForSource(source);
-  await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, source.id));
-  await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, source.id));
-  await db.update(sourcesTable).set({
-    lastCheckedAt: null,
-    lastTelegramMessageId: null,
-    initialScanDone: false,
-    initialScanProgress: 1,
-    initialScanCompletedAt: null,
-    isScanning: false,
-    lastError: null,
-    checkInterval: 5,
-    active: true,
-    status: "active",
-    totalImported: 0,
-    lastScanMessagesRead: 0,
-    lastScanFound: 0,
-    lastScanAdded: 0,
-    lastScanDuplicates: 0,
-    lastScanErrors: 0,
-    lastScanPublished: 0,
-  }).where(eq(sourcesTable.id, source.id));
+  const rows = await db.select().from(sourcesTable)
+    .where(inArray(sourcesTable.platform, ["url_pool", "url_pool_media"]));
+  if (!rows.length) return { deletedListings: 0 };
+
+  let deletedListings = 0;
+  for (const source of rows) {
+    deletedListings += await deleteListingsForSource(source);
+    await db.delete(importedPostsTable).where(eq(importedPostsTable.sourceId, source.id));
+    await db.delete(pendingJobsTable).where(eq(pendingJobsTable.sourceId, source.id));
+    await db.update(sourcesTable).set({
+      lastCheckedAt: null,
+      lastTelegramMessageId: null,
+      initialScanDone: false,
+      initialScanProgress: 1,
+      initialScanCompletedAt: null,
+      isScanning: false,
+      lastError: null,
+      checkInterval: 5,
+      active: true,
+      status: "active",
+      totalImported: 0,
+      lastScanMessagesRead: 0,
+      lastScanFound: 0,
+      lastScanAdded: 0,
+      lastScanDuplicates: 0,
+      lastScanErrors: 0,
+      lastScanPublished: 0,
+    }).where(eq(sourcesTable.id, source.id));
+  }
   if (!opts?.deferRescan) {
     void runScraperCycle(true).catch(() => undefined);
   }
@@ -2536,7 +2608,7 @@ export function startScraperWorker(): void {
       void (async () => {
         try {
           const poolSources = await db.select().from(sourcesTable)
-            .where(and(eq(sourcesTable.platform, "url_pool"), eq(sourcesTable.active, true)));
+            .where(and(inArray(sourcesTable.platform, ["url_pool", "url_pool_media"]), eq(sourcesTable.active, true)));
           if (poolSources.length) await scanUrlPoolSources(poolSources, false);
         } catch (err) {
           logger.warn({ err }, "scraper: url_pool dinleme döngüsü hatası");
@@ -2860,7 +2932,7 @@ export async function resetAllBotsAndRescan(): Promise<{
     checkInterval: INCREMENTAL_SCAN_INTERVAL_MIN,
     active: true,
     status: "active",
-  }).where(inArray(sourcesTable.platform, ["telegram", "url_pool", "eleman"]));
+  }).where(inArray(sourcesTable.platform, ["telegram", "url_pool", "url_pool_media", "eleman"]));
 
   await refreshScraperInterval();
 
