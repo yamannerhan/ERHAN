@@ -177,18 +177,17 @@ export async function processWhatsAppMessage(params: {
       return listing.id;
     });
 
-    // İlk tarama + 10 dk grace: yalnız admin. Sonra herkes + sohbet; admin'e WhatsApp etiketi.
+    // İlk tarama: yalnız admin. Bitince yeni WhatsApp ilanları herkese.
     void (async () => {
       try {
-        const { isBotPublicAnnounceReady } = await import("../../lib/bot-public-announce");
+        const { canAnnounceListingToUsers } = await import("../../lib/bot-public-announce");
         const [src] = await db.select({
           initialScanStatus: whatsappSourcesTable.initialScanStatus,
-          initialScanCompletedAt: whatsappSourcesTable.initialScanCompletedAt,
         }).from(whatsappSourcesTable).where(eq(whatsappSourcesTable.id, sourceId)).limit(1);
-        const ready = isBotPublicAnnounceReady({
-          isInitialScan: src?.initialScanStatus !== "completed",
-          initialScanDone: src?.initialScanStatus === "completed",
-          initialScanCompletedAt: src?.initialScanCompletedAt ?? null,
+        const done = src?.initialScanStatus === "completed";
+        const ready = canAnnounceListingToUsers({
+          isInitialScan: !done,
+          initialScanDone: done,
         });
         const sourceLabel = announceSourceLabel("whatsapp");
         await announceNewListing(

@@ -754,11 +754,15 @@ async function processMessage(
     });
   } catch { /* ignore */ }
 
-  // İlk tarama dışında yeni ilan hemen herkese duyurulur (grace yok — kaçırma olmasın).
+  // İlk tarama / sıfırlama: kullanıcıya bildirim YOK (yalnız admin).
+  // Tarama bitince gelen yeni ilanlar herkese gider.
   try {
-    const { ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    const { canAnnounceListingToUsers, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    const ready = !isInitialScan;
+    const ready = canAnnounceListingToUsers({
+      isInitialScan,
+      initialScanDone: source.initialScanDone,
+    });
     const sourceLabel = announceSourceLabel(source.platform);
     void announceNewListing({
       id: newListing.id,
@@ -1592,10 +1596,14 @@ async function publishElemanJob(
   if (!outcome) return "duplicate";
   const newListing = outcome;
 
+  // İlk tarama: kullanıcıya bildirim yok. Otomatik moda geçince yeni ilanlar gider.
   try {
-    const { ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
+    const { canAnnounceListingToUsers, ensureBotAnnounceSchema } = await import("../lib/bot-public-announce");
     await ensureBotAnnounceSchema();
-    const ready = !!source.initialScanDone;
+    const ready = canAnnounceListingToUsers({
+      isInitialScan: !source.initialScanDone,
+      initialScanDone: source.initialScanDone,
+    });
     const sourceLabel = announceSourceLabel("eleman");
     void announceNewListing({
       id: newListing.id,
@@ -2082,7 +2090,7 @@ async function checkUrlPoolSource(source: typeof sourcesTable.$inferSelect): Pro
     }
   }
 
-  // İlk tarama bitti → dinleme modu (grace yok; yeni ilan hemen duyurulur)
+  // İlk tarama bitti → dinleme; sonraki yeni ilanlar kullanıcıya gider
   const finishingInitial = !source.initialScanDone;
   const completedAt = source.initialScanCompletedAt
     ?? (finishingInitial ? new Date() : null);
