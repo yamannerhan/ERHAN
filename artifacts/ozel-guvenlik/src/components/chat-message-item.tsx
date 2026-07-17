@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  CornerUpLeft, Pin, PinOff, Bot, MoreHorizontal, Ban,
+  CornerUpLeft, Pin, PinOff, Bot, MoreHorizontal, Ban, Trash2,
 } from "lucide-react";
 import { FramedAvatar, chatBubbleClass } from "@/components/framed-avatar";
 import { useDisplayMode } from "@/contexts/DisplayModeContext";
@@ -128,6 +128,7 @@ export function ChatMessageItem({
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [muteOpen, setMuteOpen] = useState(false);
+  const [holdDeleteVisible, setHoldDeleteVisible] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const muteRef = useRef<HTMLDivElement>(null);
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -251,10 +252,16 @@ export function ChatMessageItem({
     if (!canModerate || !isDbMessageId(msg.id)) return;
     longPressFired.current = false;
     clearLongPress();
+    // 1.5 sn basılı tut → sil tuşu çıksın (hemen tıklamada çıkmaz)
     longPressRef.current = setTimeout(() => {
       longPressFired.current = true;
-      void deleteMessage(false);
-    }, 550);
+      setHoldDeleteVisible(true);
+    }, 1500);
+  };
+
+  const hideHoldDelete = () => {
+    setHoldDeleteVisible(false);
+    longPressFired.current = false;
   };
 
   const canShowModTools = !!(canModerate || canPin) && isDbMessageId(msg.id);
@@ -442,7 +449,7 @@ export function ChatMessageItem({
           onContextMenu={(e) => {
             if (canModerate && isDbMessageId(msg.id)) {
               e.preventDefault();
-              void deleteMessage(false);
+              setHoldDeleteVisible(true);
             }
           }}
         >
@@ -456,6 +463,23 @@ export function ChatMessageItem({
             <div className="cmc-text">{renderContent(msg.content)}</div>
           )}
         </div>
+
+        {holdDeleteVisible && canModerate && isDbMessageId(msg.id) && (
+          <div className="cmc-hold-delete" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="cmc-hold-delete__btn"
+              disabled={busy}
+              onClick={() => void deleteMessage(false).then(hideHoldDelete)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Sil
+            </button>
+            <button type="button" className="cmc-hold-delete__cancel" onClick={hideHoldDelete}>
+              İptal
+            </button>
+          </div>
+        )}
 
         {isDbMessageId(msg.id) && onReact && !msg.poll && (
           <div className="cmc-reactions" onClick={(e) => e.stopPropagation()}>

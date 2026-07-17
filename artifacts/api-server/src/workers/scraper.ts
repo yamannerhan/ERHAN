@@ -31,7 +31,7 @@ import {
   poolMessageExternalId,
   poolMessageSourceUrl,
 } from "../services/url-pool-client";
-import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, isUrlPoolJobPosting, formatPoolListingDescription } from "../lib/job-parsing";
+import { extractSalary, extractGender, extractLocation, extractExplicitWorkLocation, extractPhoneNumbers, formatTelApplyUrl, extractTitle, extractWorkType, isSecurityJobPosting, isSponsoredPost, isJobSeekerPost, isNonSecurityStaffPosting, isUrlPoolJobPosting, isChannelNoisePost, formatPoolListingDescription } from "../lib/job-parsing";
 import { maybeClassifyWithV2 } from "../services/location/classifyListingLocationV2";
 import type { ParsedLocation } from "../lib/job-parsing";
 import { getProvinceMatchTerms, textMatchesProvince } from "../lib/location-terms";
@@ -407,21 +407,27 @@ function asciiTr(text: string): string {
 }
 
 /**
- * WhatsApp / havuz: maaş veya telefon olmasa da "özel güvenlik …" ilanlarını alır.
- * İş arayan + sponsorlu + temizlik vb. dışarıda kalır.
+ * WhatsApp / Telegram / havuz esnek kapı:
+ * Maaş veya telefon olmasa da gerçek güvenlik ilanı alınır.
+ * "özel güvenlik" geçen grup/bot gürültüsü elenir.
  */
 function isWhatsAppSecurityJobPosting(text: string): boolean {
   if (text.trim().length < 18 || isSponsoredPost(text) || isJobSeekerPost(text) || isNonSecurityStaffPosting(text)) {
     return false;
   }
+  if (isChannelNoisePost(text)) return false;
+
   const normalized = asciiTr(text);
-  const securityRole = /(?:ozel\s+guvenlik|ogg\b|5188|silahli\s+guvenlik|silahsiz\s+guvenlik|guvenlik\s+(?:gorevli(?:si|leri)?|personel(?:i|leri)?|eleman(?:i|lari)?|amiri|sorumlusu|karti|kimlik)|bay\s+guvenlik|bayan\s+guvenlik|kimlikli\s+(?:bay|bayan)?\s*guvenlik|\bguvenlik\b)/.test(normalized);
+  const explicitRole = /(?:ozel\s+guvenlik|ogg\b|5188|silahli\s+guvenlik|silahsiz\s+guvenlik|guvenlik\s+(?:gorevli(?:si|leri)?|personel(?:i|leri)?|eleman(?:i|lari)?|amiri|sorumlusu|karti|kimlik)|bay\s+guvenlik|bayan\s+guvenlik|kimlikli\s+(?:bay|bayan)?\s*guvenlik)/.test(normalized);
+  const broadOnly = /\bguvenlik\b/.test(normalized) && !explicitRole;
   const hiringSignal = /(?:araniyor|aranmaktadir|aranan|alinacak|alinacaktir|alim\s+yapilacak|personel\s+alimi|eleman\s+alimi|ekip\s+arkadasi|basvurular|basvuru\s*(?:icin|:)|ise\s+alim|istihdam|ihtiyac(?:imiz)?\s+var|acil\s+(?:bay|bayan|personel)|is\s+ilani|gorevlendirilmek|calisma\s+arkadas)/.test(normalized);
   const listingDetails = /(?:\b(?:maas|ucret|yevmiye|vardiya|proje|servis|yemek|sgk|ssk|avm|fabrika|depo|site)\b|(?:\+?90|0)?5\d{2}[\s().-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2})/.test(normalized);
-  // Esnek: güvenlik rolü + (alım VEYA detay VEYA yeterince uzun ilan metni)
-  if (securityRole && (hiringSignal || listingDetails || text.trim().length >= 55)) return true;
-  // "Güvenlik" geçmese bile açık alım + telefon + iş detayı (havuz gürültüsü az)
-  if (hiringSignal && listingDetails && text.trim().length >= 40) return true;
+
+  // Açık rol: alım VEYA detay VEYA yeterli uzunluk (telefon/maaş şart değil)
+  if (explicitRole && (hiringSignal || listingDetails || text.trim().length >= 40)) return true;
+  // Sadece "güvenlik" geçen sohbet — alım + (detay veya uzun metin) şart
+  if (broadOnly && hiringSignal && (listingDetails || text.trim().length >= 55)) return true;
+  if (hiringSignal && listingDetails && text.trim().length >= 35) return true;
   return false;
 }
 
@@ -558,6 +564,10 @@ async function processMessage(
   isInitialScan = false,
 ): Promise<ProcessResult> {
   if (!text?.trim()) return "skipped";
+  // Telegram: "özel güvenlik" geçen kanal/bot gürültüsünü ilan sanma
+  if ((source.platform === "telegram" || source.platform === "whatsapp") && isChannelNoisePost(text)) {
+    return "skipped";
+  }
   const matchesSecurityJob = source.platform === "url_pool"
     ? isUrlPoolJobPosting(text)
     : (
@@ -610,12 +620,16 @@ async function processMessage(
   }
 
   const hash = createDuplicateHash(text);
-  if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
+  // Havuz: aynı firma birden fazla ilan verebilir — yalnız aynı mesaj ID çift sayılır.
+  // Telegram: aynı metin yeniden paylaşımı tek ilan olarak kalsın.
+  if (source.platform !== "url_pool") {
+    if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
 
-  const duplicateListingId = await findDuplicateActiveListing(text, hash);
-  if (duplicateListingId) {
-    await touchListingSeen(duplicateListingId);
-    return "duplicate";
+    const duplicateListingId = await findDuplicateActiveListing(text, hash);
+    if (duplicateListingId) {
+      await touchListingSeen(duplicateListingId);
+      return "duplicate";
+    }
   }
 
   const existingByMessage = await findListingBySourceMessage(source.id, messageId);
@@ -1494,9 +1508,8 @@ async function publishElemanJob(
   job: ElemanJobDetail,
 ): Promise<ProcessResult> {
   if (!job.phone?.trim()) return "skipped";
-  if (!isSecurityJobPosting(job.rawText) && !isSecurityJobPosting(`${job.title}\n${job.description}`)) {
-    return "skipped";
-  }
+  // Eleman listesi zaten isOzelGuvenlikJob + telefon ile süzülür.
+  // Aynı firma/telefon birden fazla ilan verebilir — metin hash ile çift sayma.
 
   const externalId = `eleman_${job.id}`;
   const hash = createDuplicateHash(job.rawText);
@@ -1526,17 +1539,10 @@ async function publishElemanJob(
         })
         .where(eq(listingsTable.id, existingBySource));
     }
-    return "duplicate";
+    return "updated";
   }
 
-  if (await findDuplicateImported(hash, source.id, externalId)) return "duplicate";
-
-  const duplicateListingId = await findDuplicateActiveListing(job.rawText, hash);
-  if (duplicateListingId) {
-    await touchListingSeen(duplicateListingId);
-    return "duplicate";
-  }
-
+  // Yalnızca aynı Eleman ilan ID'si çift sayılır (isim/telefon/metin benzerliği yetmez)
   const [seenExt] = await db.select({ id: importedPostsTable.id })
     .from(importedPostsTable)
     .where(and(
@@ -1544,7 +1550,7 @@ async function publishElemanJob(
       eq(importedPostsTable.externalId, externalId),
     ))
     .limit(1);
-  if (seenExt) return "duplicate";
+  if (seenExt) return "updated";
 
   const jobCity = job.locationDisplay ?? job.city;
   const parsedCity = resolveListingCity(extractLocation(job.rawText));
@@ -1667,8 +1673,7 @@ async function checkElemanListenAllCities(
         if (!isOzelGuvenlikJob(listing.title, "")) continue;
         const existing = await findListingBySourceMessage(source.id, listing.id);
         if (existing) {
-          stats.duplicates++;
-          stats.found++;
+          // Zaten yayında — yeniden tarama; çift ilan değil
           continue;
         }
         await sleep(200);
@@ -1681,6 +1686,8 @@ async function checkElemanListenAllCities(
             stats.found++;
           } else if (result === "duplicate") {
             stats.duplicates++;
+            stats.found++;
+          } else if (result === "updated") {
             stats.found++;
           }
         } catch (err) {
@@ -1769,6 +1776,7 @@ async function checkElemanSource(source: typeof sourcesTable.$inferSelect): Prom
           stats.duplicates++;
           stats.found++;
         }
+        // updated = zaten yayında; çift sayılmaz
       } catch (err) {
         stats.errors++;
         logger.warn({ err, sourceId: source.id, jobId: job.id }, "scraper: Eleman.net ilanı işlenemedi");

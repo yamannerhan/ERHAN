@@ -533,6 +533,30 @@ export function isJobSeekerPost(text: string): boolean {
 }
 
 /**
+ * Telegram/kanal gürültüsü: "özel güvenlik" geçiyor diye ilan sayma.
+ * Grup kuralları, hoşgeldin, bot duyurusu, üyelik metinleri.
+ */
+export function isChannelNoisePost(text: string): boolean {
+  const t = normalizeTr(text);
+  const hasHiring = HIRING_SIGNAL.test(t)
+    || /(?:al[ıi]nacak|ba[şs]vuru|maa[şs]|[üu]cret|yevmiye|ileti[şs]im\s*:|irtibat\s*:|0?5\d{9}|5\d{2}[\s\-.]?\d{3})/.test(t);
+
+  // Hoşgeldin / kurallar / bot meta
+  if (/(?:ho[şs]\s*geldin|hosgeldiniz|grup\s+kurallar[ıi]|kanal\s+kurallar[ıi]|sabitlenmi[şs]\s+mesaj|pinned\s+message|yard[ıi]m\s+men[üu]|bot\s+komut|komutlar\s*:|admin(?:e|lere)?\s+(?:yaz[ıi]n|ula[şs][ıi]n))/.test(t) && !hasHiring) {
+    return true;
+  }
+  // "Bu grup özel güvenlik …" / topluluk tanıtımı — ilan değil
+  if (/(?:bu\s+(?:grup|kanal|topluluk).{0,40}(?:özel\s+)?g[üu]venlik|(?:özel\s+)?g[üu]venlik\s+(?:grubu|kanalı|toplulu[ğg]u|sohbeti)|üyel(?:er|ik).{0,30}(?:ilan|payla[şs])|sadece\s+(?:i[şs]\s+)?ilan\s+payla[şs]|reklam\s+yasak|ilan\s+d[ıi][şs][ıi]\s+yazmay[ıi]n)/.test(t) && !hasHiring) {
+    return true;
+  }
+  // Haber / bilgilendirme
+  if (/(?:son\s+dakika|haber\s*:|bilgilendirme\s*:|duyurulur|e[ğg]itim\s+program[ıi]|seminer\s+|webinar)/.test(t) && !hasHiring) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Mesaj havuzu (url_pool):
  * - Sadece özel güvenlik iş ilanları
  * - Anahtar: güvenlik, özel, ögg, silahlı/silahsız, danışman, proje(+güvenlik), koruma…
@@ -541,11 +565,12 @@ export function isJobSeekerPost(text: string): boolean {
  */
 export function isUrlPoolJobPosting(text: string): boolean {
   const t = text.trim();
-  if (t.length < 15) return false;
+  if (t.length < 12) return false;
   if (isSponsoredPost(t)) return false;
   if (isJobSeekerPost(t)) return false;
   if (isUnrelatedJobRole(t)) return false;
   if (isNonSecurityStaffPosting(t)) return false;
+  if (isChannelNoisePost(t)) return false;
 
   // Zorunlu: güvenlik alanına ait anahtar kelime
   if (!hasSecurityKeyword(t)) return false;
@@ -554,24 +579,25 @@ export function isUrlPoolJobPosting(text: string): boolean {
   if (isSecurityJobPosting(t)) return true;
 
   const n = normalizeTr(t);
-  const hiringOrListing = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacak|al[ıi]nacakt[ıi]r|ba[şs]vuru|maa[şs]|[üu]cret|proje|vardiya|personel|ilan|acil|ihtiya[çc]|kimlik|eleman|i[şs]e\s*al[ıi]m|kontenjan|g[öo]rev|hakedi[şs]|yevmiye|sgk|servis|ileti[şs]im|irtibat)/.test(n);
+  const hiringOrListing = /(?:aran[ıi]yor|aranmaktad[ıi]r|al[ıi]nacak|al[ıi]nacakt[ıi]r|ba[şs]vuru|maa[şs]|[üu]cret|proje|vardiya|personel|ilan|acil|ihtiya[çc]|kimlik|eleman|i[şs]e\s*al[ıi]m|kontenjan|g[öo]rev|hakedi[şs]|yevmiye|sgk|servis|ileti[şs]im|irtibat|çal[ıi][şs]ma\s+arkada[şs]|ekip)/.test(n);
   const hasPhone = /(?:\+?90|0)?\s*5\d{2}[\s().-]*\d{3}/.test(t);
 
   // Güvenlik kelimesi var + (alım/ilan sinyali veya telefon veya yeterli uzunluk)
   if (hiringOrListing) return true;
-  if (hasPhone && t.length >= 20) return true;
-  if (t.length >= 40) return true;
+  if (hasPhone && t.length >= 18) return true;
+  if (t.length >= 28) return true;
   return false;
 }
 
 export function isSecurityJobPosting(text: string): boolean {
-  if (text.length < 35) return false;
+  if (text.length < 28) return false;
   if (isSponsoredPost(text) || isNonSecurityStaffPosting(text) || isJobSeekerPost(text)) return false;
+  if (isChannelNoisePost(text)) return false;
 
   const t = normalizeTr(text);
 
   // Sohbet / bilgi / soru gürültüsü — ilan değil
-  if (/(?:selam|merhaba|nas[ıi]ls[ıi]n|te[şs]ekk[üu]r|kolay gelsin|hay[ıi]rl[ıi]s[ıi]|amin\b|in[şs]allah)/.test(t) && t.length < 120) {
+  if (/(?:selam|merhaba|nas[ıi]ls[ıi]n|te[şs]ekk[üu]r|kolay gelsin|hay[ıi]rl[ıi]s[ıi]|amin\b|in[şs]allah)/.test(t) && t.length < 100) {
     return false;
   }
   if (/(?:ne\s+zaman|var\s*m[ıi]\s*\?|bilen\s+var\s*m[ıi]|yard[ıi]mc[ıi]\s+olur\s*mus|nas[ıi]l\s+ba[şs]vuru)/.test(t) && !HIRING_SIGNAL.test(t)) {
@@ -589,14 +615,14 @@ export function isSecurityJobPosting(text: string): boolean {
   const hasPhone = /(?:0|\+90)?[\s-]*5\d{2}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}/.test(t) || /5\d{9}/.test(t);
   const hasJobDetails = /vardiya|servis|yemek|sgk|proje|avm|site|fabrika|depo|hastane|metro|2\+2|2\s+\+\s+2|part[\s-]?time|g[üu]nl[üu]k/.test(t);
 
-  // Açık güvenlik rolü + (alım sinyali veya maaş+iletişim)
+  // Açık güvenlik rolü — maaş/telefon şart değil
   if (explicitSecurity && hiringStrong) return true;
-  if (explicitSecurity && salary && (hasPhone || hiringStrong || hasJobDetails)) return true;
-  if (explicitSecurity && hasPhone && hasJobDetails) return true;
+  if (explicitSecurity && (salary || hasPhone || hasJobDetails)) return true;
+  if (explicitSecurity && t.length >= 50) return true;
 
-  // Genel "güvenlik" — sohbet değilse maaş+telefon veya güçlü alım yeterli
+  // Genel "güvenlik" — sohbet değilse alım + (maaş|telefon|detay)
+  if (broadSecurity && hiringStrong && (salary || hasPhone || hasJobDetails || t.length >= 60)) return true;
   if (broadSecurity && salary && hasPhone) return true;
-  if (broadSecurity && hiringStrong && (salary || hasPhone || hasJobDetails)) return true;
 
   return false;
 }

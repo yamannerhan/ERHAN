@@ -2833,7 +2833,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
         <button onClick={deepRescan30Days} disabled={deepRescanning} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 transition-colors disabled:opacity-50">
-          <RefreshCw className={`w-3.5 h-3.5 ${deepRescanning ? "animate-spin" : ""}`} /> {deepRescanning ? "Taranıyor…" : "30 Gün Yeniden Tara"}
+          <RefreshCw className={`w-3.5 h-3.5 ${deepRescanning ? "animate-spin" : ""}`} /> {deepRescanning ? "Taranıyor…" : "20 Gün Yeniden Tara"}
         </button>
         <button onClick={resetBots} disabled={resetting || resettingAll} className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 bg-amber-500/15 text-amber-300 rounded-lg hover:bg-amber-500/25 transition-colors disabled:opacity-50">
           <RefreshCw className={`w-3.5 h-3.5 ${resetting ? "animate-spin" : ""}`} /> {resetting ? "Sıfırlanıyor…" : "Telegram Sıfırla"}

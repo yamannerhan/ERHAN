@@ -278,9 +278,16 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "Durum güncellenemedi");
-      setActive((prev) => prev ? { ...prev, status } : prev);
       setConfirmResolve(false);
-      await load();
+      if (status === "resolved" || status === "closed" || status === "cancelled") {
+        const id = active.id;
+        setTickets((prev) => prev.filter((t) => t.id !== id));
+        setActive(null);
+        setMode("list");
+      } else {
+        setActive((prev) => prev ? { ...prev, status } : prev);
+        await load();
+      }
     } catch (e: any) {
       setError(e?.message || "Hata");
     } finally {
@@ -295,7 +302,7 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
   const deleteTicket = async (id: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!isStaff) return;
-    if (!window.confirm("Bu destek talebi silinsin mi?")) return;
+    if (!window.confirm("Bu destek talebi ekrandan kaldırılsın mı?")) return;
     setSending(true);
     setError("");
     try {
@@ -307,11 +314,11 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
         const data = await r.json().catch(() => ({})) as { error?: string };
         throw new Error(data.error || "Silinemedi");
       }
+      setTickets((prev) => prev.filter((t) => t.id !== id));
       if (active?.id === id) {
         setActive(null);
         setMode("list");
       }
-      await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Hata");
     } finally {
@@ -409,14 +416,26 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
                 {!confirmResolve ? (
                   <div className="og-cs-staff-safe-row">
                     {closed ? (
-                      <button
-                        type="button"
-                        className="og-cs-reopen-btn"
-                        disabled={sending}
-                        onClick={() => void setStatus("answered")}
-                      >
-                        Yeniden Aç
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="og-cs-reopen-btn"
+                          disabled={sending}
+                          onClick={() => void setStatus("answered")}
+                        >
+                          Yeniden Aç
+                        </button>
+                        <button
+                          type="button"
+                          className="og-cs-resolve-btn"
+                          style={{ color: "#fb7185", borderColor: "rgba(251,113,133,0.35)" }}
+                          disabled={sending}
+                          onClick={() => void deleteTicket(active.id)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Ekrandan kaldır
+                        </button>
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -467,63 +486,44 @@ export function ChatSupportPanel({ onCloseChat }: { onCloseChat?: () => void }) 
     );
   }
 
-  /* Staff inbox — sohbet kutusundan yanıt */
+  /* Staff inbox — sohbet kutusundan yanıt (yalnızca aktif talepler) */
   if (isStaff) {
     const activeTickets = tickets.filter((t) => ACTIVE.has(t.status));
-    const resolvedTickets = tickets.filter((t) => t.status === "resolved").slice(0, 20);
     return (
       <div className="og-cs-panel">
         <div className="og-cs-hero">
           <Headphones className="w-5 h-5 text-amber-400" />
           <div>
             <div className="text-xs font-bold text-white">Destek Talepleri</div>
-            <div className="text-[10px] text-white/45">Çözülenleri yeniden açıp yanıtlayabilirsiniz.</div>
+            <div className="text-[10px] text-white/45">Çözülen talepler baloncuktan kalkar; admin panelden silinebilir.</div>
           </div>
         </div>
         {error && <div className="og-cs-error">{error}</div>}
-        {activeTickets.length === 0 && resolvedTickets.length === 0 ? (
-          <div className="og-cs-empty text-xs text-white/40">Destek talebi yok.</div>
+        {activeTickets.length === 0 ? (
+          <div className="og-cs-empty text-xs text-white/40">Aktif destek talebi yok.</div>
         ) : (
           <div className="og-cs-list">
-            {activeTickets.length > 0 && (
-              <>
-                <div className="text-[10px] font-bold text-amber-400/80 uppercase tracking-wide mb-1.5">Aktif</div>
-                {activeTickets.map((t) => (
-                  <button key={t.id} type="button" className="og-cs-ticket-row" onClick={() => void openThread(t.id)}>
-                    <span className="min-w-0 truncate">
-                      <span className="text-white/90">{t.subject}</span>
-                      {t.username ? <span className="text-white/35"> · @{t.username}</span> : null}
-                    </span>
-                    <span style={{ color: STATUS_COLOR[t.status] }}>{STATUS_LABEL[t.status] ?? t.status}</span>
-                  </button>
-                ))}
-              </>
-            )}
-            {resolvedTickets.length > 0 && (
-              <>
-                <div className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-wide mb-1.5 mt-3">Çözülenler</div>
-                {resolvedTickets.map((t) => (
-                  <div key={t.id} className="og-cs-ticket-row flex items-center gap-2">
-                    <button type="button" className="min-w-0 flex-1 text-left truncate" onClick={() => void openThread(t.id)}>
-                      <span className="text-white/90">{t.subject}</span>
-                      {t.username ? <span className="text-white/35"> · @{t.username}</span> : null}
-                    </button>
-                    <span className="shrink-0 text-[10px]" style={{ color: STATUS_COLOR[t.status] }}>
-                      {STATUS_LABEL[t.status] ?? t.status}
-                    </span>
-                    <button
-                      type="button"
-                      className="shrink-0 p-1.5 rounded-md text-rose-300 hover:bg-rose-500/15"
-                      title="Talebi sil"
-                      disabled={sending}
-                      onClick={(e) => void deleteTicket(t.id, e)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
+            <div className="text-[10px] font-bold text-amber-400/80 uppercase tracking-wide mb-1.5">Aktif</div>
+            {activeTickets.map((t) => (
+              <div key={t.id} className="og-cs-ticket-row flex items-center gap-2">
+                <button type="button" className="min-w-0 flex-1 text-left truncate" onClick={() => void openThread(t.id)}>
+                  <span className="text-white/90">{t.subject}</span>
+                  {t.username ? <span className="text-white/35"> · @{t.username}</span> : null}
+                </button>
+                <span className="shrink-0 text-[10px]" style={{ color: STATUS_COLOR[t.status] }}>
+                  {STATUS_LABEL[t.status] ?? t.status}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 p-1.5 rounded-md text-rose-300 hover:bg-rose-500/15"
+                  title="Ekrandan kaldır"
+                  disabled={sending}
+                  onClick={(e) => void deleteTicket(t.id, e)}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

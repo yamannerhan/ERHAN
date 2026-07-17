@@ -59,4 +59,22 @@ describe("isUrlPoolJobPosting — sadece özel güvenlik ilanları", () => {
       false,
     );
   });
+
+  it("rejects channel noise that only mentions özel güvenlik", () => {
+    assert.equal(
+      isUrlPoolJobPosting("Bu grup özel güvenlik çalışanları içindir. Kurallara uyun, reklam yasak."),
+      false,
+    );
+    assert.equal(
+      isUrlPoolJobPosting("Hoşgeldiniz! Özel güvenlik sohbet kanalına katıldınız."),
+      false,
+    );
+  });
+
+  it("accepts short security hiring without phone", () => {
+    assert.equal(
+      isUrlPoolJobPosting("Gebze özel güvenlik görevlisi aranıyor acil proje vardiya"),
+      true,
+    );
+  });
 });

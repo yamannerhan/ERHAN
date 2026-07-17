@@ -631,7 +631,7 @@ html:not(.dark) .og-chat-empty-art circle {
 }
 
 html:not(.dark) .cmc-bubble {
-  color: #10233f !important;
+  color: #000000 !important;
   background: #f8fbff !important;
   border-color: rgba(25, 94, 165, 0.16) !important;
   box-shadow: 0 4px 14px rgba(25, 94, 165, 0.07) !important;
@@ -642,9 +642,9 @@ html:not(.dark) .cmc--own .cmc-bubble {
 }
 
 html:not(.dark) :is(.cmc-name:not(.name-admin):not(.name-mod):not(.name-vip), .cmc-text, .cmc-time, .cmc-reply__text) {
-  color: #17324f !important;
+  color: #000000 !important;
   text-shadow: none !important;
-  -webkit-text-fill-color: #17324f !important;
+  -webkit-text-fill-color: #000000 !important;
 }
 
 /* Admin / mod / vip efektli isimler açık temada da korunsun */
