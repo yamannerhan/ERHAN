@@ -307,6 +307,11 @@ export function Layout({
           });
         }
       });
+      socket.on("notification:cleared", () => {
+        void refetchNotifs();
+        void refetchUnread();
+        void queryClient.invalidateQueries();
+      });
       socket.on("company:logo-updated", () => {
         void queryClient.invalidateQueries();
       });

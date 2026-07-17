@@ -2199,6 +2199,7 @@ export async function resetUrlPoolSource(): Promise<{ deletedListings: number }>
     isScanning: false,
     lastError: null,
     checkInterval: URL_POOL_LISTEN_INTERVAL_MIN,
+    totalImported: 0,
     lastScanMessagesRead: 0,
     lastScanFound: 0,
     lastScanAdded: 0,

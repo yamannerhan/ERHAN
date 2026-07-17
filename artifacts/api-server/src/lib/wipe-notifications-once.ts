@@ -32,5 +32,12 @@ export async function wipeAllNotificationsOnce(): Promise<void> {
 /** Admin: herkesi temizle (tekrarlanabilir) */
 export async function wipeAllNotificationsNow(): Promise<number> {
   const deleted = await db.delete(notificationsTable).returning({ id: notificationsTable.id });
+  try {
+    const { emitRealtime } = await import("./realtime");
+    emitRealtime("notification:cleared", { deleted: deleted.length });
+  } catch (err) {
+    logger.warn({ err }, "notifications: cleared event emit failed");
+  }
+  logger.info({ deleted: deleted.length }, "notifications: admin tüm bildirimleri sildi");
   return deleted.length;
 }

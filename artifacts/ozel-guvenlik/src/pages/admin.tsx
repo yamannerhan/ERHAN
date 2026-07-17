@@ -801,6 +801,11 @@ function AdminNotificationsInbox() {
       withCredentials: true,
     });
     socket.on("notification:new", () => { void refetch(); });
+    socket.on("notification:cleared", () => {
+      void refetch();
+      queryClient.invalidateQueries({ queryKey: getGetNotificationsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetUnreadNotificationCountQueryKey() });
+    });
     return () => { socket.disconnect(); };
   }, [user, refetch]);
 
@@ -829,6 +834,24 @@ function AdminNotificationsInbox() {
     }
   };
 
+  const wipeEveryone = async () => {
+    if (!confirm("TÜM kullanıcıların bildirim zili silinecek. Herkesin sitesinde de kaybolur. Emin misiniz?")) return;
+    try {
+      const r = await fetch("/api/admin/notifications", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const d = await r.json().catch(() => ({})) as { deleted?: number; error?: string };
+      if (!r.ok) throw new Error(d.error || "Silinemedi");
+      queryClient.invalidateQueries({ queryKey: getGetNotificationsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetUnreadNotificationCountQueryKey() });
+      toast({ title: "Herkesin bildirimleri silindi", description: `${d.deleted ?? 0} kayıt temizlendi` });
+      void refetch();
+    } catch (e) {
+      toast({ title: "Hata", description: e instanceof Error ? e.message : undefined, variant: "destructive" });
+    }
+  };
+
   const openNotif = (n: { id: number; type: string; linkUrl?: string | null; isRead: boolean }) => {
     if (!n.isRead) void markRead(n.id);
     if (n.type === "support") {
@@ -847,12 +870,19 @@ function AdminNotificationsInbox() {
           <p className="text-xs text-muted-foreground">
             {unreadCount > 0 ? <span className="text-amber-300 font-semibold">{unreadCount} okunmamış</span> : "Tüm bildirimler okundu"}
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             {unreadCount > 0 && (
               <button type="button" onClick={() => void markAllRead()} className="text-[10px] px-2.5 py-1 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 font-semibold">
                 Tümünü okundu say
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => void wipeEveryone()}
+              className="text-[10px] px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-semibold"
+            >
+              Herkesin zilini sil
+            </button>
             <button type="button" onClick={() => void refetch()} className="text-[10px] px-2.5 py-1 rounded-lg bg-white/10 text-muted-foreground hover:bg-white/15">
               Yenile
             </button>
