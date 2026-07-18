@@ -423,11 +423,114 @@ export function elemanCityCount(): number {
   return ELEMAN_CITY_LIST.length;
 }
 
-export function parseElemanCursor(cursor: string | null | undefined): { cityIndex: number; page: number } {
-  const match = cursor?.match(/^(\d+):(\d+)$/);
-  return match ? { cityIndex: Number(match[1]), page: Math.max(1, Number(match[2])) } : { cityIndex: 0, page: 1 };
+export type ElemanCursor = {
+  cityIndex: number;
+  page: number;
+  lastListingId: string;
+  lastListingUrl: string;
+};
+
+/** Cursor: "city|page|listingId|encodedUrl" (eski: "city:page" / "city:page:id") */
+export function parseElemanCursor(cursor: string | null | undefined): ElemanCursor {
+  const empty: ElemanCursor = { cityIndex: 0, page: 1, lastListingId: "", lastListingUrl: "" };
+  if (!cursor?.trim()) return empty;
+
+  if (cursor.includes("|")) {
+    const [c, p, id = "", ...urlParts] = cursor.split("|");
+    let lastListingUrl = "";
+    const enc = urlParts.join("|").trim();
+    if (enc) {
+      try {
+        lastListingUrl = decodeURIComponent(enc);
+      } catch {
+        lastListingUrl = enc;
+      }
+    }
+    return {
+      cityIndex: Number(c) || 0,
+      page: Math.max(1, Number(p) || 1),
+      lastListingId: String(id ?? "").trim(),
+      lastListingUrl,
+    };
+  }
+
+  // Eski colon formatı
+  const match = cursor.match(/^(\d+):(\d+)(?::([^|]*))?$/);
+  if (!match) return empty;
+  const rest = String(match[3] ?? "");
+  const colonIdx = rest.indexOf(":");
+  // city:page:id  veya city:page:id:urlEnc
+  let lastListingId = rest;
+  let lastListingUrl = "";
+  if (colonIdx >= 0) {
+    lastListingId = rest.slice(0, colonIdx);
+    const enc = rest.slice(colonIdx + 1);
+    if (enc) {
+      try {
+        lastListingUrl = decodeURIComponent(enc);
+      } catch {
+        lastListingUrl = enc;
+      }
+    }
+  }
+  return {
+    cityIndex: Number(match[1]) || 0,
+    page: Math.max(1, Number(match[2]) || 1),
+    lastListingId: lastListingId.trim(),
+    lastListingUrl,
+  };
 }
 
-export function formatElemanCursor(cityIndex: number, page: number): string {
-  return `${Math.max(0, Math.floor(cityIndex))}:${Math.max(1, Math.floor(page))}`;
+export function formatElemanCursor(
+  cityIndex: number,
+  page: number,
+  lastListingId = "",
+  lastListingUrl = "",
+): string {
+  const id = String(lastListingId ?? "").trim();
+  const url = String(lastListingUrl ?? "").trim();
+  return [
+    String(Math.max(0, Math.floor(cityIndex))),
+    String(Math.max(1, Math.floor(page))),
+    id,
+    url ? encodeURIComponent(url) : "",
+  ].join("|");
+}
+
+/**
+ * Bir şehrin tüm sayfalarını tara (pages<=0 → boş sayfaya kadar).
+ * onPage: her sayfa sonrası cursor kaydı için çağrılır.
+ */
+export async function iterateElemanCityPages(
+  citySlug: string | null,
+  opts: {
+    startPage?: number;
+    maxPages?: number;
+    onListing: (item: ElemanListItem, page: number) => Promise<void>;
+    onPageDone?: (page: number, lastListingId: string, empty: boolean) => Promise<void>;
+  },
+): Promise<{ pagesRead: number; listingsSeen: number; lastListingId: string }> {
+  const start = Math.max(1, opts.startPage ?? 1);
+  const maxPages = opts.maxPages && opts.maxPages > 0 ? opts.maxPages : 500;
+  let pagesRead = 0;
+  let listingsSeen = 0;
+  let lastListingId = "";
+
+  for (let page = start; page < start + maxPages; page += 1) {
+    const listings = await fetchElemanListPage(citySlug, page);
+    pagesRead += 1;
+    if (listings.length === 0) {
+      await opts.onPageDone?.(page, lastListingId, true);
+      break;
+    }
+    for (const listing of listings) {
+      listingsSeen += 1;
+      lastListingId = listing.id;
+      await opts.onListing(listing, page);
+    }
+    await opts.onPageDone?.(page, lastListingId, false);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  return { pagesRead, listingsSeen, lastListingId };
 }

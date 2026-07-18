@@ -1139,10 +1139,10 @@ void import("./lib/listing-merge").then((m) => {
   setInterval(() => { void m.scanListingMerges(20).catch(() => {}); }, 6 * 60 * 60 * 1000);
 }).catch(() => {});
 
-// Süresi dolan ilanlar (expiresAt geçmişse) otomatik silinir.
+// Süresi dolan ilanlar (expiresAt geçmişse) saatte bir EXPIRED yapılır.
 void purgeExpiredListings();
 void purgeDemoListings();
-setInterval(() => { void purgeExpiredListings(); }, 30 * 60 * 1000);
+setInterval(() => { void purgeExpiredListings(); }, 60 * 60 * 1000);
 void trimChatHistory();
 setInterval(() => { void trimChatHistory(); }, 60 * 1000);
 setInterval(() => { void broadcastOnlineCount(); }, 45000);
