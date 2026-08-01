@@ -2646,7 +2646,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   const [resettingSourceId, setResettingSourceId] = useState<number | null>(null);
 
   const resetSingleSource = async (id: number, name: string) => {
-    if (!confirm(`"${name}" grubu sıfırlanacak:\n• Bu gruptan gelen tüm ilanlar silinir\n• Son 20 gün yeniden taranır\n• Sitede bot ilanı 20 gün kalır\n\nDevam?`)) return;
+    if (!confirm(`"${name}" grubu sıfırlanacak:\n• Bu gruptan gelen tüm ilanlar silinir\n• Son 15 gün yeniden taranır\n• Sitede bot ilanı 15 gün kalır\n\nDevam?`)) return;
     setResettingSourceId(id);
     try {
       const r = await apiCall(`/admin/sources/${id}/reset`, "POST") as { message?: string; deletedListings?: number };
@@ -2657,7 +2657,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   };
 
   const resetBots = async () => {
-    if (!confirm("Tüm Telegram bot ilanları silinecek ve gruplar sırayla %1→%100 20 gün taranacak. Sitede yeni bot ilanları 20 gün kalır. Devam?")) return;
+    if (!confirm("Tüm Telegram bot ilanları silinecek ve gruplar sırayla %1→%100 15 gün taranacak. Sitede yeni bot ilanları 15 gün kalır. Devam?")) return;
     setResetting(true);
     try {
       const r = await apiCall("/admin/sources/reset", "POST") as { message?: string };
@@ -2709,11 +2709,11 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
   };
 
   const deepRescan30Days = async () => {
-    if (!confirm("Tüm Telegram kaynakları son 20 gün geriye taranacak. Yayındaki ilanlar silinmez. Devam?")) return;
+    if (!confirm("Tüm Telegram kaynakları son 15 gün geriye taranacak. Yayındaki ilanlar silinmez. Devam?")) return;
     setDeepRescanning(true);
     try {
       const r = await apiCall("/admin/sources/deep-rescan", "POST") as { message?: string };
-      toast({ title: "20 gün taraması başlatıldı", description: r.message ?? "Arka planda devam ediyor." });
+      toast({ title: "15 gün taraması başlatıldı", description: r.message ?? "Arka planda devam ediyor." });
       void load();
     } catch (e: unknown) { toast({ title: "Hata", description: (e as Error).message, variant: "destructive" }); }
     finally { setDeepRescanning(false); }
@@ -2752,7 +2752,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         <Radio className="w-4 h-4 text-primary mt-0.5 shrink-0" />
         <div className="text-xs text-primary/80 space-y-1">
           <p><strong>Sıralı tarama:</strong> Her döngüde <strong>tek grup</strong> taranır. İlk grup %100 olunca sıradaki gruba geçilir.</p>
-          <p>İlk tarama: son <strong>20 gün</strong> (Telegram). WhatsApp: gidebildiği kadar. Bot ilanları sitede <strong>20 gün</strong> kalır (mesaj tarihinden).</p>
+          <p>İlk tarama: son <strong>15 gün</strong> (Telegram). WhatsApp: gidebildiği kadar. Bot ilanları sitede <strong>15 gün</strong> kalır (mesaj tarihinden).</p>
         </div>
       </div>
 
@@ -2779,14 +2779,14 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
         <p className="text-xs font-semibold text-muted-foreground mb-2">Tarama modu (otomatik)</p>
         <div className="flex flex-wrap items-center gap-2">
           <span className={`text-xs px-3 py-1.5 rounded-lg ${scanPhase === "initial" ? "bg-amber-500/20 text-amber-300" : "bg-green-500/20 text-green-300"}`}>
-            {scanPhase === "initial" ? "İlk tarama (20 gün geriye)" : "Günlük tarama (yeni ilanlar)"}
+            {scanPhase === "initial" ? "İlk tarama (15 gün geriye)" : "Günlük tarama (yeni ilanlar)"}
           </span>
           <span className="text-xs text-muted-foreground">Aralık: <strong>{effectiveScanInterval} dk</strong></span>
         </div>
         <p className="text-[10px] text-muted-foreground mt-2">
           {scanPhase === "initial"
             ? "Gruplar sırayla taranıyor — bir grup %100 olmadan diğerine geçilmez."
-            : "Tüm grupların 20 günlük taraması bitti. Her 5 dakikada bir yeni mesajlar kontrol edilir."}
+            : "Tüm grupların 15 günlük taraması bitti. Her 5 dakikada bir yeni mesajlar kontrol edilir."}
         </p>
       </div>
 
@@ -2884,7 +2884,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
           </div>
           <Input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder={form.platform === "telegram" ? "https://t.me/kanal_adi" : form.platform === "sahibinden" ? "https://www.sahibinden.com/..." : "https://facebook.com/sayfaadi"} className="h-8 text-sm bg-white/5 border-white/10" />
           {form.platform === "telegram" && (
-            <p className="text-[10px] text-muted-foreground">Her dakika sırayla 1 grup taranır. İlk tarama son 20 gün; bitince yeni ilanlar yakalanır. Sitede bot ilanı 20 gün (mesaj tarihinden).</p>
+            <p className="text-[10px] text-muted-foreground">Her dakika sırayla 1 grup taranır. İlk tarama son 15 gün; bitince yeni ilanlar yakalanır. Sitede bot ilanı 15 gün (mesaj tarihinden).</p>
           )}
           <div className="space-y-1">
             <Input value={form.targetCitiesText} onChange={e => setForm(f => ({ ...f, targetCitiesText: e.target.value }))} placeholder="Hedef şehir/ilçe: İstanbul, Kocaeli, Gebze, Ankara" className="h-8 text-sm bg-white/5 border-white/10" />
@@ -3003,7 +3003,7 @@ function SourcesSection({ apiCall, toast }: { apiCall: (path: string, method?: s
                   {s.platform === "telegram" && !s.initialScanDone && (
                     <div className="mt-2">
                       <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
-                        <span>20 gün tarama ilerlemesi</span>
+                        <span>15 gün tarama ilerlemesi</span>
                         <span className="text-amber-400 font-medium">%{Math.max(1, s.initialScanProgress ?? 1)}</span>
                       </div>
                       <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -3515,7 +3515,7 @@ function UrlPoolSourcesSection({ apiCall, toast }: { apiCall: (path: string, met
               <div>• WhatsApp bot yok — harici <strong className="text-slate-200">Mesaj + Medya Havuzu</strong> linklerinden çeker</div>
               <div>• Mesaj: <span className="text-sky-300 break-all">…/api/whatsapp/messages</span></div>
               <div>• Medya OCR: <span className="text-sky-300 break-all">…/api/whatsapp/media</span> (ör. <span className="text-sky-300">…/medya</span>)</div>
-              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">20 gün</strong>; bitince her <strong className="text-slate-200">5 dk</strong> dinler</div>
+              <div>• İlk tarama / sıfırla: son <strong className="text-slate-200">15 gün</strong>; bitince her <strong className="text-slate-200">5 dk</strong> dinler</div>
               <div>• Sadece özel güvenlik iş ilanları</div>
             </div>
           </div>

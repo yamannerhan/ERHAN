@@ -1,5 +1,5 @@
 import { db, listingsTable, notificationsTable, listingSeoPath } from "@workspace/db";
-import { and, eq, lt, gte, lte, or, isNull, isNotNull } from "drizzle-orm";
+import { and, eq, gte, lte, or, isNull } from "drizzle-orm";
 import { logger } from "./logger";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -103,21 +103,8 @@ export async function runListingAgingPass(): Promise<{ reminded: number; deactiv
       deactivated += 1;
     }
 
-    // Bot: 60 saat last_seen yoksa pasif (48–72 arası orta)
-    const botStaleCutoff = new Date(now.getTime() - 60 * 60 * 60 * 1000);
-    const staleBots = await db
-      .update(listingsTable)
-      .set({ isActive: false, status: "inactive", updatedAt: now })
-      .where(and(
-        eq(listingsTable.isActive, true),
-        eq(listingsTable.sourceType, "bot_imported"),
-        or(
-          and(isNotNull(listingsTable.lastSeenAt), lt(listingsTable.lastSeenAt, botStaleCutoff)),
-          and(isNull(listingsTable.lastSeenAt), lt(listingsTable.createdAt, botStaleCutoff)),
-        )!,
-      ))
-      .returning({ id: listingsTable.id });
-    botsStale = staleBots.length;
+    // Bot listings expire only through their source-date TTL; short lastSeen windows must not hide them early.
+
   } catch (err) {
     logger.error({ err }, "listing aging pass failed");
   }

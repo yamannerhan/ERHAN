@@ -212,9 +212,9 @@ function shouldAutoPublish(source: typeof sourcesTable.$inferSelect): boolean {
   return source.autoPublish || !source.requireApproval;
 }
 
-// Telegram / havuz ilk tarama + sıfırla: son 20 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
+// Telegram / havuz ilk tarama + sıfırla: son 15 gün. WhatsApp: gidebildiği kadar. Sonraki: imleç sonrası.
 const envInitialDays = Number(process.env["SCRAPER_INITIAL_DAYS"]);
-const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 20;
+const INITIAL_SCAN_DAYS = Number.isFinite(envInitialDays) && envInitialDays > 0 ? envInitialDays : 15;
 const INITIAL_SCAN_MS = INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 /** İlan havuzu dinleme aralığı (dk) — artımlı mod 5 dk */
 const URL_POOL_LISTEN_INTERVAL_MIN = 5;
@@ -222,7 +222,7 @@ const URL_POOL_LISTEN_INTERVAL_MIN = 5;
 const WA_INITIAL_SCAN_DAYS = 730;
 const WA_INITIAL_SCAN_MS = WA_INITIAL_SCAN_DAYS * 24 * 60 * 60 * 1000;
 /** Bot ilanları sitede kalma süresi = mesaj/yayın tarihinden itibaren */
-const LISTING_TTL_DAYS = 20;
+const LISTING_TTL_DAYS = 15;
 const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
 const SOURCE_SCAN_DELAY_MS = 2_000;
 const STALE_SCAN_LOCK_MS = 90 * 1000;
@@ -246,7 +246,7 @@ const ELEMAN_LISTEN_INTERVAL_MIN = 30;
 const ELEMAN_CITIES_PER_INITIAL_CYCLE = 1;
 /** Dinlemede döngü başına şehir (sonra cursor ile zincir; tam tur bitince 30dk) */
 const ELEMAN_CITIES_PER_LISTEN_CYCLE = 3;
-/** Her döngüde geriye kaç sayfa (×100 mesaj) — 20 güne daha hızlı ulaşmak için */
+/** Her döngüde geriye kaç sayfa (×100 mesaj) — 15 güne daha hızlı ulaşmak için */
 const BACKWARD_PAGES_PER_RUN = 12;
 const ALLOWED_SCAN_INTERVALS = [1, 5, 10, 30] as const;
 
@@ -414,7 +414,7 @@ function bumpScanBackoffOnRateLimit(): void {
 }
 
 /**
- * Bot ilanı sitede LISTING_TTL_DAYS (20) gün kalsın.
+ * Bot ilanı sitede LISTING_TTL_DAYS (15) gün kalsın.
  * Süre mesaj/yayın tarihinden hesaplanır (sisteme eklenme anından değil).
  */
 function listingExpiryFrom(postedAt?: Date): Date {
@@ -648,7 +648,7 @@ async function processMessage(
     const existingId = await findListingBySourceMessage(source.id, messageId);
     if (existingId && postedAt) {
       await db.update(listingsTable)
-        .set({ sourcePublishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
         .where(eq(listingsTable.id, existingId));
     }
     return "duplicate";
@@ -671,7 +671,7 @@ async function processMessage(
   if (existingByMessage) {
     if (postedAt) {
       await db.update(listingsTable)
-        .set({ sourcePublishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
+        .set({ sourcePublishedAt: postedAt, publishedAt: postedAt, lastCheckedAt: now, lastSeenAt: now })
         .where(eq(listingsTable.id, existingByMessage));
     }
     return "duplicate";
@@ -1578,7 +1578,7 @@ async function publishElemanJob(
           sourceUrl: job.url,
           lastSeenAt: now,
           lastCheckedAt: now,
-          ...(job.postedAt ? { sourcePublishedAt: job.postedAt } : {}),
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
           ...(assignCoordsFromCity(structuredCity) ?? {}),
         })
         .where(eq(listingsTable.id, existingByIdOrUrl));
@@ -1589,7 +1589,7 @@ async function publishElemanJob(
           sourceUrl: job.url,
           lastSeenAt: now,
           lastCheckedAt: now,
-          ...(job.postedAt ? { sourcePublishedAt: job.postedAt } : {}),
+          ...(job.postedAt ? { sourcePublishedAt: job.postedAt, publishedAt: job.postedAt } : {}),
         })
         .where(eq(listingsTable.id, existingByIdOrUrl));
     }
@@ -2126,7 +2126,7 @@ async function runWhatsAppSequentialDeepScan(): Promise<void> {
   kickWhatsAppDeepScanNew();
 }
 
-/** WhatsApp ilanlarını sil + 20 günlük temiz tarama (yeni job kuyruğu). */
+/** WhatsApp ilanlarını sil + 15 günlük temiz tarama (yeni job kuyruğu). */
 export async function resetAllWhatsAppSources(_opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number; pendingGroups: number }> {
   waScanGeneration++;
   waSequentialRunning = false;
@@ -2885,12 +2885,12 @@ export async function dedupeExistingListings(): Promise<{ removed: number; kept:
   return { removed, kept: survivors.length };
 }
 
-/** Süresi dolan ilanları EXPIRED yap (silme). Süre = kaynak/yayın tarihi + 20 gün. */
+/** Süresi dolan ilanları EXPIRED yap (silme). Süre = kaynak/yayın tarihi + 15 gün. */
 export async function purgeExpiredListings(): Promise<number> {
   const now = new Date();
   const days = LISTING_TTL_DAYS;
 
-  // expires_at = kaynak yayın tarihi (mesaj) + 20 gün; yoksa published_at / first_seen_at
+  // expires_at = kaynak yayın tarihi (mesaj) + 15 gün; yoksa published_at / first_seen_at
   try {
     await db.execute(sql.raw(`
       UPDATE listings
@@ -2934,7 +2934,7 @@ export async function purgeExpiredListings(): Promise<number> {
     logger.warn({ err: e }, "scraper: eleman çöp temizliği atlandı");
   }
 
-  // 20 günü dolan aktif ilanlar → EXPIRED (veri korunur)
+  // 15 günü dolan aktif ilanlar → EXPIRED (veri korunur)
   const expired = await db.update(listingsTable)
     .set({
       status: "expired",
@@ -2951,9 +2951,20 @@ export async function purgeExpiredListings(): Promise<number> {
     ))
     .returning({ id: listingsTable.id });
 
-  if (expired.length === 0) return 0;
-  logger.info({ count: expired.length }, "scraper: süresi dolan ilanlar EXPIRED yapıldı");
-  return expired.length;
+  const hardDeleteCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const expiredForGracePeriod = await db.select({ id: listingsTable.id })
+    .from(listingsTable)
+    .where(and(
+      eq(listingsTable.status, "expired"),
+      eq(listingsTable.autoDeleteOnExpiry, true),
+      isNotNull(listingsTable.expiredAt),
+      lt(listingsTable.expiredAt, hardDeleteCutoff),
+    ));
+  const hardDeleted = await deleteListingsByIds(expiredForGracePeriod.map((listing) => listing.id));
+
+  if (expired.length > 0) logger.info({ count: expired.length }, "scraper: expired listings deactivated");
+  if (hardDeleted > 0) logger.info({ count: hardDeleted }, "scraper: expired listings permanently deleted after grace period");
+  return expired.length + hardDeleted;
 }
 
 /** Demo/sahte kaynaklı ilanları kalıcı sil */
@@ -2977,7 +2988,7 @@ export async function expireImportedListings(): Promise<number> {
   return purgeExpiredListings();
 }
 
-/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 20 gün yeniden tara. */
+/** Tüm Telegram botlarını sıfırla: bot ilanlarını sil, sırayla 15 gün yeniden tara. */
 export async function resetAllTelegramBots(opts?: { deferRescan?: boolean }): Promise<{ deletedListings: number }> {
   await releaseStaleScanLocks(true);
 
@@ -3102,7 +3113,7 @@ export async function resetAllBotsAndRescan(): Promise<{
   };
 }
 
-/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 20 günü yeniden tara. */
+/** Tek Telegram kaynağını sıfırla: o gruptan gelen ilanları sil, son 15 günü yeniden tara. */
 export async function resetSingleTelegramSource(sourceId: number): Promise<{ deletedListings: number }> {
   const [source] = await db.select().from(sourcesTable).where(eq(sourcesTable.id, sourceId)).limit(1);
   if (!source) throw new Error("Kaynak bulunamadı");
